@@ -151,6 +151,7 @@
   .seg button {
     border: 0; border-radius: 0; padding: 5px 11px; font-size: 12px;
     background: var(--panel); color: var(--muted); cursor: pointer;
+    white-space: nowrap;
   }
   .seg button + button { border-left: 1px solid var(--line); }
   .seg button[aria-pressed="true"] { background: var(--copper-soft); color: var(--copper); font-weight: 600; }
@@ -197,7 +198,7 @@
   .errlist li { padding: 4px 0; border-top: 1px solid var(--hair); line-height: 1.45; }
   .errlist li:first-child { border-top: 0; }
   .errlist b { color: var(--copper); font-weight: 600; }
-  .card > h2.withbar { display: flex; align-items: center; gap: 10px; padding-right: 10px; }
+  .card > h2.withbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-right: 10px; }
   .card > h2.withbar > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .cap {
     display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center;
@@ -291,17 +292,17 @@
     <div>
       <div class="card">
         <h2 class="withbar">
-          <span id="cvTitle">ALIGN 의 배치 (기준선)</span>
+          <span id="cvTitle">배치 — 나란히</span>
           <span class="viewbar">
-            <span class="seg" id="modes">
-              <button data-mode="ours" aria-pressed="true">우리</button>
-              <button data-mode="align" aria-pressed="false">ALIGN</button>
-              <button data-mode="both" aria-pressed="false">나란히</button>
-              <button data-mode="route" aria-pressed="false">배선</button>
+            <span class="seg" id="whatSeg" title="배치를 볼지, 배선을 볼지">
+              <button data-what="place" aria-pressed="true">배치</button>
+              <button data-what="route" aria-pressed="false">배선</button>
             </span>
-            <button class="ghost" id="flipY" title="보기만 상하로 뒤집는다 (좌표는 그대로)"
-                    aria-pressed="false">↕ 뒤집기</button>
-            <button class="ghost" id="fit" title="확대/이동 초기화">맞춤</button>
+            <span class="seg" id="whoSeg" title="누구 것을 볼지">
+              <button data-who="both" aria-pressed="true">나란히</button>
+              <button data-who="ours" aria-pressed="false">우리</button>
+              <button data-who="align" aria-pressed="false">ALIGN</button>
+            </span>
           </span>
         </h2>
         <canvas id="cv" width="800" height="560"></canvas>
@@ -310,9 +311,10 @@
           <span class="key"><span class="sw"></span> 블록</span>
           <span class="key"><span class="sw ours"></span> 우리 배치</span>
           <span class="key"><span class="sw ax"></span> 대칭축</span>
+          <span id="flipNote" hidden>↕ ALIGN 과 견주려고 상하로 뒤집어 그림 (좌표는 그대로)</span>
           <span id="bbox"></span>
           <span id="zoom" style="margin-left:auto"></span>
-          <span style="color:var(--faint)">휠 확대 · 끌어 이동</span>
+          <span style="color:var(--faint)">휠 확대 · 끌어 이동 · 더블클릭 초기화</span>
         </div>
       </div>
       <div class="card" style="margin-top:16px">
@@ -371,16 +373,18 @@ const EXAMPLES = [
   ["high_speed_comparator", "High-Speed Comparator"],
 ];
 import { makeView, drawPanel, drawRouted, zoomAt, GROUPS } from "./view.mjs";
+// 기준선은 워커 없이 여기서 바로 뽑는다. 모듈 워커가 서지 않는 브라우저
+// (구형 사파리 — 맥·iOS 에서 이것 때문에 그림이 통째로 비었다) 에서도
+// 첫 화면은 나와야 한다.
+import { previewOf } from "./src/baseline.mjs";
 const $ = (id) => document.getElementById(id);
 const cv = $("cv"), ctx = cv.getContext("2d");
 const view = makeView();
-let mode = "ours";           // ours | align | both | route
+// 보기는 두 갈래다 — **무엇을**(배치/배선) 과 **누구를**(나란히/우리/ALIGN).
+let what = "place";          // place | route
+let who = "both";            // both | ours | align
 let frame = null;            // 최적화 중간 상태
 let routed = null;           // 배선 기하 {ours, align}
-// 우리 배치는 ALIGN 의 **상하 거울상**으로 나올 수 있다. 대칭 자유도라 틀린 게
-// 아니지만 (블록 크기·변이·bbox 가 같고 HPWL 도 거의 같다) 나란히 놓으면
-// 다르게 보인다. 이 토글은 **보기만** 뒤집는다 — 좌표와 산출물은 안 건드린다.
-let flipView = false;
 let drcIndex = null;         // 배선/DRC 실제 결과
 let drcWho = "ours";
 const layersOn = new Set(["metal", "via", "device"]);   // 웰은 기본 꺼짐
@@ -406,87 +410,136 @@ new MutationObserver(() => { readPal(); redraw(); })
 
 let blobs = new Map();          // 예제 -> 앞단 출력
 let base = null;                // ALIGN 기준선
-let ours = null;                // 우리 배치
-let shown = "base";
+let ours = null;                // 우리 배치 (이번 세션에서 푼 것)
+let preOurs = null;             // 미리 계산해둔 우리 배치 (downloads/*.place.json)
 let worker = null, busy = false;
+
+/** 지금 "우리" 칸에 그릴 것. 방금 푼 것이 있으면 그것, 없으면 미리 계산해둔 것. */
+const oursNow = () => frame ?? ours ?? preOurs;
+
+// 우리 배치는 ALIGN 의 **상하 거울상**으로 나오기도 한다. 대칭 자유도라 틀린 게
+// 아니지만 (블록 크기·변이·bbox 가 같고 HPWL 도 거의 같다) 나란히 놓으면 딴
+// 것처럼 보인다. 그래서 같은 이름 블록의 y 가 더 잘 맞는 쪽으로 **보기만**
+// 뒤집는다 — 좌표도 산출물도 안 건드린다.
+function oriented(d) {
+  if (!d?.rects?.length || !base?.rects?.length) return d;
+  const by = new Map(base.rects.map((r) => [r.name, (r.y + r.h / 2 - base.bbox[1]) /
+                                                    Math.max(1, base.bbox[3] - base.bbox[1])]));
+  const span = Math.max(1, d.bbox[3] - d.bbox[1]);
+  let asis = 0, flip = 0, n = 0;
+  for (const r of d.rects) {
+    const a = by.get(r.name);
+    if (a == null) continue;
+    const c = (r.y + r.h / 2 - d.bbox[1]) / span;
+    asis += Math.abs(c - a); flip += Math.abs(1 - c - a); n++;
+  }
+  if (!n || flip >= asis - 1e-9) return d;
+  const y0 = d.bbox[1], y1 = d.bbox[3];
+  return { ...d, flipped: true,
+           rects: d.rects.map((r) => ({ ...r, y: y0 + y1 - r.y - r.h, sy: -r.sy })),
+           axes: (d.axes ?? []).map((a) => (a.vert ? a : { ...a, at: y0 + y1 - a.at })) };
+}
 
 // ---------------------------------------------------------------- 그리기
 //
-// 패널 하나(우리 / ALIGN)를 그리는 일은 view.mjs 가 한다. 여기서는 어떤 것을
-// 어디에 그릴지만 정한다. "나란히"에서는 두 패널이 같은 확대/이동을 쓴다.
-function panels(W, H) {
-  if (mode !== "both") return [{ x: 0, y: 0, w: W, h: H }];
-  const gap = 1;
-  const half = (W - gap) / 2;
-  return [{ x: 0, y: 0, w: half, h: H }, { x: half + gap, y: 0, w: half, h: H }];
+// 패널 하나를 그리는 일은 view.mjs 가 한다. 여기서는 무엇을 어디에 그릴지,
+// 그리고 **캔버스를 얼마나 크게 잡을지**만 정한다.
+//
+// 캔버스 크기가 중요하다. telescopic_ota 는 1440 x 11760 — 세로가 여덟 배다.
+// 높이를 660 으로 묶어두면 그림이 폭 80px 짜리 실오라기가 되어 아무것도 안 보인다.
+// 그래서 (1) 높이는 창 높이만큼 쓰고, (2) 나란히에서는 두 패널을 내용 폭에
+// 맞춰 좁혀 가운데로 붙인다 — 멀찍이 떨어뜨려 놓으면 비교가 안 된다.
+
+/** 지금 화면에 그릴 것들. 왼쪽이 ALIGN, 오른쪽이 우리 — 순서는 늘 같다. */
+function shots() {
+  const emptyOurs = ["아직 우리 배치가 없습니다", "배치 실행을 누르세요"];
+  const emptyRoute = ["아직 배선 결과가 없습니다", "배선 실행을 누르세요"];
+  const items = what === "route"
+    ? [{ key: "align", geo: routed?.align, label: "ALIGN", empty: emptyRoute },
+       { key: "ours", geo: routed?.ours, label: "우리", empty: emptyRoute }]
+    : (() => {
+        const live = oriented(oursNow());
+        const tag = frame ? `탐색 중 · ${frame.module}` : ours ? "우리" : "우리 · 미리 계산";
+        return [
+          { key: "align", data: base, label: "ALIGN", empty: ["ALIGN 기준선이 없습니다"] },
+          { key: "ours", data: live, accent: true, empty: emptyOurs,
+            label: live?.flipped ? tag + " ↕" : tag, axes: live?.axes ?? [] }];
+      })();
+  const out = who === "both" ? items : items.filter((it) => it.key === who);
+  $("flipNote").hidden = !(what === "place" && out.some((it) => it.data?.flipped));
+  return out;
 }
 
-function canvasSize() {
-  const W = Math.max(280, Math.round(cv.getBoundingClientRect().width));
-  // 캔버스 높이는 보여줄 레이아웃의 종횡비에서 뽑는다. 고정 비율로 두면
-  // 1440x11760 같은 세로 설계에서 좌우가 통째로 빈다.
-  if (mode === "route") {
-    const g = routed?.[drcWho];
-    const bw = g ? Math.max(1, g.bbox[2] - g.bbox[0]) : 1;
-    const bh = g ? Math.max(1, g.bbox[3] - g.bbox[1]) : 1;
-    return { W, H: Math.round(Math.min(660, Math.max(320, (W * bh) / bw))) };
+/** 두 패널이 같은 배율을 쓰도록 맞출 상자 — 둘 중 큰 쪽. */
+function frameBox(items) {
+  let w = 1, h = 1;
+  for (const it of items) {
+    const b = (it.data ?? it.geo)?.bbox;
+    if (!b) continue;
+    w = Math.max(w, b[2] - b[0]); h = Math.max(h, b[3] - b[1]);
   }
-  const d = frame ?? (mode === "align" ? base : ours) ?? base;
-  let ratio = 0.72;
-  if (d?.bbox) {
-    const bw = Math.max(1, d.bbox[2] - d.bbox[0]), bh = Math.max(1, d.bbox[3] - d.bbox[1]);
-    ratio = bh / bw;
-    if (mode === "both") ratio *= 2;      // 반쪽 폭에 같은 내용이 들어간다
-  }
-  return { W, H: Math.round(Math.min(660, Math.max(320, W * ratio))) };
+  return [0, 0, w, h];
 }
 
-/** 보기용 상하 뒤집기. 원본은 안 건드린다. */
-function mirror(d) {
-  if (!flipView || !d?.rects) return d;
-  const [, y0, , y1] = d.bbox;
-  return { ...d, rects: d.rects.map((r) => ({ ...r, y: y0 + y1 - r.y - r.h })) };
+/** 캔버스 크기와 패널 자리를 한 번에 정한다. */
+function layout() {
+  const full = Math.max(280, Math.round(
+    (cv.parentElement?.clientWidth || cv.getBoundingClientRect().width)));
+  const items = shots();
+  const n = items.length;
+  const box = frameBox(items);
+  const ar = (box[3] - box[1]) / (box[2] - box[0]);      // 세로/가로
+
+  // 높이: 내용 비율대로 잡되 창 높이를 넘기지 않는다.
+  const cap = Math.max(360, Math.min(820, Math.round(window.innerHeight * 0.78)));
+  const pad = 24;                                  // fitOf 가 두는 여백
+  const gap = n > 1 ? 1 : 0;
+  const per = (full - gap) / n;
+  const H = Math.round(Math.min(cap, Math.max(220, per * ar + pad * 2)));
+
+  // 패널 폭: 내용이 세로로 길어 높이가 잘렸으면 필요한 만큼만 쓰고 가운데로 모은다.
+  const floor = n === 1 ? 260 : 160;               // 너무 좁으면 끌어 옮길 자리가 없다
+  const want = Math.min(per, Math.max(floor, ((H - pad * 2) / Math.max(ar, 1e-3)) * 1.1 + pad * 2));
+  const W = Math.round(Math.min(full, want * n + gap));
+  const panels = [];
+  for (let k = 0; k < n; k++)
+    panels.push({ x: k * ((W - gap) / n + gap), y: 0, w: (W - gap) / n, h: H });
+  return { W, H, full, items, box, panels };
 }
 
 function redraw() {
-  const { W, H } = canvasSize();
+  const { W, H, full, items, box, panels } = layout();
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  if (cv.width !== W * dpr || cv.height !== H * dpr) {
-    cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + "px";
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
   }
+  // 캔버스가 카드보다 좁으면 가운데로 — 옆에 빈 캔버스를 늘어놓지 않는다.
+  cv.style.width = W + "px";
+  cv.style.height = H + "px";
+  cv.style.marginLeft = cv.style.marginRight = W < full ? "auto" : "0";
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = pal.sunk; ctx.fillRect(0, 0, W, H);
 
-  const ps = panels(W, H);
   let shownBbox = null;
-  if (mode === "route") {
-    const g = routed?.[drcWho];
-    drawRouted(ctx, ps[0], g, { pal, view, on: layersOn,
-                                label: drcWho === "ours" ? "우리 배치의 배선" : "ALIGN 의 배선" });
-    shownBbox = g?.bbox;
-  } else if (mode === "both") {
-    drawPanel(ctx, ps[0], base, { pal, view, label: "ALIGN" });
-    const live = mirror(frame ?? ours);
-    drawPanel(ctx, ps[1], live, { pal, view, label: frame ? "탐색 중" : "우리",
-                                  accent: true, axes: ours?.axes ?? [] });
-    ctx.strokeStyle = pal.hair; ctx.beginPath();
-    ctx.moveTo(ps[1].x - 0.5, 0); ctx.lineTo(ps[1].x - 0.5, H); ctx.stroke();
-    shownBbox = live?.bbox ?? base?.bbox;
-  } else if (mode === "align") {
-    drawPanel(ctx, ps[0], base, { pal, view });
-    shownBbox = base?.bbox;
-  } else {
-    const live = mirror(frame ?? ours);
-    if (!live && base) { drawPanel(ctx, ps[0], base, { pal, view, dim: true, label: "ALIGN (기준선)" }); shownBbox = base.bbox; }
-    else {
-      drawPanel(ctx, ps[0], live, { pal, view, accent: true, axes: ours?.axes ?? [],
-                                    label: frame ? `탐색 중 · ${frame.module}` : null });
-      shownBbox = live?.bbox;
+  items.forEach((it, k) => {
+    const p = panels[k];
+    if (what === "route")
+      drawRouted(ctx, p, it.geo, { pal, view, on: layersOn, box,
+                                   label: it.label, empty: it.empty });
+    else
+      drawPanel(ctx, p, it.data, { pal, view, box, label: it.label,
+                                   accent: it.accent, axes: it.axes, empty: it.empty });
+    const b = (it.data ?? it.geo)?.bbox;
+    if (b && (it.key === "ours" || !shownBbox)) shownBbox = b;
+    if (k) {
+      ctx.strokeStyle = pal.hair; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(p.x - 0.5, 0); ctx.lineTo(p.x - 0.5, H); ctx.stroke();
     }
-  }
-  if (shownBbox)
-    $("bbox").textContent =
-      `${Math.round(shownBbox[2] - shownBbox[0])} × ${Math.round(shownBbox[3] - shownBbox[1])}`;
+  });
+
+  $("bbox").textContent = shownBbox
+    ? `${Math.round(shownBbox[2] - shownBbox[0])} × ${Math.round(shownBbox[3] - shownBbox[1])}`
+    : "";
   $("zoom").textContent = view.s === 1 ? "" : `${view.s.toFixed(1)}×`;
 }
 
@@ -494,9 +547,9 @@ function redraw() {
 cv.addEventListener("wheel", (e) => {
   e.preventDefault();
   const r = cv.getBoundingClientRect();
-  const { W, H } = canvasSize();
   const px = e.clientX - r.left, py = e.clientY - r.top;
-  const p = panels(W, H).find((q) => px >= q.x && px < q.x + q.w) ?? panels(W, H)[0];
+  const ps = layout().panels;
+  const p = ps.find((q) => px >= q.x && px < q.x + q.w) ?? ps[0];
   zoomAt(view, p, px, py, e.deltaY < 0 ? 1.15 : 1 / 1.15);
   redraw();
 }, { passive: false });
@@ -537,29 +590,29 @@ cv.addEventListener("pointercancel", endDrag);
   }
 }
 
+// 확대/이동 초기화는 더블클릭 — 버튼 대신. 보기를 바꿀 때도 되돌린다.
 const resetView = () => { view.s = 1; view.tx = 0; view.ty = 0; redraw(); };
-$("fit").addEventListener("click", resetView);
-$("flipY").addEventListener("click", () => {
-  flipView = !flipView;
-  $("flipY").setAttribute("aria-pressed", String(flipView));
-  $("flipY").style.color = flipView ? "var(--copper)" : "";
-  $("flipY").style.borderColor = flipView ? "var(--copper)" : "";
-  redraw();
-});
+cv.addEventListener("dblclick", resetView);
 
-function setMode(m) {
-  mode = m;
-  for (const b of $("modes").querySelectorAll("button"))
-    b.setAttribute("aria-pressed", String(b.dataset.mode === m));
-  $("cvTitle").textContent = mode === "align" ? "ALIGN 의 배치 (기준선)"
-    : mode === "both" ? "나란히 — 같은 배율"
-    : mode === "route" ? "배선 결과 — ALIGN 배선기가 낸 실제 기하"
-    : "우리 배치";
-  $("layerBar").hidden = mode !== "route";
+const TITLE = { place: "배치", route: "배선" };
+const WHO = { both: "나란히", ours: "우리", align: "ALIGN (기준선)" };
+function setView(nextWhat, nextWho) {
+  what = nextWhat ?? what;
+  who = nextWho ?? who;
+  for (const b of $("whatSeg").querySelectorAll("button"))
+    b.setAttribute("aria-pressed", String(b.dataset.what === what));
+  for (const b of $("whoSeg").querySelectorAll("button"))
+    b.setAttribute("aria-pressed", String(b.dataset.who === who));
+  $("cvTitle").textContent = `${TITLE[what]} — ${WHO[who]}`;
+  $("layerBar").hidden = what !== "route";
+  // 한쪽만 볼 때는 아래 DRC 표도 같은 쪽을 본다.
+  if (who !== "both" && who !== drcWho) setDrcWho(who);
   resetView();
 }
-for (const btn of $("modes").querySelectorAll("button"))
-  btn.addEventListener("click", () => setMode(btn.dataset.mode));
+for (const btn of $("whatSeg").querySelectorAll("button"))
+  btn.addEventListener("click", () => setView(btn.dataset.what, null));
+for (const btn of $("whoSeg").querySelectorAll("button"))
+  btn.addEventListener("click", () => setView(null, btn.dataset.who));
 
 // ---------------------------------------------------------------- 표시
 const mkRow = (dl, k, v, cls) => {
@@ -577,6 +630,47 @@ function showInfo(b) {
   mkRow(dl, "ALIGN bbox", b.base
     ? `<small>${b.base.bbox[2] - b.base.bbox[0]} × ${b.base.bbox[3] - b.base.bbox[1]}</small>` : "—");
   mkRow(dl, "ALIGN HPWL", b.base ? `<small>${Math.round(b.base.hpwl)}</small>` : "—");
+}
+
+/** 변이 표 — 우리가 고른 소자 변이와 ALIGN 의 것. */
+function variantRows(rects) {
+  const tb = $("vt"); tb.textContent = "";
+  if (!rects?.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="dim">배치를 실행하면 채워집니다</td></tr>';
+    return;
+  }
+  const alignBy = new Map((base?.rects ?? []).map((q) => [q.name, q]));
+  const short = (v) => (v ?? "—").replace(/_(\d{6,})_/, "_");
+  for (const q of rects) {
+    const a = alignBy.get(q.name);
+    const same = a && a.concrete === q.concrete;
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="inst">${q.name}</td>` +
+      `<td class="${same ? "same" : "diff"}">${short(q.concrete)}</td>` +
+      `<td class="dim">${Math.round(q.w)}×${Math.round(q.h)}</td>` +
+      `<td class="dim flip">${q.sx > 0 ? "+" : "−"}${q.sy > 0 ? "+" : "−"}</td>` +
+      `<td class="dim">${same ? "같음" : short(a?.concrete)}</td>`;
+    tb.append(tr);
+  }
+}
+
+/** 미리 계산해둔 배치의 지표. 이번 세션에서 푼 것이 아니라고 적어둔다. */
+function showPre(pre) {
+  const dl = $("metrics"); dl.textContent = "";
+  variantRows(pre?.rects);
+  if (!pre) return;
+  const q = pre.quality ?? {};
+  const cls = (v) => (v == null ? "" : v <= 1.002 ? "win" : "lose");
+  const ar = q.alignArea ? q.area / q.alignArea : null;
+  const hr = q.alignHpwl ? q.hpwl / q.alignHpwl : null;
+  mkRow(dl, "면적", ar ? `${ar.toFixed(3)}× <small>ALIGN 대비</small>` : "—", cls(ar));
+  mkRow(dl, "배선 HPWL", hr ? `${hr.toFixed(3)}× <small>ALIGN 대비</small>` : "—", cls(hr));
+  if (q.resid != null) mkRow(dl, "대칭 잔차", `${q.resid.toExponential(1)}`, "win");
+  if (q.offgrid != null)
+    mkRow(dl, "배선 격자", q.offgrid === 0 ? "0 <small>밖</small>"
+      : `${q.offgrid} <small>블록이 격자 밖</small>`, q.offgrid === 0 ? "win" : "lose");
+  mkRow(dl, "어디서 온 값", "<small>미리 계산해둔 결과</small>");
 }
 
 function showResult(r) {
@@ -602,22 +696,7 @@ function showResult(r) {
   if (r.hpwlBeforeFlip)
     mkRow(dl, "반전 효과", `${(r.hpwl / r.hpwlBeforeFlip).toFixed(2)}× <small>HPWL</small>`, "win");
 
-  // 변이 표
-  const tb = $("vt"); tb.textContent = "";
-  const alignBy = new Map((base?.rects ?? []).map((q) => [q.name, q]));
-  for (const q of r.rects) {
-    const a = alignBy.get(q.name);
-    const tr = document.createElement("tr");
-    const short = (s) => (s ?? "—").replace(/_(\d{6,})_/, "_");
-    const same = a && a.concrete === q.concrete;
-    tr.innerHTML =
-      `<td class="inst">${q.name}</td>` +
-      `<td class="${same ? "same" : "diff"}">${short(q.concrete)}</td>` +
-      `<td class="dim">${Math.round(q.w)}×${Math.round(q.h)}</td>` +
-      `<td class="dim flip">${q.sx > 0 ? "+" : "−"}${q.sy > 0 ? "+" : "−"}</td>` +
-      `<td class="dim">${same ? "같음" : short(a?.concrete)}</td>`;
-    tb.append(tr);
-  }
+  variantRows(r.rects);
 
   // 하위 모듈
   if (r.subs?.length) {
@@ -808,9 +887,9 @@ async function ingest(fileList) {
       $("ex").value = "__upload__";
       text.textContent = `올림 — 모듈 ${blob.topology.modules.length}, 인스턴스 ${nInst}` +
         (blob._missing?.length ? `  (템플릿 ${blob._missing.length}개 없음)` : "");
-      base = null; ours = null; frame = null; routed = null;
-      $("metrics").textContent = ""; $("vt").innerHTML =
-        '<tr><td colspan="5" class="dim">배치를 실행하면 채워집니다</td></tr>';
+      base = null; ours = null; preOurs = null; frame = null; routed = null;
+      $("metrics").textContent = "";
+      variantRows(null);
       showDrc(null); fillDownloads(null);
       redraw();
       if (!/앞단 완료/.test($("status").textContent))
@@ -880,7 +959,7 @@ async function loadRouted(name) {
     try { out[who] = await (await fetch("./routed/" + g)).json(); } catch {}
   }
   routed = out;
-  if (mode === "route") redraw();
+  if (what === "route") redraw();
 }
 
 function showDrc(rec) {
@@ -932,14 +1011,17 @@ function showDrc(rec) {
   box.append(head, ul);
 }
 
+/** DRC 표가 누구 것을 보는지. 그림과 표는 서로를 따라간다 —
+ *  한쪽은 우리, 다른 쪽은 ALIGN 을 보고 있으면 읽는 사람이 헷갈린다. */
+function setDrcWho(w) {
+  drcWho = w;
+  for (const b of $("drcWho").querySelectorAll("button"))
+    b.setAttribute("aria-pressed", String(b.dataset.who === w));
+  showDrc(drcIndex?.find((r) => r.name === $("ex").value));
+  if (who !== "both" && who !== w) setView(null, w);     // 여기서 되돌아오지 않는다
+}
 for (const btn of $("drcWho").querySelectorAll("button"))
-  btn.addEventListener("click", () => {
-    drcWho = btn.dataset.who;
-    for (const b of $("drcWho").querySelectorAll("button"))
-      b.setAttribute("aria-pressed", String(b === btn));
-    showDrc(drcIndex?.find((r) => r.name === $("ex").value));
-    if (mode === "route") redraw();
-  });
+  btn.addEventListener("click", () => setDrcWho(btn.dataset.who));
 
 async function loadExample(name) {
   if (name === "__upload__") return blobs.get(name);
@@ -952,42 +1034,65 @@ async function loadExample(name) {
   return blobs.get(name);
 }
 
-function spawn() {
-  worker?.terminate();
-  worker = new Worker(new URL("./worker.mjs", import.meta.url), { type: "module" });
-  worker.onmessage = (e) => {
-    const m = e.data;
-    if (m.type === "baseline") {
-      base = m.base; showInfo(m);
-      shown = "base"; $("cvTitle").textContent = "ALIGN 의 배치 (기준선)";
-      redraw();
-      setStatus(`<span class="dot"></span><span>계산 중 — 변이 조합을 훑는다</span>`);
-    } else if (m.type === "progress") {
-      setStatus(`<span class="dot"></span><span>${m.done}/${m.total} 후보 · ${m.t.toFixed(0)}s</span>`);
-    } else if (m.type === "frame") {
-      // 설정 하나가 끝날 때의 최선. 블록이 재배치되는 과정이 그대로 보인다.
-      frame = m;
-      if (!ours) $("cvTitle").textContent =
-        m.isTop ? "탐색 중 — 변이 배정과 영역을 훑는다" : `하위 모듈 배치 중 · ${m.module}`;
-      redraw();
-      setStatus(`<span class="dot"></span><span>${m.isTop ? "최상위" : m.module} ` +
-                `설정 ${m.i}/${m.total} · ${m.t.toFixed(0)}s</span>`);
-    } else if (m.type === "done") {
-      ours = m; frame = null; busy = false; $("run").disabled = false;
-      $("routeRun").disabled = false;
-      shown = "ours"; $("cvTitle").textContent = "우리 배치 (변이·반전·영역 모두 직접 선택)";
-      redraw(); showResult(m);
-      setStatus(`<span>완료 — ${m.secs.toFixed(1)}s · 설정 ${m.configs} 개</span>`);
-    } else if (m.type === "error") {
+// --- 배치 한 판 돌리기 ---
+//
+// 보통은 모듈 워커에서 돈다 (예제 하나가 8~107 초라 메인 스레드면 페이지가 언다).
+// 그런데 **모듈 워커가 서지 않는 브라우저**가 있다 — 구형 사파리에서는 워커가
+// 조용히 죽어 그림이 통째로 비었다. 그래서 워커가 안 뜨거나 첫 소식이 없으면
+// 같은 코드(src/job.mjs)를 메인 스레드에서 돌린다. 그동안 페이지가 멎지만
+// 아무것도 안 나오는 것보다 낫다.
+function handle(m) {
+  if (m.type === "baseline") {
+    base = m.base; showInfo(m);
+    redraw();
+    setStatus('<span class="dot"></span><span>계산 중 — 변이 조합을 훑는다</span>');
+  } else if (m.type === "progress") {
+    setStatus(`<span class="dot"></span><span>${m.done}/${m.total} 후보 · ${m.t.toFixed(0)}s</span>`);
+  } else if (m.type === "frame") {
+    // 설정 하나가 끝날 때의 최선. 블록이 재배치되는 과정이 그대로 보인다.
+    frame = m;
+    redraw();
+    setStatus(`<span class="dot"></span><span>${m.isTop ? "최상위" : m.module} ` +
+              `설정 ${m.i}/${m.total} · ${m.t.toFixed(0)}s</span>`);
+  } else if (m.type === "done") {
+    ours = m; frame = null; busy = false; $("run").disabled = false;
+    $("routeRun").disabled = false;
+    redraw(); showResult(m);
+    setStatus(`<span>완료 — ${m.secs.toFixed(1)}s · 설정 ${m.configs} 개</span>`);
+  } else if (m.type === "error") {
+    busy = false; $("run").disabled = false;
+    setStatus(`<span style="color:var(--copper)">실패: ${m.msg.split("\n")[0]}</span>`);
+    console.error(m.msg);
+  }
+}
+
+function startJob(msg) {
+  let spoke = false, fell = false;
+  const fallback = async (why) => {
+    if (spoke || fell) return;
+    fell = true;
+    worker?.terminate(); worker = null;
+    console.warn("모듈 워커를 못 씁니다 — 메인 스레드로 돌립니다:", why);
+    setStatus('<span class="dot"></span><span>이 브라우저는 모듈 워커를 못 씁니다 — ' +
+              '메인 스레드에서 돕니다. 끝날 때까지 페이지가 멎습니다.</span>');
+    try {
+      const { runJob } = await import("./src/job.mjs");   // 여기서 화면이 한 번 그려진다
+      await new Promise((r) => setTimeout(r, 60));
+      await runJob(msg, handle);
+    } catch (err) {
       busy = false; $("run").disabled = false;
-      setStatus(`<span style="color:var(--copper)">실패: ${m.msg.split("\n")[0]}</span>`);
-      console.error(m.msg);
+      setStatus(`<span style="color:var(--copper)">실패: ${err.message}</span>`);
     }
   };
-  worker.onerror = (e) => {
-    busy = false; $("run").disabled = false;
-    setStatus(`<span style="color:var(--copper)">워커 오류: ${e.message}</span>`);
-  };
+  try {
+    worker?.terminate();
+    worker = new Worker(new URL("./worker.mjs", import.meta.url), { type: "module" });
+  } catch (err) { fallback(err.message); return; }
+  worker.onmessage = (e) => { spoke = true; handle(e.data); };
+  worker.onerror = (e) => { e.preventDefault?.(); fallback(e.message || "worker error"); };
+  worker.postMessage(msg);
+  // 아무 말 없이 죽는 워커도 있다. 첫 소식(baseline)은 원래 바로 온다.
+  setTimeout(() => fallback("첫 소식이 없습니다"), 6000);
 }
 
 // --- 배선: 앞단과 같은 워커에서 ALIGN 배선기를 돌린다 ---
@@ -1036,12 +1141,15 @@ async function runRoute() {
     // 축소 wasm 배선기는 계층 설계의 두 번째 하위 모듈에서 멈춘다
     // (null function — 함수 포인터가 비어 있다). 원인을 찾는 중이라,
     // 그때까지는 무슨 일인지 분명히 말해준다.
+    const noWorker = /worker|module/i.test(err.message) && !/null function/i.test(err.message);
     const wasm = /null function|fatal|memory access/i.test(err.message);
     setStatus(`<span style="color:var(--copper)">배선 실패 — ` +
-      (wasm ? "브라우저 배선기(축소 wasm)가 이 설계에서 멈췄습니다. " +
+      (noWorker ? "이 브라우저에서는 배선 워커가 서지 않습니다 (모듈 워커가 필요합니다). " +
+                  "아래 내려받기의 GDS·DRC 는 네이티브 경로로 만든 것입니다."
+       : wasm ? "브라우저 배선기(축소 wasm)가 이 설계에서 멈췄습니다. " +
               "계층 설계는 아직 네이티브 경로로만 끝까지 갑니다 — " +
               "아래 내려받기의 GDS·DRC 가 그 결과입니다."
-            : err.message) + "</span>");
+       : err.message) + "</span>");
   } finally {
     busy = false; $("run").disabled = false; $("routeRun").disabled = false;
   }
@@ -1056,14 +1164,11 @@ function showRouted(m) {
     gdsBytes: g?.bytes ?? 0, gdsName: g?.name ?? "",
     rects: m.geo?.terminals?.length ?? 0,
   } };
-  // 올린 회로에는 ALIGN 기준선이 없다 — 우리 쪽만 본다.
-  drcWho = "ours";
-  for (const b of $("drcWho").querySelectorAll("button"))
-    b.setAttribute("aria-pressed", String(b.dataset.who === "ours"));
-  showDrc(rec);
+  // 방금 브라우저가 낸 것에는 ALIGN 기준선이 없다 — 우리 쪽만 본다.
   routed = m.geo ? { ours: m.geo } : null;
   uploadRouted(m);
-  setMode("route");
+  setView("route", "ours");
+  showDrc(rec);            // setView 가 표를 index 로 되돌리므로 그 뒤에
 }
 
 /** 방금 만든 산출물을 Blob 링크로 내려받게 한다 (서버에 없다). */
@@ -1122,39 +1227,69 @@ async function run() {
   try {
     const name = $("ex").value;
     const blob = await loadExample(name);
-    spawn();
-    worker.postMessage({ name, blob, batch: Number($("batch").value) });
+    startJob({ name, blob, batch: Number($("batch").value) });
   } catch (err) {
     busy = false; $("run").disabled = false;
     setStatus(`<span style="color:var(--copper)">${err.message}</span>`);
   }
 }
 
-// 쉴 때도 진짜 배치를 보여준다 — ALIGN 의 결과가 기준선이다.
+// --- 쉴 때 보여줄 것 ---
+//
+// 페이지가 뜨자마자 **진짜 배치 두 개**가 나란히 있어야 한다. ALIGN 기준선은
+// 앞단 출력에서 바로 뽑고 (파싱이라 순식간이다 — 워커를 거치지 않는다),
+// 우리 쪽은 미리 계산해둔 결과(downloads/*.place.json)를 읽어 그린다.
+// 배치 실행을 누르면 그 자리에 이번에 푼 것이 들어온다.
+const preCache = new Map();
+
+/** 미리 계산해둔 배치 JSON -> 그릴 사각형. 소자 상자는 앞단 템플릿에서 온다. */
+function preRects(place, blob) {
+  const boxOf = new Map(Object.entries(blob.templates ?? {}).map(([c, t]) => [c, t.bbox]));
+  for (const sm of place.subModules ?? []) boxOf.set(sm.concrete, sm.bbox);
+  const rects = [];
+  for (const it of place.instances ?? []) {
+    const bb = boxOf.get(it.concrete);
+    if (!bb) return null;                 // 상자를 하나라도 모르면 그리지 않는다
+    const xs = [it.sX * bb[0] + it.oX, it.sX * bb[2] + it.oX].sort((a, b) => a - b);
+    const ys = [it.sY * bb[1] + it.oY, it.sY * bb[3] + it.oY].sort((a, b) => a - b);
+    rects.push({ name: it.name, concrete: it.concrete,
+                 x: xs[0], y: ys[0], w: xs[1] - xs[0], h: ys[1] - ys[0],
+                 sx: it.sX > 0 ? 1 : -1, sy: it.sY > 0 ? 1 : -1 });
+  }
+  if (!rects.length) return null;
+  const b = place.bbox;
+  return { rects, bbox: b, hpwl: place.quality?.hpwl,
+           area: (b[2] - b[0]) * (b[3] - b[1]), quality: place.quality ?? null };
+}
+
+async function loadPre(name, blob) {
+  if (name === "__upload__") return null;
+  if (preCache.has(name)) return preCache.get(name);
+  let out = null;
+  try {
+    const r = await fetch(`./downloads/${name}.place.json`);
+    if (r.ok) out = preRects(await r.json(), blob);
+  } catch { /* 없으면 없는 대로 — 배치 실행을 누르면 채워진다 */ }
+  preCache.set(name, out);
+  return out;
+}
+
 async function preview(name) {
   try {
     const blob = await loadExample(name);
-    spawnPreview(blob);
+    const p = previewOf(blob);            // 워커 없이 — 파싱만 한다
+    base = p.base; ours = null; frame = null;
+    $("subCard").hidden = true;
+    showInfo(p);
+    preOurs = await loadPre(name, blob);
+    showPre(preOurs);
+    redraw();
+    setStatus(preOurs
+      ? "<span>미리 계산해둔 배치입니다 — 배치 실행을 누르면 브라우저에서 다시 풉니다</span>"
+      : "<span>대기 — 배치 실행을 누르세요</span>");
   } catch (err) {
     setStatus(`<span style="color:var(--copper)">${err.message}</span>`);
   }
-}
-let pw = null;
-function spawnPreview(blob) {
-  // 기준선만 뽑으려고 워커를 쓴다 (계산이 아니라 파싱이라 금방 끝난다)
-  pw?.terminate();
-  pw = new Worker(new URL("./worker.mjs", import.meta.url), { type: "module" });
-  pw.onmessage = (e) => {
-    if (e.data.type !== "baseline") return;
-    base = e.data.base; ours = null; shown = "base";
-    $("cvTitle").textContent = "ALIGN 의 배치 (기준선)";
-    $("metrics").textContent = ""; $("subCard").hidden = true;
-    $("vt").innerHTML = '<tr><td colspan="5" class="dim">배치를 실행하면 채워집니다</td></tr>';
-    showInfo(e.data); redraw();
-    setStatus("<span>대기 — ALIGN 의 배치를 표시하고 있습니다</span>");
-    pw.terminate(); pw = null;
-  };
-  pw.postMessage({ blob, batch: 0, previewOnly: true });
 }
 
 const sel = $("ex");
@@ -1165,7 +1300,8 @@ for (const [v, label] of EXAMPLES) {
 sel.addEventListener("change", () => {
   const v = sel.value;
   if (v === "__upload__") {
-    base = null; ours = null; frame = null; routed = null;
+    base = null; ours = null; preOurs = null; frame = null; routed = null;
+    $("metrics").textContent = ""; variantRows(null);
     showDrc(null); fillDownloads(null); redraw();
     setStatus("<span>올린 설계 — 배치 실행을 누르세요</span>");
     return;
@@ -1174,6 +1310,8 @@ sel.addEventListener("change", () => {
 });
 $("run").addEventListener("click", run);
 addEventListener("resize", () => redraw());
+
+setView("place", "both");        // 첫 화면은 배치를 나란히
 preview(EXAMPLES[0][0]);
 loadRouted(EXAMPLES[0][0]);
 fillDownloads(EXAMPLES[0][0]);
