@@ -1,0 +1,85 @@
+{
+ "example": "telescopic_ota",
+ "top": "TELESCOPIC_OTA",
+ "bbox": [
+  0,
+  0,
+  1440,
+  11760
+ ],
+ "grid": [
+  80,
+  84
+ ],
+ "instances": [
+  {
+   "name": "X_M1_M2",
+   "abstract": "SCM_NMOS_57015810",
+   "concrete": "SCM_NMOS_57015810_X2_Y1",
+   "oX": 160,
+   "oY": 2352,
+   "sX": 1,
+   "sY": -1
+  },
+  {
+   "name": "X_M10_M9",
+   "abstract": "CMC_PMOS_51983143",
+   "concrete": "CMC_PMOS_51983143_X2_Y1",
+   "oX": 160,
+   "oY": 9408,
+   "sX": 1,
+   "sY": 1
+  },
+  {
+   "name": "X_M5_M6",
+   "abstract": "CMC_S_NMOS_B_73061948",
+   "concrete": "CMC_S_NMOS_B_73061948_X1_Y1",
+   "oX": 80,
+   "oY": 7056,
+   "sX": 1,
+   "sY": -1
+  },
+  {
+   "name": "X_M7_M8",
+   "abstract": "CMC_S_PMOS_B_41456065",
+   "concrete": "CMC_S_PMOS_B_41456065_X1_Y1",
+   "oX": 80,
+   "oY": 7056,
+   "sX": 1,
+   "sY": 1
+  },
+  {
+   "name": "X_M3_M4",
+   "abstract": "DP_NMOS_B_44742353",
+   "concrete": "DP_NMOS_B_44742353_X3_Y1",
+   "oX": 0,
+   "oY": 4704,
+   "sX": 1,
+   "sY": -1
+  }
+ ],
+ "synthLeaves": [],
+ "needLeaves": [
+  "SCM_NMOS_57015810_X2_Y1",
+  "CMC_PMOS_51983143_X2_Y1",
+  "CMC_S_NMOS_B_73061948_X1_Y1",
+  "CMC_S_PMOS_B_41456065_X1_Y1",
+  "DP_NMOS_B_44742353_X3_Y1"
+ ],
+ "quality": {
+  "area": 16934400,
+  "hpwl": 12628,
+  "overlap": 0,
+  "resid": 1.1368683772161603e-13,
+  "offgrid": 0,
+  "orderViolations": 0,
+  "alignArea": 16934400,
+  "alignHpwl": 12788,
+  "alignBbox": [
+   0,
+   0,
+   1440,
+   11760
+  ]
+ }
+}

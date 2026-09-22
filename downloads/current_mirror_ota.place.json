@@ -1,0 +1,84 @@
+{
+ "example": "current_mirror_ota",
+ "top": "CURRENT_MIRROR_OTA",
+ "bbox": [
+  0,
+  0,
+  8800,
+  2352
+ ],
+ "grid": [
+  80,
+  84
+ ],
+ "instances": [
+  {
+   "name": "X_M10_M11",
+   "abstract": "SCM_NMOS_54009245",
+   "concrete": "SCM_NMOS_54009245_X1_Y1",
+   "oX": 4960,
+   "oY": 0,
+   "sX": 1,
+   "sY": 1
+  },
+  {
+   "name": "X_M14_M16",
+   "abstract": "SCM_NMOS_75369159",
+   "concrete": "SCM_NMOS_75369159_X1_Y1",
+   "oX": 3040,
+   "oY": 0,
+   "sX": 1,
+   "sY": 1
+  },
+  {
+   "name": "X_M18_M19",
+   "abstract": "SCM_PMOS_36427133",
+   "concrete": "SCM_PMOS_36427133",
+   "oX": 5760,
+   "oY": 0,
+   "sX": 1,
+   "sY": 1
+  },
+  {
+   "name": "X_M20_M21",
+   "abstract": "SCM_PMOS_36427133",
+   "concrete": "SCM_PMOS_36427133",
+   "oX": 3040,
+   "oY": 0,
+   "sX": -1,
+   "sY": 1
+  },
+  {
+   "name": "X_M15_M17",
+   "abstract": "DP_NMOS_B_32249044",
+   "concrete": "DP_NMOS_B_32249044_X2_Y1",
+   "oX": 3840,
+   "oY": 0,
+   "sX": 1,
+   "sY": 1
+  }
+ ],
+ "synthLeaves": [],
+ "needLeaves": [
+  "SCM_NMOS_54009245_X1_Y1",
+  "SCM_NMOS_75369159_X1_Y1",
+  "SCM_PMOS_36427133",
+  "DP_NMOS_B_32249044_X2_Y1"
+ ],
+ "quality": {
+  "area": 20697599.99999999,
+  "hpwl": 12935.999999999989,
+  "overlap": 1.497392076998949e-8,
+  "resid": 0,
+  "offgrid": 0,
+  "orderViolations": 0,
+  "alignArea": 20697600,
+  "alignHpwl": 12936,
+  "alignBbox": [
+   0,
+   0,
+   8800,
+   2352
+  ]
+ }
+}

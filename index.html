@@ -1,0 +1,1180 @@
+<meta charset="utf-8">
+<title>Symmetry Placer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* 팔레트는 이 주제에서 나왔다. 구리(배선 금속)가 강조색, 마젠타는 대칭축 —
+     이 배치기가 하는 일 자체가 대칭이라 축에만 진한 색을 쓴다.
+     중성색은 강조색의 반대쪽으로 살짝 차게 기울였다. */
+  :root {
+    --ground: #eef1f4;
+    --panel: #ffffff;
+    --sunk: #e6eaee;
+    --ink: #12181f;
+    --muted: #5a6772;
+    --faint: #8996a1;
+    --line: #d2d9e0;
+    --hair: #e4e9ee;
+    --copper: #a8551f;
+    --copper-soft: #f3e3d7;
+    --axis: #9c2d66;
+    --block: #a8bccd;
+    --block-line: #45596b;
+    --ours: #a8551f;
+    --good: #2f6f4e;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0d1218;
+      --panel: #151c24;
+      --sunk: #101720;
+      --ink: #e3eaf1;
+      --muted: #93a2af;
+      --faint: #6b7a88;
+      --line: #27313c;
+      --hair: #1d2530;
+      --copper: #e0913f;
+      --copper-soft: #33241a;
+      --axis: #e173ab;
+      --block: #40566a;
+      --block-line: #8fa8bd;
+      --ours: #e0913f;
+      --good: #5fc08c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d1218;
+    --panel: #151c24;
+    --sunk: #101720;
+    --ink: #e3eaf1;
+    --muted: #93a2af;
+    --faint: #6b7a88;
+    --line: #27313c;
+    --hair: #1d2530;
+    --copper: #e0913f;
+    --copper-soft: #33241a;
+    --axis: #e173ab;
+    --block: #40566a;
+    --block-line: #8fa8bd;
+    --ours: #e0913f;
+    --good: #5fc08c;
+  }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; padding-block: 28px 56px; }
+
+  header { margin-bottom: 22px; }
+  h1 {
+    font-size: clamp(22px, 3.4vw, 30px); font-weight: 600; margin: 0 0 6px;
+    letter-spacing: -0.015em; text-wrap: balance;
+  }
+  .tag {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--copper); margin: 0 0 10px;
+  }
+  .lede { margin: 0; color: var(--muted); max-width: 62ch; }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  /* --- 조작부 --- */
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; margin: 20px 0 16px;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field > span {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  select, button {
+    font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 10px;
+  }
+  select { min-width: 180px; }
+  button.run {
+    background: var(--copper); border-color: var(--copper); color: #fff;
+    font-weight: 600; padding: 8px 20px; cursor: pointer;
+  }
+  :root[data-theme="dark"] button.run,
+  :root:not([data-theme="light"]) button.run { color: #16110a; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) button.run { color: #fff; } }
+  button.run:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, select:focus-visible {
+    outline: 2px solid var(--copper); outline-offset: 2px;
+  }
+  .spacer { flex: 1 1 auto; }
+  .status {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 8px; min-height: 30px;
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--copper);
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: .25 } 50% { opacity: 1 } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; opacity: .8 } }
+
+  /* --- 본문 2단 --- */
+  .cols { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; overflow: hidden;
+  }
+  .card > h2 {
+    font-size: 11px; font-family: var(--mono); letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--faint); font-weight: 500;
+    margin: 0; padding: 11px 14px 9px; border-bottom: 1px solid var(--hair);
+  }
+  .card > .body { padding: 14px; }
+
+  canvas {
+    display: block; width: 100%; background: var(--sunk);
+    cursor: grab; touch-action: none;
+  }
+  canvas.dragging { cursor: grabbing; }
+  .viewbar {
+    display: flex; gap: 2px; align-items: center; margin-left: auto;
+  }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button {
+    border: 0; border-radius: 0; padding: 5px 11px; font-size: 12px;
+    background: var(--panel); color: var(--muted); cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--copper-soft); color: var(--copper); font-weight: 600; }
+  .ghost {
+    border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+    border-radius: 7px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+  }
+  [hidden] { display: none !important; }
+  .layers {
+    display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center;
+    padding: 9px 14px; border-top: 1px solid var(--hair);
+  }
+  .lay {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px 3px 6px;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    background: var(--panel); user-select: none;
+  }
+  .lay input { appearance: none; margin: 0; width: 9px; height: 9px; border-radius: 2px;
+               border: 1px solid var(--line); background: var(--sunk); }
+  .lay input:checked { background: currentColor; border-color: currentColor; }
+  .lay[data-on="1"] { color: var(--ink); border-color: var(--faint); }
+  .lay input:focus-visible { outline: 2px solid var(--copper); outline-offset: 1px; }
+  .drop {
+    border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px;
+    font-size: 12px; color: var(--muted); cursor: pointer; background: var(--panel);
+    display: flex; align-items: center; gap: 8px; min-height: 34px;
+  }
+  .drop.over { border-color: var(--copper); color: var(--copper); background: var(--copper-soft); }
+  .drop input { display: none; }
+  .dl { display: flex; flex-wrap: wrap; gap: 6px; }
+  .dl a {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink);
+    text-decoration: none; background: var(--panel);
+  }
+  .dl a:hover { border-color: var(--copper); color: var(--copper); }
+  .dl a span { color: var(--faint); }
+  .errlist {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    max-height: 190px; overflow: auto; margin: 0;
+  }
+  .errlist li { padding: 4px 0; border-top: 1px solid var(--hair); line-height: 1.45; }
+  .errlist li:first-child { border-top: 0; }
+  .errlist b { color: var(--copper); font-weight: 600; }
+  .card > h2.withbar { display: flex; align-items: center; gap: 10px; padding-right: 10px; }
+  .card > h2.withbar > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .cap {
+    display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center;
+    padding: 9px 14px; border-top: 1px solid var(--hair);
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .key { display: inline-flex; align-items: center; gap: 5px; }
+  .sw { width: 14px; height: 9px; border-radius: 2px; border: 1px solid var(--block-line); background: var(--block); }
+  .sw.ours { background: transparent; border: 1.5px solid var(--ours); }
+  .sw.ax { width: 2px; height: 12px; border: 0; border-radius: 0; background: var(--axis); }
+
+  /* --- 지표 --- */
+  .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--hair); }
+  .m { background: var(--panel); padding: 11px 14px; }
+  .m dt {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--faint); margin: 0 0 2px;
+  }
+  .m dd {
+    margin: 0; font-family: var(--mono); font-size: 17px; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .m dd small { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .m dd.win { color: var(--good); }
+  .m dd.lose { color: var(--copper); }
+
+  /* --- 표 --- */
+  .tw { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 11.5px; }
+  th, td { text-align: left; padding: 6px 14px; white-space: nowrap; }
+  thead th {
+    font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--faint); font-weight: 500; border-bottom: 1px solid var(--hair);
+  }
+  tbody tr + tr td { border-top: 1px solid var(--hair); }
+  td.inst { color: var(--ink); }
+  td.dim { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .same { color: var(--good); }
+  .diff { color: var(--copper); }
+  .flip { letter-spacing: 0.1em; }
+
+  /* --- 설명 --- */
+  .notes { margin-top: 22px; display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+  .note h3 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
+  .note p { margin: 0 0 9px; color: var(--muted); }
+  .note p:last-child { margin-bottom: 0; }
+  .note code, code { font-family: var(--mono); font-size: 12px; background: var(--sunk); padding: 1px 5px; border-radius: 4px; }
+  .caveat { border-left: 2px solid var(--copper); padding-left: 12px; }
+  .caveat h3 { color: var(--copper); }
+  footer {
+    margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 11px; color: var(--faint);
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="tag">Analog layout · in-browser</p>
+    <h1>Symmetry Placer</h1>
+    <p class="lede">
+      아날로그 IC 배치를 브라우저에서 푼다. 대칭 제약을 벌점이 아니라 <b>좌표계</b>로
+      흡수해 <code>z = z₀ + Nθ</code> 위에서 내려가므로, 어떤 θ 를 넣어도 대칭이
+      정의상 정확히 만족된다. 소자 변이·거울 반전·영역 종횡비까지 스스로 고른다 —
+      <b>ALIGN 의 배치 단계 없이</b> 앞단 출력만으로 돈다.
+    </p>
+  </header>
+
+  <div class="bar">
+    <label class="field"><span>회로</span>
+      <select id="ex"></select>
+    </label>
+    <label class="field"><span>시작점</span>
+      <select id="batch">
+        <option value="48">48 — 빠름</option>
+        <option value="96" selected>96 — 기본</option>
+        <option value="288">288 — 깊게</option>
+      </select>
+    </label>
+    <button class="run" id="run">배치 실행</button>
+    <button class="run" id="routeRun" disabled
+            title="배치한 뒤 ALIGN 배선기(wasm)로 배선한다">배선 실행</button>
+    <label class="drop" id="drop" title="회로 넷리스트(.sp)를 올린다 — 앞단부터 브라우저에서 돌린다">
+      <input type="file" id="file" multiple accept=".sp,.cir,.json">
+      <span id="dropText">회로 올리기 — .sp 넷리스트 또는 앞단 출력</span>
+    </label>
+    <div class="spacer"></div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="card">
+        <h2 class="withbar">
+          <span id="cvTitle">ALIGN 의 배치 (기준선)</span>
+          <span class="viewbar">
+            <span class="seg" id="modes">
+              <button data-mode="ours" aria-pressed="true">우리</button>
+              <button data-mode="align" aria-pressed="false">ALIGN</button>
+              <button data-mode="both" aria-pressed="false">나란히</button>
+              <button data-mode="route" aria-pressed="false">배선</button>
+            </span>
+            <button class="ghost" id="flipY" title="보기만 상하로 뒤집는다 (좌표는 그대로)"
+                    aria-pressed="false">↕ 뒤집기</button>
+            <button class="ghost" id="fit" title="확대/이동 초기화">맞춤</button>
+          </span>
+        </h2>
+        <canvas id="cv" width="800" height="560"></canvas>
+        <div class="layers" id="layerBar" hidden></div>
+        <div class="cap">
+          <span class="key"><span class="sw"></span> 블록</span>
+          <span class="key"><span class="sw ours"></span> 우리 배치</span>
+          <span class="key"><span class="sw ax"></span> 대칭축</span>
+          <span id="bbox"></span>
+          <span id="zoom" style="margin-left:auto"></span>
+          <span style="color:var(--faint)">휠 확대 · 끌어 이동</span>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>소자 변이 — 우리가 고른 것 vs ALIGN</h2>
+        <div class="tw"><table>
+          <thead><tr><th>인스턴스</th><th>우리 선택</th><th>크기</th><th>반전</th><th>ALIGN</th></tr></thead>
+          <tbody id="vt"><tr><td colspan="5" class="dim">배치를 실행하면 채워집니다</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>결과</h2>
+        <dl class="metrics" id="metrics"></dl>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>설계</h2>
+        <div class="body"><dl class="metrics" id="info" style="margin:-14px"></dl></div>
+      </div>
+      <div class="card" id="drcCard" style="margin-top:16px">
+        <h2 class="withbar">
+          <span>배선 · GDS · DRC</span>
+          <span class="viewbar">
+            <span class="seg" id="drcWho">
+              <button data-who="ours" aria-pressed="true">우리</button>
+              <button data-who="align" aria-pressed="false">ALIGN</button>
+            </span>
+          </span>
+        </h2>
+        <dl class="metrics" id="drcMetrics"></dl>
+        <div class="body" id="drcErrs" style="border-top:1px solid var(--hair)"></div>
+        <div class="body" style="border-top:1px solid var(--hair)">
+          <div class="dl" id="dlBar"></div>
+        </div>
+      </div>
+      <div class="card" id="subCard" hidden style="margin-top:16px">
+        <h2>하위 모듈이 올린 모양</h2>
+        <div class="tw"><table>
+          <thead><tr><th>모듈</th><th>쓴 것</th><th>올린 후보</th></tr></thead>
+          <tbody id="st"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+
+  <footer id="foot">의존성 없는 ES 모듈 · 빌드 단계 없음 · 전부 이 페이지 안에서 계산됩니다</footer>
+</div>
+
+<script type="module">
+const EXAMPLES = [
+  ["telescopic_ota", "Telescopic OTA"],
+  ["current_mirror_ota", "Current-Mirror OTA"],
+  ["five_transistor_ota", "5-Transistor OTA"],
+  ["cascode_current_mirror_ota", "Cascode Current-Mirror OTA"],
+  ["high_speed_comparator", "High-Speed Comparator"],
+];
+import { makeView, drawPanel, drawRouted, zoomAt, GROUPS } from "./view.mjs";
+const $ = (id) => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+const view = makeView();
+let mode = "ours";           // ours | align | both | route
+let frame = null;            // 최적화 중간 상태
+let routed = null;           // 배선 기하 {ours, align}
+// 우리 배치는 ALIGN 의 **상하 거울상**으로 나올 수 있다. 대칭 자유도라 틀린 게
+// 아니지만 (블록 크기·변이·bbox 가 같고 HPWL 도 거의 같다) 나란히 놓으면
+// 다르게 보인다. 이 토글은 **보기만** 뒤집는다 — 좌표와 산출물은 안 건드린다.
+let flipView = false;
+let drcIndex = null;         // 배선/DRC 실제 결과
+let drcWho = "ours";
+const layersOn = new Set(["metal", "via", "device"]);   // 웰은 기본 꺼짐
+
+// getComputedStyle 은 스타일 재계산을 강제한다. 블록마다 부르면 한 프레임이
+// 수백 ms 로 늘어진다 — 한 번 읽어두고 테마가 바뀔 때만 다시 읽는다.
+const KEYS = ["--sunk", "--muted", "--ink", "--faint", "--copper", "--axis",
+              "--block", "--block-line", "--ours", "--hair"];
+let PAL = {}, pal = {};
+const readPal = () => {
+  const cs = getComputedStyle(document.documentElement);
+  for (const k of KEYS) PAL[k] = cs.getPropertyValue(k).trim();
+  pal = { sunk: PAL["--sunk"], ink: PAL["--ink"], faint: PAL["--faint"],
+          hair: PAL["--hair"], axis: PAL["--axis"], block: PAL["--block"],
+          blockLine: PAL["--block-line"], ours: PAL["--ours"] };
+};
+readPal();
+const c = (k) => PAL[k] ?? "#888";
+window.matchMedia?.("(prefers-color-scheme: dark)")
+  .addEventListener?.("change", () => { readPal(); redraw(); });
+new MutationObserver(() => { readPal(); redraw(); })
+  .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+let blobs = new Map();          // 예제 -> 앞단 출력
+let base = null;                // ALIGN 기준선
+let ours = null;                // 우리 배치
+let shown = "base";
+let worker = null, busy = false;
+
+// ---------------------------------------------------------------- 그리기
+//
+// 패널 하나(우리 / ALIGN)를 그리는 일은 view.mjs 가 한다. 여기서는 어떤 것을
+// 어디에 그릴지만 정한다. "나란히"에서는 두 패널이 같은 확대/이동을 쓴다.
+function panels(W, H) {
+  if (mode !== "both") return [{ x: 0, y: 0, w: W, h: H }];
+  const gap = 1;
+  const half = (W - gap) / 2;
+  return [{ x: 0, y: 0, w: half, h: H }, { x: half + gap, y: 0, w: half, h: H }];
+}
+
+function canvasSize() {
+  const W = Math.max(280, Math.round(cv.getBoundingClientRect().width));
+  // 캔버스 높이는 보여줄 레이아웃의 종횡비에서 뽑는다. 고정 비율로 두면
+  // 1440x11760 같은 세로 설계에서 좌우가 통째로 빈다.
+  if (mode === "route") {
+    const g = routed?.[drcWho];
+    const bw = g ? Math.max(1, g.bbox[2] - g.bbox[0]) : 1;
+    const bh = g ? Math.max(1, g.bbox[3] - g.bbox[1]) : 1;
+    return { W, H: Math.round(Math.min(660, Math.max(320, (W * bh) / bw))) };
+  }
+  const d = frame ?? (mode === "align" ? base : ours) ?? base;
+  let ratio = 0.72;
+  if (d?.bbox) {
+    const bw = Math.max(1, d.bbox[2] - d.bbox[0]), bh = Math.max(1, d.bbox[3] - d.bbox[1]);
+    ratio = bh / bw;
+    if (mode === "both") ratio *= 2;      // 반쪽 폭에 같은 내용이 들어간다
+  }
+  return { W, H: Math.round(Math.min(660, Math.max(320, W * ratio))) };
+}
+
+/** 보기용 상하 뒤집기. 원본은 안 건드린다. */
+function mirror(d) {
+  if (!flipView || !d?.rects) return d;
+  const [, y0, , y1] = d.bbox;
+  return { ...d, rects: d.rects.map((r) => ({ ...r, y: y0 + y1 - r.y - r.h })) };
+}
+
+function redraw() {
+  const { W, H } = canvasSize();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (cv.width !== W * dpr || cv.height !== H * dpr) {
+    cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + "px";
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = pal.sunk; ctx.fillRect(0, 0, W, H);
+
+  const ps = panels(W, H);
+  let shownBbox = null;
+  if (mode === "route") {
+    const g = routed?.[drcWho];
+    drawRouted(ctx, ps[0], g, { pal, view, on: layersOn,
+                                label: drcWho === "ours" ? "우리 배치의 배선" : "ALIGN 의 배선" });
+    shownBbox = g?.bbox;
+  } else if (mode === "both") {
+    drawPanel(ctx, ps[0], base, { pal, view, label: "ALIGN" });
+    const live = mirror(frame ?? ours);
+    drawPanel(ctx, ps[1], live, { pal, view, label: frame ? "탐색 중" : "우리",
+                                  accent: true, axes: ours?.axes ?? [] });
+    ctx.strokeStyle = pal.hair; ctx.beginPath();
+    ctx.moveTo(ps[1].x - 0.5, 0); ctx.lineTo(ps[1].x - 0.5, H); ctx.stroke();
+    shownBbox = live?.bbox ?? base?.bbox;
+  } else if (mode === "align") {
+    drawPanel(ctx, ps[0], base, { pal, view });
+    shownBbox = base?.bbox;
+  } else {
+    const live = mirror(frame ?? ours);
+    if (!live && base) { drawPanel(ctx, ps[0], base, { pal, view, dim: true, label: "ALIGN (기준선)" }); shownBbox = base.bbox; }
+    else {
+      drawPanel(ctx, ps[0], live, { pal, view, accent: true, axes: ours?.axes ?? [],
+                                    label: frame ? `탐색 중 · ${frame.module}` : null });
+      shownBbox = live?.bbox;
+    }
+  }
+  if (shownBbox)
+    $("bbox").textContent =
+      `${Math.round(shownBbox[2] - shownBbox[0])} × ${Math.round(shownBbox[3] - shownBbox[1])}`;
+  $("zoom").textContent = view.s === 1 ? "" : `${view.s.toFixed(1)}×`;
+}
+
+// --- 확대 / 이동 ---
+cv.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  const { W, H } = canvasSize();
+  const px = e.clientX - r.left, py = e.clientY - r.top;
+  const p = panels(W, H).find((q) => px >= q.x && px < q.x + q.w) ?? panels(W, H)[0];
+  zoomAt(view, p, px, py, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+  redraw();
+}, { passive: false });
+
+let drag = null;
+cv.addEventListener("pointerdown", (e) => {
+  drag = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
+  cv.setPointerCapture(e.pointerId); cv.classList.add("dragging");
+});
+cv.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  view.tx = drag.tx + (e.clientX - drag.x);
+  view.ty = drag.ty + (e.clientY - drag.y);
+  redraw();
+});
+const endDrag = () => { drag = null; cv.classList.remove("dragging"); };
+cv.addEventListener("pointerup", endDrag);
+cv.addEventListener("pointercancel", endDrag);
+
+// 레이어 토글
+{
+  const bar = $("layerBar");
+  for (const [key, label] of GROUPS) {
+    const l = document.createElement("label");
+    l.className = "lay";
+    l.dataset.on = layersOn.has(key) ? "1" : "0";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.id = "lay-" + key; cb.checked = layersOn.has(key);
+    cb.addEventListener("change", () => {
+      if (cb.checked) layersOn.add(key); else layersOn.delete(key);
+      l.dataset.on = cb.checked ? "1" : "0";
+      redraw();
+    });
+    const t = document.createElement("span");
+    t.textContent = label;
+    l.append(cb, t);
+    bar.append(l);
+  }
+}
+
+const resetView = () => { view.s = 1; view.tx = 0; view.ty = 0; redraw(); };
+$("fit").addEventListener("click", resetView);
+$("flipY").addEventListener("click", () => {
+  flipView = !flipView;
+  $("flipY").setAttribute("aria-pressed", String(flipView));
+  $("flipY").style.color = flipView ? "var(--copper)" : "";
+  $("flipY").style.borderColor = flipView ? "var(--copper)" : "";
+  redraw();
+});
+
+function setMode(m) {
+  mode = m;
+  for (const b of $("modes").querySelectorAll("button"))
+    b.setAttribute("aria-pressed", String(b.dataset.mode === m));
+  $("cvTitle").textContent = mode === "align" ? "ALIGN 의 배치 (기준선)"
+    : mode === "both" ? "나란히 — 같은 배율"
+    : mode === "route" ? "배선 결과 — ALIGN 배선기가 낸 실제 기하"
+    : "우리 배치";
+  $("layerBar").hidden = mode !== "route";
+  resetView();
+}
+for (const btn of $("modes").querySelectorAll("button"))
+  btn.addEventListener("click", () => setMode(btn.dataset.mode));
+
+// ---------------------------------------------------------------- 표시
+const mkRow = (dl, k, v, cls) => {
+  const d = document.createElement("div"); d.className = "m";
+  const dt = document.createElement("dt"); dt.textContent = k;
+  const dd = document.createElement("dd"); dd.innerHTML = v;
+  if (cls) dd.className = cls;
+  d.append(dt, dd); dl.append(d);
+};
+
+function showInfo(b) {
+  const dl = $("info"); dl.textContent = "";
+  mkRow(dl, "블록", String(b.base?.rects.length ?? "—"));
+  mkRow(dl, "모듈", b.modules > 1 ? `${b.modules} <small>(계층)</small>` : "1");
+  mkRow(dl, "ALIGN bbox", b.base
+    ? `<small>${b.base.bbox[2] - b.base.bbox[0]} × ${b.base.bbox[3] - b.base.bbox[1]}</small>` : "—");
+  mkRow(dl, "ALIGN HPWL", b.base ? `<small>${Math.round(b.base.hpwl)}</small>` : "—");
+}
+
+function showResult(r) {
+  const dl = $("metrics"); dl.textContent = "";
+  const ar = base ? r.area / base.area : null;
+  const hr = base ? r.hpwl / base.hpwl : null;
+  const cls = (v) => (v == null ? "" : v <= 1.002 ? "win" : "lose");
+  mkRow(dl, "면적", ar ? `${ar.toFixed(3)}× <small>ALIGN 대비</small>` : "—", cls(ar));
+  mkRow(dl, "배선 HPWL", hr ? `${hr.toFixed(3)}× <small>ALIGN 대비</small>` : "—", cls(hr));
+  let blockArea = 0;
+  for (const q of r.rects) blockArea += q.w * q.h;
+  mkRow(dl, "겹침", `${(r.overlap / blockArea).toExponential(1)} <small>블록면적 대비</small>`, "win");
+  mkRow(dl, "대칭 잔차", `${r.resid.toExponential(1)}`, "win");
+  mkRow(dl, "배선 격자", r.offgrid === 0
+    ? `0 <small>밖 / M1 ${r.grid[0]} M2 ${r.grid[1]}</small>`
+    : `${r.offgrid} <small>블록이 격자 밖</small>`,
+    r.offgrid === 0 ? "win" : "lose");
+  mkRow(dl, "변이 조합", `${r.combos} <small>중 탐색</small>`);
+  mkRow(dl, "legalize", `${r.tried - r.legalFail}/${r.tried} <small>성공</small>`);
+  if (r.nOrder)
+    mkRow(dl, "Order 제약", `${r.orderBad} <small>위반 / ${r.nOrder} 개</small>`,
+          r.orderBad ? "lose" : "win");
+  if (r.hpwlBeforeFlip)
+    mkRow(dl, "반전 효과", `${(r.hpwl / r.hpwlBeforeFlip).toFixed(2)}× <small>HPWL</small>`, "win");
+
+  // 변이 표
+  const tb = $("vt"); tb.textContent = "";
+  const alignBy = new Map((base?.rects ?? []).map((q) => [q.name, q]));
+  for (const q of r.rects) {
+    const a = alignBy.get(q.name);
+    const tr = document.createElement("tr");
+    const short = (s) => (s ?? "—").replace(/_(\d{6,})_/, "_");
+    const same = a && a.concrete === q.concrete;
+    tr.innerHTML =
+      `<td class="inst">${q.name}</td>` +
+      `<td class="${same ? "same" : "diff"}">${short(q.concrete)}</td>` +
+      `<td class="dim">${Math.round(q.w)}×${Math.round(q.h)}</td>` +
+      `<td class="dim flip">${q.sx > 0 ? "+" : "−"}${q.sy > 0 ? "+" : "−"}</td>` +
+      `<td class="dim">${same ? "같음" : short(a?.concrete)}</td>`;
+    tb.append(tr);
+  }
+
+  // 하위 모듈
+  if (r.subs?.length) {
+    $("subCard").hidden = false;
+    const st = $("st"); st.textContent = "";
+    for (const s of r.subs) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td class="inst">${s.name.replace(/^PRIMITIVE_/, "P·")}</td>` +
+        `<td class="dim">${s.box[0]}×${s.box[1]}</td>` +
+        `<td class="dim">${s.shapes.slice(0, 4).map((b) => b[0] + "×" + b[1]).join("  ")}</td>`;
+      st.append(tr);
+    }
+  } else $("subCard").hidden = true;
+}
+
+// ---------------------------------------------------------------- 실행
+const setStatus = (html) => { $("status").innerHTML = html; };
+
+// --- 내 설계 올리기 ---
+//
+// 배치기의 입력은 ALIGN 앞단 출력 세 가지다.
+//   1_topology/<top>.verilog.json     인스턴스 -> abstract 템플릿, fa_map, 제약
+//   2_primitives/__primitives__.json  concrete -> abstract, x_cells, y_cells
+//   2_primitives/<concrete>.json      bbox, terminals
+// 폴더를 통째로 올리면 이름으로 골라낸다. 우리가 묶어둔 한 덩이 JSON
+// ({topology, primitives, templates}) 하나만 올려도 된다.
+// SPICE 넷리스트에서 최상위 서브서킷 이름을 뽑는다.
+// ALIGN 은 .subckt 가 여럿이면 **아무 것에도 포함되지 않는 것**을 최상위로 본다.
+function topSubckt(text) {
+  const defined = [], used = new Set();
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.trim();
+    const m = /^\.subckt\s+(\S+)/i.exec(l);
+    if (m) { defined.push(m[1]); continue; }
+    if (!l || l.startsWith("*") || l.startsWith(".")) continue;
+    // 인스턴스 줄: X<이름> <넷...> <서브서킷> [파라미터]
+    if (/^x/i.test(l)) {
+      const toks = l.split(/\s+/).slice(1).filter((t) => !t.includes("="));
+      if (toks.length) used.add(toks[toks.length - 1].toUpperCase());
+    }
+  }
+  if (!defined.length) throw new Error(".subckt 를 못 찾았습니다");
+  const top = defined.find((d) => !used.has(d.toUpperCase()));
+  return (top ?? defined[defined.length - 1]).toUpperCase();
+}
+
+// 앞단과 배선은 **같은 워커**를 쓴다 — 워커가 다르면 Pyodide 파일시스템도
+// 다르고, 배선은 앞단이 만든 작업 디렉터리를 읽어야 한다. 그래서 워커는
+// 한 번 띄워두고, 오가는 메시지는 기다리는 쪽(frontPend)으로 넘긴다.
+let frontWorker = null, frontPend = null;
+let uploadName = null;   // 올린 넷리스트 이름 — 산출물 파일 이름에 쓴다
+let frontFor = null;     // 워커 안에 앞단 작업 디렉터리가 있는 설계
+function frontSend(msg, want, fresh) {
+  return new Promise((resolve, reject) => {
+    if (fresh) { frontWorker?.terminate(); frontWorker = null; frontPend = null; }
+    if (!frontWorker) {
+      frontWorker = new Worker(new URL("./frontworker.mjs", import.meta.url), { type: "module" });
+      frontWorker.onmessage = (ev) => {
+        const m = ev.data;
+        if (m.type === "log") {
+          setStatus(`<span class="dot"></span><span>${m.step}/7 ${m.text}</span>`);
+          return;
+        }
+        const p = frontPend; frontPend = null;
+        if (!p) return;
+        if (m.type === "error") {
+          const e = new Error(m.msg.split("\n")[0]);
+          // Pyodide 가 치명적으로 죽으면 그 인스턴스는 못 쓴다 — 버린다.
+          if (/fatal/i.test(m.msg)) { e.fatal = true; frontWorker?.terminate(); frontWorker = null; frontFor = null; }
+          p.reject(e);
+        }
+        else if (m.type === p.want) p.resolve(m);
+        else p.reject(new Error("워커가 \"" + m.type + "\" 를 보냈습니다"));
+      };
+      frontWorker.onerror = (ev) => {
+        const p = frontPend; frontPend = null;
+        p?.reject(new Error(ev.message || "워커 오류"));
+      };
+    }
+    frontPend = { resolve, reject, want };
+    frontWorker.postMessage(msg);
+  });
+}
+/** 넷리스트를 앞단에 돌린다. 첫 호출은 Pyodide 25MB 를 받느라 오래 걸린다. */
+async function runFront(spText, name, subckt, constText) {
+  frontFor = null;
+  const r = await frontSend({ sp: spText, name, subckt, constraints: constText },
+                            "front", true);
+  frontFor = name;
+  return r;
+}
+
+/** 지금 화면에 있는 설계 이름 (올린 것이든 예제든). */
+const designName = () =>
+  $("ex").value === "__upload__" ? uploadName : $("ex").value;
+
+/** 배선하려면 워커 안에 그 설계의 앞단 결과가 있어야 한다. 없으면 만든다. */
+async function ensureFront() {
+  const want = designName();
+  if (!want) throw new Error("설계가 없습니다");
+  if (frontFor === want) return;
+  if ($("ex").value === "__upload__")
+    throw new Error("올린 회로를 다시 올려주세요");
+  setStatus('<span class="dot"></span><span>앞단 준비 — 예제 넷리스트를 돌립니다</span>');
+  const [sp, cn] = await Promise.all(
+    ["sp", "const.json"].map(async (e) => {
+      const r = await fetch(`./netlists/${want}.${e}`);
+      if (!r.ok) throw new Error(`netlists/${want}.${e} → ${r.status}`);
+      return r.text();
+    }));
+  await runFront(sp, want, topSubckt(sp), cn);
+}
+
+async function ingest(fileList) {
+  const all = [...fileList];
+
+  // --- 회로 넷리스트 ---
+  const sp = all.find((f) => /\.(sp|cir)$/i.test(f.name));
+  if (sp) {
+    const text = await sp.text();
+    const subckt = topSubckt(text);
+    const name = sp.name.replace(/\.(sp|cir)$/i, "");
+    uploadName = name;
+    const cf = all.find((f) => /\.const\.json$/i.test(f.name));
+    const constText = cf ? await cf.text() : "";
+    setStatus('<span class="dot"></span><span>앞단 준비 — 처음이면 25MB 를 받습니다</span>');
+    const r = await runFront(text, name, subckt, constText);
+    setStatus(`<span>앞단 완료 — 모듈 ${r.modules}, 인스턴스 ${r.instances}, ` +
+              `소자 ${r.concrete} 종  (${r.secs.toFixed(1)}s)</span>`);
+    return r.blob;
+  }
+
+  const files = all.filter((f) => f.name.endsWith(".json"));
+  if (!files.length) throw new Error(".sp 넷리스트나 앞단 출력 JSON 이 필요합니다");
+
+  // 한 덩이로 묶인 것인가?
+  if (files.length === 1) {
+    const j = JSON.parse(await files[0].text());
+    if (j.topology && j.primitives && j.templates) return j;
+    throw new Error("한 파일만 올릴 때는 {topology, primitives, templates} 형식이어야 합니다");
+  }
+
+  let topology = null, primitives = null;
+  const templates = {};
+  for (const f of files) {
+    const base = f.name.replace(/^.*[\\/]/, "");
+    if (base.endsWith(".verilog.json")) {
+      const j = JSON.parse(await f.text());
+      if (j.modules) topology = j;
+    } else if (base === "__primitives__.json") {
+      primitives = JSON.parse(await f.text());
+    }
+  }
+  if (!topology) throw new Error("*.verilog.json 을 못 찾았습니다 (1_topology)");
+  if (!primitives) throw new Error("__primitives__.json 을 못 찾았습니다 (2_primitives)");
+
+  const want = new Set(Object.keys(primitives));
+  for (const f of files) {
+    const base = f.name.replace(/^.*[\\/]/, "");
+    if (!base.endsWith(".json") || base.startsWith("__")) continue;
+    const cn = base.slice(0, -5);
+    if (!want.has(cn)) continue;
+    const j = JSON.parse(await f.text());
+    if (j.bbox && j.terminals) templates[cn] = j;
+  }
+  const missing = [...want].filter((c) => !templates[c]);
+  if (missing.length === want.size)
+    throw new Error("2_primitives 의 <concrete>.json 을 하나도 못 찾았습니다");
+  return { topology, primitives, templates, place: null, _missing: missing };
+}
+
+{
+  const drop = $("drop"), input = $("file"), text = $("dropText");
+  const use = async (fl) => {
+    try {
+      text.textContent = "읽는 중…";
+      setStatus('<span class="dot"></span><span>읽는 중…</span>');
+      const blob = await ingest(fl);
+      const nInst = (blob.topology.modules.at(-1).instances ?? []).length;
+      blobs.set("__upload__", blob);
+      const o = document.createElement("option");
+      o.value = "__upload__";
+      o.textContent = "내 회로";
+      const prev = [...$("ex").options].find((x) => x.value === "__upload__");
+      if (prev) prev.remove();
+      $("ex").append(o);
+      $("ex").value = "__upload__";
+      text.textContent = `올림 — 모듈 ${blob.topology.modules.length}, 인스턴스 ${nInst}` +
+        (blob._missing?.length ? `  (템플릿 ${blob._missing.length}개 없음)` : "");
+      base = null; ours = null; frame = null; routed = null;
+      $("metrics").textContent = ""; $("vt").innerHTML =
+        '<tr><td colspan="5" class="dim">배치를 실행하면 채워집니다</td></tr>';
+      showDrc(null); fillDownloads(null);
+      redraw();
+      if (!/앞단 완료/.test($("status").textContent))
+        setStatus("<span>올렸습니다 — 배치 실행을 누르세요</span>");
+    } catch (e) {
+      text.textContent = "회로 올리기 — .sp 넷리스트 또는 앞단 출력";
+      setStatus(`<span style="color:var(--copper)">${e.message}</span>`);
+    }
+  };
+  input.addEventListener("change", () => input.files.length && use(input.files));
+  for (const ev of ["dragenter", "dragover"])
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); });
+  for (const ev of ["dragleave", "drop"])
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); });
+  drop.addEventListener("drop", (e) => {
+    const fl = e.dataTransfer?.files;
+    if (fl?.length) use(fl);
+  });
+}
+
+// --- 산출물 다운로드 ---
+//
+// 정적 호스팅(GitHub Pages 등)에서는 <a download> 가 그대로 동작한다.
+// (아티팩트 뷰어 안에서는 샌드박스가 페이지발 다운로드를 막는다.)
+let dlIndex = null;
+async function fillDownloads(name) {
+  const bar = $("dlBar");
+  bar.textContent = "";
+  if (!name) {
+    bar.innerHTML = '<span style="color:var(--faint);font-size:12px">' +
+      '배선 실행을 누르면 GDS · 배치 · 배선 기하 · DRC 원문이 여기에 생깁니다.</span>';
+    return;
+  }
+  if (!dlIndex) {
+    try { dlIndex = await (await fetch("./downloads/index.json")).json(); }
+    catch { dlIndex = []; }
+  }
+  const rec = dlIndex.find((r) => r.name === name);
+  if (!rec?.files?.length) {
+    bar.innerHTML = '<span style="color:var(--faint);font-size:12px">산출물 없음</span>';
+    return;
+  }
+  for (const f of rec.files) {
+    const a = document.createElement("a");
+    a.href = "./downloads/" + f.file;
+    a.download = f.file;
+    a.innerHTML = `${f.label} <span>${(f.bytes / 1024).toFixed(0)}K</span>`;
+    bar.append(a);
+  }
+}
+
+// --- 배선 · DRC: 실제 산출물을 읽는다 (손으로 적은 표가 아니다) ---
+async function loadRouted(name) {
+  routed = null;
+  if (!drcIndex) {
+    try {
+      drcIndex = await (await fetch("./routed/index.json")).json();
+    } catch { drcIndex = []; }
+  }
+  const rec = drcIndex.find((r) => r.name === name);
+  showDrc(rec);
+  if (!rec) return;
+  const out = {};
+  for (const who of ["ours", "align"]) {
+    const g = rec[who]?.geo;
+    if (!g) continue;
+    try { out[who] = await (await fetch("./routed/" + g)).json(); } catch {}
+  }
+  routed = out;
+  if (mode === "route") redraw();
+}
+
+function showDrc(rec) {
+  const dl = $("drcMetrics"), box = $("drcErrs");
+  dl.textContent = ""; box.textContent = "";
+  if (!rec) {
+    box.innerHTML = '<p style="margin:0;color:var(--muted)">배선 실행을 누르면 ' +
+      '브라우저가 ALIGN 배선기를 돌려 실제 DRC 결과를 여기에 채웁니다.</p>';
+    return;
+  }
+  const d = rec[drcWho];
+  if (!d) {
+    box.innerHTML = '<p style="margin:0;color:var(--muted)">결과 없음</p>';
+    return;
+  }
+  const n = d.errors.length;
+  const other = rec[drcWho === "ours" ? "align" : "ours"];
+  mkRow(dl, "GDS", d.gdsBytes
+    ? `${(d.gdsBytes / 1024).toFixed(0)}K <small>${d.gdsName}</small>` : "-",
+    d.gdsBytes ? "win" : "lose");
+  mkRow(dl, "배선 사각형", d.rects ? String(d.rects) : "-");
+  mkRow(dl, "DRC / LVS", `${n} <small>건</small>`, n === 0 ? "win" : "");
+  mkRow(dl, drcWho === "ours" ? "ALIGN 은" : "우리는",
+    other ? `${other.errors.length} <small>건</small>` : "-",
+    other && other.errors.length === n ? "win" : "");
+  if (!n) {
+    box.innerHTML = '<p style="margin:0;color:var(--good)">DRC/LVS 에러 없음.</p>';
+    return;
+  }
+  const kinds = new Map();
+  for (const e of d.errors) {
+    const k = e.text.split(" (")[0];
+    kinds.set(k, (kinds.get(k) ?? 0) + 1);
+  }
+  const ul = document.createElement("ul");
+  ul.className = "errlist";
+  ul.style.listStyle = "none"; ul.style.padding = "0";
+  for (const e of d.errors.slice(0, 8)) {
+    const li = document.createElement("li");
+    const k = e.text.split(" (")[0];
+    li.innerHTML = `<b>${k}</b> <span style="color:var(--faint)">${e.file}</span><br>` +
+      e.text.slice(k.length, k.length + 200).replace(/[<>]/g, "");
+    ul.append(li);
+  }
+  const head = document.createElement("p");
+  head.style.cssText = "margin:0 0 8px;color:var(--muted);font-size:12px";
+  head.textContent = [...kinds].map(([k, v]) => `${k} ${v}건`).join(" · ") +
+    (d.errors.length > 8 ? `  (앞 8건만)` : "");
+  box.append(head, ul);
+}
+
+for (const btn of $("drcWho").querySelectorAll("button"))
+  btn.addEventListener("click", () => {
+    drcWho = btn.dataset.who;
+    for (const b of $("drcWho").querySelectorAll("button"))
+      b.setAttribute("aria-pressed", String(b === btn));
+    showDrc(drcIndex?.find((r) => r.name === $("ex").value));
+    if (mode === "route") redraw();
+  });
+
+async function loadExample(name) {
+  if (name === "__upload__") return blobs.get(name);
+  if (!blobs.has(name)) {
+    setStatus("<span>앞단 출력 읽는 중…</span>");
+    const res = await fetch(`./data/${name}.json`);
+    if (!res.ok) throw new Error(`data/${name}.json → ${res.status}`);
+    blobs.set(name, await res.json());
+  }
+  return blobs.get(name);
+}
+
+function spawn() {
+  worker?.terminate();
+  worker = new Worker(new URL("./worker.mjs", import.meta.url), { type: "module" });
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "baseline") {
+      base = m.base; showInfo(m);
+      shown = "base"; $("cvTitle").textContent = "ALIGN 의 배치 (기준선)";
+      redraw();
+      setStatus(`<span class="dot"></span><span>계산 중 — 변이 조합을 훑는다</span>`);
+    } else if (m.type === "progress") {
+      setStatus(`<span class="dot"></span><span>${m.done}/${m.total} 후보 · ${m.t.toFixed(0)}s</span>`);
+    } else if (m.type === "frame") {
+      // 설정 하나가 끝날 때의 최선. 블록이 재배치되는 과정이 그대로 보인다.
+      frame = m;
+      if (!ours) $("cvTitle").textContent =
+        m.isTop ? "탐색 중 — 변이 배정과 영역을 훑는다" : `하위 모듈 배치 중 · ${m.module}`;
+      redraw();
+      setStatus(`<span class="dot"></span><span>${m.isTop ? "최상위" : m.module} ` +
+                `설정 ${m.i}/${m.total} · ${m.t.toFixed(0)}s</span>`);
+    } else if (m.type === "done") {
+      ours = m; frame = null; busy = false; $("run").disabled = false;
+      $("routeRun").disabled = false;
+      shown = "ours"; $("cvTitle").textContent = "우리 배치 (변이·반전·영역 모두 직접 선택)";
+      redraw(); showResult(m);
+      setStatus(`<span>완료 — ${m.secs.toFixed(1)}s · 설정 ${m.configs} 개</span>`);
+    } else if (m.type === "error") {
+      busy = false; $("run").disabled = false;
+      setStatus(`<span style="color:var(--copper)">실패: ${m.msg.split("\n")[0]}</span>`);
+      console.error(m.msg);
+    }
+  };
+  worker.onerror = (e) => {
+    busy = false; $("run").disabled = false;
+    setStatus(`<span style="color:var(--copper)">워커 오류: ${e.message}</span>`);
+  };
+}
+
+// --- 배선: 앞단과 같은 워커에서 ALIGN 배선기를 돌린다 ---
+//
+// oX 는 transformation 의 원점이다. 화면 좌표(x = cx - w/2)에서 되돌린다:
+//   oX = cx - sX*w/2  =>  sX=+1 이면 x,  sX=-1 이면 x + w
+async function runRoute() {
+  if (!ours || busy) return;
+  busy = true;
+  $("routeRun").disabled = true; $("run").disabled = true;
+  setStatus('<span class="dot"></span><span>배선 중 — ALIGN 배선기 (wasm)</span>');
+  const placement = {
+    bbox: [0, 0, Math.round(ours.bbox[2] - ours.bbox[0]),
+           Math.round(ours.bbox[3] - ours.bbox[1])],
+    instances: ours.rects.map((r) => ({
+      name: r.name, concrete: r.concrete,
+      oX: Math.round(r.sx > 0 ? r.x : r.x + r.w),
+      oY: Math.round(r.sy > 0 ? r.y : r.y + r.h),
+      sX: r.sx > 0 ? 1 : -1, sY: r.sy > 0 ? 1 : -1,
+    })),
+    subModules: ours.subModules ?? [],
+  };
+  try {
+    let m;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await ensureFront();
+        setStatus('<span class="dot"></span><span>배선 중 — ALIGN 배선기 (wasm)</span>');
+        m = await frontSend({ cmd: "route", placement }, "route", false);
+        break;
+      } catch (e) {
+        // 파이썬 인스턴스가 죽었으면 워커를 새로 띄우고 한 번만 다시 해본다.
+        if (!e.fatal || attempt) throw e;
+        setStatus('<span class="dot"></span><span>워커를 다시 띄웁니다</span>');
+      }
+    }
+    if (!m.ok) {
+      console.error("[배선 원문]\n" + m.error);   // 파이썬 역추적은 콘솔에 남긴다
+      const ls = (m.error || "").split("\n").filter((l) => l.trim());
+      throw new Error((ls[ls.length - 1] || "알 수 없는 오류").slice(0, 200));
+    }
+    showRouted(m);
+    setStatus(`<span>배선 완료 — DRC/LVS ${m.nerrors}건, ` +
+              `GDS ${(m.gds?.[0]?.bytes ?? 0) / 1024 | 0}K  (${m.secs.toFixed(1)}s)</span>`);
+  } catch (err) {
+    // 축소 wasm 배선기는 계층 설계의 두 번째 하위 모듈에서 멈춘다
+    // (null function — 함수 포인터가 비어 있다). 원인을 찾는 중이라,
+    // 그때까지는 무슨 일인지 분명히 말해준다.
+    const wasm = /null function|fatal|memory access/i.test(err.message);
+    setStatus(`<span style="color:var(--copper)">배선 실패 — ` +
+      (wasm ? "브라우저 배선기(축소 wasm)가 이 설계에서 멈췄습니다. " +
+              "계층 설계는 아직 네이티브 경로로만 끝까지 갑니다 — " +
+              "아래 내려받기의 GDS·DRC 가 그 결과입니다."
+            : err.message) + "</span>");
+  } finally {
+    busy = false; $("run").disabled = false; $("routeRun").disabled = false;
+  }
+}
+
+/** 브라우저가 방금 낸 배선 결과를 그림·DRC 표·다운로드에 꽂는다. */
+function showRouted(m) {
+  const errs = (m.errors ?? []).map((t) => ({ text: t, file: "" }));
+  const g = m.gds?.[0];
+  const rec = { name: "__upload__", ours: {
+    errors: errs, nerrors: m.nerrors ?? errs.length,
+    gdsBytes: g?.bytes ?? 0, gdsName: g?.name ?? "",
+    rects: m.geo?.terminals?.length ?? 0,
+  } };
+  // 올린 회로에는 ALIGN 기준선이 없다 — 우리 쪽만 본다.
+  drcWho = "ours";
+  for (const b of $("drcWho").querySelectorAll("button"))
+    b.setAttribute("aria-pressed", String(b.dataset.who === "ours"));
+  showDrc(rec);
+  routed = m.geo ? { ours: m.geo } : null;
+  uploadRouted(m);
+  setMode("route");
+}
+
+/** 방금 만든 산출물을 Blob 링크로 내려받게 한다 (서버에 없다). */
+let blobUrls = [];
+function uploadRouted(m) {
+  const bar = $("dlBar");
+  for (const u of blobUrls) URL.revokeObjectURL(u);
+  blobUrls = [];
+  bar.textContent = "";
+  const base = designName() || "design";
+  const add = (blob, file, label) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = file;
+    blobUrls.push(a.href);
+    a.innerHTML = `${label} <span>${(blob.size / 1024).toFixed(0)}K</span>`;
+    bar.append(a);
+  };
+  if (m.gdsB64) {
+    const bin = atob(m.gdsB64), u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    add(new Blob([u], { type: "application/octet-stream" }),
+        base + ".gds", "GDS (KLayout)");
+  }
+  add(new Blob([JSON.stringify(placementJson(), null, 1)], { type: "application/json" }),
+      base + ".place.json", "배치 (좌표·변이·반전)");
+  if (m.geo)
+    add(new Blob([JSON.stringify(m.geo)], { type: "application/json" }),
+        base + ".routed.json", "배선 기하 (레이어별)");
+  add(new Blob([(m.errors ?? []).join("\n") || "(에러 없음)\n"], { type: "text/plain" }),
+      base + ".errors.txt", "DRC/LVS 원문");
+}
+
+/** 내려받을 배치 JSON — emit.mjs 가 내는 것과 같은 모양. */
+function placementJson() {
+  return {
+    top: designName(), bbox: ours.bbox, grid: ours.grid ?? [80, 84],
+    instances: ours.rects.map((r) => ({
+      name: r.name, concrete: r.concrete,
+      oX: Math.round(r.sx > 0 ? r.x : r.x + r.w),
+      oY: Math.round(r.sy > 0 ? r.y : r.y + r.h),
+      sX: r.sx > 0 ? 1 : -1, sY: r.sy > 0 ? 1 : -1,
+      x: Math.round(r.x), y: Math.round(r.y),
+      w: Math.round(r.w), h: Math.round(r.h),
+    })),
+    quality: { area: ours.area, hpwl: ours.hpwl, overlap: ours.overlap,
+                resid: ours.resid, offgrid: ours.offgrid, orderBad: ours.orderBad },
+  };
+}
+$("routeRun").addEventListener("click", runRoute);
+
+async function run() {
+  if (busy) return;
+  busy = true; $("run").disabled = true; ours = null; frame = null;
+  $("subCard").hidden = true;
+  $("vt").innerHTML = '<tr><td colspan="5" class="dim">계산 중…</td></tr>';
+  try {
+    const name = $("ex").value;
+    const blob = await loadExample(name);
+    spawn();
+    worker.postMessage({ name, blob, batch: Number($("batch").value) });
+  } catch (err) {
+    busy = false; $("run").disabled = false;
+    setStatus(`<span style="color:var(--copper)">${err.message}</span>`);
+  }
+}
+
+// 쉴 때도 진짜 배치를 보여준다 — ALIGN 의 결과가 기준선이다.
+async function preview(name) {
+  try {
+    const blob = await loadExample(name);
+    spawnPreview(blob);
+  } catch (err) {
+    setStatus(`<span style="color:var(--copper)">${err.message}</span>`);
+  }
+}
+let pw = null;
+function spawnPreview(blob) {
+  // 기준선만 뽑으려고 워커를 쓴다 (계산이 아니라 파싱이라 금방 끝난다)
+  pw?.terminate();
+  pw = new Worker(new URL("./worker.mjs", import.meta.url), { type: "module" });
+  pw.onmessage = (e) => {
+    if (e.data.type !== "baseline") return;
+    base = e.data.base; ours = null; shown = "base";
+    $("cvTitle").textContent = "ALIGN 의 배치 (기준선)";
+    $("metrics").textContent = ""; $("subCard").hidden = true;
+    $("vt").innerHTML = '<tr><td colspan="5" class="dim">배치를 실행하면 채워집니다</td></tr>';
+    showInfo(e.data); redraw();
+    setStatus("<span>대기 — ALIGN 의 배치를 표시하고 있습니다</span>");
+    pw.terminate(); pw = null;
+  };
+  pw.postMessage({ blob, batch: 0, previewOnly: true });
+}
+
+const sel = $("ex");
+for (const [v, label] of EXAMPLES) {
+  const o = document.createElement("option");
+  o.value = v; o.textContent = label; sel.append(o);
+}
+sel.addEventListener("change", () => {
+  const v = sel.value;
+  if (v === "__upload__") {
+    base = null; ours = null; frame = null; routed = null;
+    showDrc(null); fillDownloads(null); redraw();
+    setStatus("<span>올린 설계 — 배치 실행을 누르세요</span>");
+    return;
+  }
+  preview(v); loadRouted(v); fillDownloads(v);
+});
+$("run").addEventListener("click", run);
+addEventListener("resize", () => redraw());
+preview(EXAMPLES[0][0]);
+loadRouted(EXAMPLES[0][0]);
+fillDownloads(EXAMPLES[0][0]);
+</script>

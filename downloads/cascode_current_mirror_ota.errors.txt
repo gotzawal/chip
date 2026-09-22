@@ -1,0 +1,8 @@
+# CASCODED_CMC_NMOS_59476726_PG0_0.errors
+DIFFERENT WIDTH ('Rectangles on layer Rvt with the same 2x centerline 1134 but different widths {420, 588}:', ([1, 3], [([200, 357, 600, 777], None, 'drawing', False), ([2280, 357, 2680, 777], None, 'drawing', False), ([1000, 273, 1240, 861], None, 'drawing', False), ([1640, 273, 1880, 861], None, 'drawing', False)]))
+DIFFERENT WIDTH ('Rectangles on layer Rvt with the same 2x centerline 1134 but different widths {420, 588}:', ([1, 3], [([200, 357, 600, 777], None, 'drawing', False), ([2280, 357, 2680, 777], None, 'drawing', False), ([1000, 273, 1240, 861], None, 'drawing', False), ([1640, 273, 1880, 861], None, 'drawing', False)]))
+
+# CASCODE_CURRENT_MIRROR_OTA_0.errors
+DIFFERENT WIDTH ('Rectangles on layer Rvt with the same 2x centerline 10878 but different widths {420, 588}:', ([1, 3], [([200, 5229, 600, 5649], None, 'drawing', False), ([1000, 5145, 1240, 5733], None, 'drawing', False), ([1640, 5145, 1880, 5733], None, 'drawing', False), ([2280, 5229, 2680, 5649], None, 'drawing', False)]))
+DIFFERENT WIDTH ('Rectangles on layer Rvt with the same 2x centerline 10878 but different widths {420, 588}:', ([1, 3], [([200, 5229, 600, 5649], None, 'drawing', False), ([1000, 5145, 1240, 5733], None, 'drawing', False), ([1640, 5145, 1880, 5733], None, 'drawing', False), ([2280, 5229, 2680, 5649], None, 'drawing', False)]))
+
