@@ -1,11 +1,13 @@
-/** 캔버스 보기 — 확대/이동, 세 가지 모드, 중간 과정 프레임.
+/** 캔버스 보기 — 확대/이동, 패널, 배선 레이어.
  *
  *  좌표계가 둘이다.
  *    레이아웃 좌표 : 템플릿 단위 (telescopic_ota 는 1440 x 11760)
  *    화면 좌표     : 픽셀
- *  fit() 이 레이아웃을 패널에 꽉 채우는 배율을 잡고, view {s, tx, ty} 가 그 위에
+ *  fitOf() 가 레이아웃을 패널에 꽉 채우는 배율을 잡고, view {s, tx, ty} 가 그 위에
  *  사용자의 확대/이동을 얹는다. 나란히 보기에서는 두 패널이 **같은 배율**을
- *  쓴다 — 안 그러면 크기 비교가 안 된다.
+ *  써야 한다 — 안 그러면 크기 비교가 안 된다. 그래서 그릴 때 맞출 상자를
+ *  opt.box 로 따로 받는다: 두 패널에 같은 상자(둘의 합집합)를 주면 배율이 같아지고,
+ *  각자의 bbox 는 테두리로만 그려진다.
  */
 
 export function makeView() {
@@ -37,7 +39,7 @@ export function mapper(fit, view, panel) {
 
 /** 패널 하나를 그린다. */
 export function drawPanel(ctx, panel, data, opt) {
-  const { pal, view, label, accent, axes = [], dim = false } = opt;
+  const { pal, view, label, accent, axes = [], box = null, empty = null } = opt;
   ctx.save();
   ctx.beginPath();
   ctx.rect(panel.x, panel.y, panel.w, panel.h);
@@ -45,9 +47,13 @@ export function drawPanel(ctx, panel, data, opt) {
 
   ctx.fillStyle = pal.sunk;
   ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
-  if (!data?.rects?.length) { ctx.restore(); return null; }
+  if (!data?.rects?.length) {
+    if (empty) drawEmpty(ctx, panel, pal, empty);
+    ctx.restore();
+    return null;
+  }
 
-  const fit = fitOf(data.bbox, panel);
+  const fit = fitOf(box ?? data.bbox, panel);
   const m = mapper(fit, view, panel);
   const [x0, y0, x1, y1] = data.bbox;
 
@@ -74,15 +80,14 @@ export function drawPanel(ctx, panel, data, opt) {
   ctx.textBaseline = "middle";
   for (const r of data.rects) {
     const px = m.X(r.x), py = m.Y(r.y + r.h), pw = r.w * m.S, ph = r.h * m.S;
-    ctx.globalAlpha = dim ? 0.3 : accent ? 0.5 : 0.78;
+    ctx.globalAlpha = accent ? 0.55 : 0.82;
     ctx.fillStyle = pal.block;
     ctx.fillRect(px, py, pw, ph);
-    ctx.globalAlpha = dim ? 0.5 : 1;
+    ctx.globalAlpha = 1;
     ctx.strokeStyle = accent ? pal.ours : pal.blockLine;
     ctx.lineWidth = accent ? 1.5 : 1;
     ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
-    ctx.globalAlpha = 1;
-    if (pw > 40 && ph > 14 && !dim) {
+    if (pw > 34 && ph > 13) {
       ctx.fillStyle = pal.ink;
       const t = r.name.replace(/^X_?/, "");
       ctx.fillText(t.length > 14 ? t.slice(0, 13) + "…" : t, px + pw / 2, py + ph / 2);
@@ -99,6 +104,23 @@ export function drawPanel(ctx, panel, data, opt) {
   }
   ctx.restore();
   return { fit, m };
+}
+
+/** 아직 그릴 것이 없는 패널 — 빈 상자 대신 무엇을 눌러야 하는지 적는다. */
+function drawEmpty(ctx, panel, pal, lines) {
+  const ls = Array.isArray(lines) ? lines : [lines];
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const cx = panel.x + panel.w / 2, cy = panel.y + panel.h / 2;
+  ls.forEach((t, i) => {
+    ctx.font = i === 0
+      ? '500 12px "IBM Plex Mono", ui-monospace, monospace'
+      : '400 11px "IBM Plex Mono", ui-monospace, monospace';
+    ctx.fillStyle = i === 0 ? pal.faint : pal.hair;
+    ctx.fillText(t, cx, cy + (i - (ls.length - 1) / 2) * 18);
+  });
+  ctx.restore();
 }
 
 /** 커서를 고정한 채 확대한다. */
@@ -157,16 +179,20 @@ const GROUP_OF = new Map(LAYERS.map((l) => [l.key, l.group]));
 
 /** 배선된 기하를 그린다. on 은 켜진 묶음의 Set. */
 export function drawRouted(ctx, panel, geo, opt) {
-  const { pal, view, on, label } = opt;
+  const { pal, view, on, label, box = null, empty = null } = opt;
   ctx.save();
   ctx.beginPath();
   ctx.rect(panel.x, panel.y, panel.w, panel.h);
   ctx.clip();
   ctx.fillStyle = pal.sunk;
   ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
-  if (!geo?.terminals?.length) { ctx.restore(); return; }
+  if (!geo?.terminals?.length) {
+    if (empty) drawEmpty(ctx, panel, pal, empty);
+    ctx.restore();
+    return;
+  }
 
-  const fit = fitOf(geo.bbox, panel);
+  const fit = fitOf(box ?? geo.bbox, panel);
   const m = mapper(fit, view, panel);
 
   // 아래층부터 그려야 위층이 덮는다. 묶음 순서가 곧 층 순서다.
@@ -199,7 +225,7 @@ export function drawRouted(ctx, panel, geo, opt) {
     ctx.font = '500 10px "IBM Plex Mono", ui-monospace, monospace';
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillStyle = pal.faint;
-    ctx.fillText(`${label} · ${drawn}/${geo.terminals.length} 사각형`, panel.x + 10, panel.y + 8);
+    ctx.fillText(`${label} · ${drawn}/${geo.terminals.length}`, panel.x + 10, panel.y + 8);
   }
   ctx.restore();
 }
