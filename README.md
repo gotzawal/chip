@@ -116,6 +116,51 @@ ALIGN 앞단 출력을 직접 올려도 된다 (그때는 배치까지만 된다
 `{topology, primitives, templates}` 로 묶은 JSON 한 파일도 받는다
 (`data/*.json` 이 그 형식이다).
 
+## 예제 더 넣기
+
+**쓰기만 할 거면 예제로 만들 필요가 없다** — 회로 올리기에 `.sp` 를 던지면
+그 자리에서 돈다. 예제는 "미리 올려둔 회로" 일 뿐이고, 목록은
+`data/index.json` 에서 읽는다.
+
+```json
+[ { "name": "my_ota", "label": "My OTA" }, ... ]
+```
+
+### 1. 브라우저만으로 (네이티브 ALIGN 없이)
+
+1. `.sp` 를 올린다. 앞단이 브라우저에서 한 번 돈다.
+2. 올리기 칸 옆의 **예제로 저장** 을 누른다 — `<이름>.json` 이 떨어진다.
+3. 그 파일을 `data/` 에 넣고 `data/index.json` 에 한 줄 더한다.
+
+ALIGN 기준선(`place`)은 안 들어간다 — 브라우저 앞단은 배치를 안 하기 때문이다.
+그 예제는 **왼쪽 패널이 빈 채로** 돌고, 오른쪽에 우리 배치만 나온다.
+면적/HPWL 의 "ALIGN 대비" 칸도 비고, 나머지(겹침·대칭 잔차·격자)는 그대로 나온다.
+
+### 2. 네이티브 ALIGN 이 있으면 (기준선까지)
+
+```bash
+source symplace/env.sh
+./symplace/scripts/verify.sh my_ota            # 앞단 -> 배치 -> 배선까지
+node symplace/web/placer/pack-example.mjs      "$ALIGN_WORK/my_ota" my_ota --label "My OTA"
+```
+
+`pack-example.mjs` 는 ALIGN 작업 디렉터리(또는 `stage-design.sh` 가 펼쳐 둔
+폴더)를 읽어 `data/<이름>.json` 한 덩이로 묶고 `data/index.json` 까지 고친다.
+`3_pnr/Results` 의 `scaled_placement_verilog` 를 찾으면 **비교 기준선**으로
+같이 담는다. terminals 는 `netType == "pin"` 만 남긴다 (예제 하나가 84K -> 13K).
+
+지금 저장소의 예제 다섯 개는 이 스크립트로 다시 만들면 **바이트까지 같다.**
+
+### 3. 배선 버튼까지 되게 하려면
+
+`netlists/<이름>.sp` (제약이 있으면 `<이름>.const.json` 도) 를 같이 넣는다.
+배선 버튼은 앞단 결과가 워커 안에 있어야 도는데, 예제를 고른 경우 이 파일로
+앞단을 한 번 돌린 뒤 배선한다.
+
+ALIGN 자신의 배선을 비교로 깔고 싶으면 `routed/<이름>.align.json` 과
+`routed/index.json` 의 한 줄이 더 필요하다 (`symplace/scripts/route/stage-routed.sh`
+가 만드는 모양이다). 없으면 배선 보기의 왼쪽만 빈다.
+
 ## 배치 품질 (ALIGN 대비, 시작점 96, 무게 2, node 단일 스레드)
 
 | 예제 | 면적 | HPWL | 시간 | 변이 |
@@ -417,6 +462,7 @@ symplace/patches/           ALIGN 배선 단계 메모리 8.4GB -> 1.45GB 패치
 symplace/web/placer/test/   검사 — 파이썬 대조, 심플렉스 검증, legalize 성질 검사
 symplace/web/placer/fixtures/  파이썬이 뽑아둔 정답 고정값 + 예제 5 개 앞단 출력
 symplace/web/placer/emit.mjs   배치 -> place.json (네이티브 배선기로 넘길 때)
+symplace/web/placer/pack-example.mjs  앞단 출력 폴더 -> data/<이름>.json (예제 넣기)
 ```
 
 배치기 본체(`src/*.mjs`)는 **이 저장소 루트의 것 하나뿐이다.** 사이트가 그대로

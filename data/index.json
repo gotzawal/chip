@@ -1,1 +1,27 @@
-[{"name":"cascode_current_mirror_ota","bytes":25796},{"name":"current_mirror_ota","bytes":8994},{"name":"five_transistor_ota","bytes":12220},{"name":"high_speed_comparator","bytes":25493},{"name":"telescopic_ota","bytes":13256}]
+[
+ {
+  "name": "telescopic_ota",
+  "label": "Telescopic OTA",
+  "bytes": 13256
+ },
+ {
+  "name": "current_mirror_ota",
+  "label": "Current-Mirror OTA",
+  "bytes": 8994
+ },
+ {
+  "name": "five_transistor_ota",
+  "label": "5-Transistor OTA",
+  "bytes": 12220
+ },
+ {
+  "name": "cascode_current_mirror_ota",
+  "label": "Cascode Current-Mirror OTA",
+  "bytes": 25796
+ },
+ {
+  "name": "high_speed_comparator",
+  "label": "High-Speed Comparator",
+  "bytes": 25493
+ }
+]
