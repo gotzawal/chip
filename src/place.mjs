@@ -32,20 +32,38 @@ import { legalize, exactOverlap } from "./legalize.mjs";
  */
 export function placeDesign(input, {
   batch = 96, iters = 600, seed = 0, M = 48,
-  slack = 1.25, aspects = null, maxConfigs = 64,
+  slack = 1.25, aspects = null, maxConfigs = null,
   // null 이면 설계 자신에서 뽑는다 (multiStartVariants 의 설명 참고).
   // ALIGN 과 견주려고 그쪽 값을 넣어도 되지만, 그건 벤치마크용이지
   // 배치에 필요한 정보가 아니다.
   refArea = null, refHpwl = null,
-  // 면적 대 배선의 무게. 1 이면 면적/refArea 와 HPWL/refHpwl 을 그대로 더한다.
-  // 기본값에서 배선 항이 0.5 쯤에서 놀아 면적이 조금 앞선다 — 아날로그에서
-  // 면적이 1차 비용이라 그쪽이 맞다고 보고 두었다. 배선을 더 보고 싶으면 올려라.
-  hpwlWeight = 1,
+  // 면적 대 배선의 무게. 점수는 `면적/refArea + hpwlWeight x HPWL/refHpwl`.
+  //
+  // **1 이 아니라 2 가 기본이다.** refHpwl = sqrt(refArea) x 넷수 로 두면 배선
+  // 항이 0.5 언저리에서 놀아, 무게 1 에서는 면적이 배선을 2:1 로 눌렀다.
+  // 그래서 면적을 조금 얻고 배선을 크게 내주는 변이를 계속 골랐다. 실측:
+  //
+  //     예제                        무게 1          무게 2
+  //     five_transistor_ota         0.862 / 1.404   1.077 / 0.803
+  //     cascode_current_mirror_ota  0.988 / 1.348   0.988 / 1.156
+  //     current_mirror_ota          1.000 / 1.000   1.000 / 1.000
+  //     telescopic_ota              씨앗 4 개에서 둘 다 3/4 는 1.000 / 0.987
+  //
+  // telescopic 은 무게가 아니라 **씨앗 운**이다 (양쪽 다 네 번 중 한 번은
+  // 나쁜 해에 빠진다). 나머지 둘에서는 무게 2 가 분명히 낫다.
+  // 면적만 보고 싶으면 1 로 내리면 된다.
+  hpwlWeight = 2,
+  // 연속 단계의 저울. calibrate 가 lam 을 "밀도 기울기 = lamRatio x 배선
+  // 기울기" 로 잡는다. hpwlWeight 가 **다 나온 해 중에서 고르는** 저울이라면
+  // 이건 **어떤 해가 나오는지**를 바꾸는 저울이다.
+  lamRatio = 1.0,
   // PDK 금속 pitch. [qx, qy] 를 주면 블록 원점이 그 배수가 되도록 legalize 가
   // 정수 제약으로 푼다. ALIGN 배선기가 이걸 요구한다 (FinFET14nm Mock: 80, 84).
   // null 이면 격자 없이 — 배선기로 넘길 수 없다.
   grid = null,
   flips = true, maxTries = 0, onProgress = null,
+  // legalize 가 실패하면 이 여유들로 다시 풀어본다 (아래 설명).
+  retrySlack = [3, 6],
   // 설정(변이 배정 x 영역) 하나가 끝날 때마다 불린다. 화면에 중간 과정을
   // 보여주려고 뚫어뒀다 — 좌표가 들어 있어 그대로 그릴 수 있다.
   onConfig = null,
@@ -57,6 +75,8 @@ export function placeDesign(input, {
   const groups = variantGroups(design);
   const res = multiStartVariants(design, groups, {
     batch, iters, seed, M, slack, aspects, maxConfigs, refArea, refHpwl,
+    // 후보를 고르는 저울과 legalize 뒤 저울을 같게 둔다.
+    hpwlWeight, lamRatio,
     onProgress, onConfig,
   });
 
@@ -82,6 +102,12 @@ export function placeDesign(input, {
   // (NMOS_4T_85599263 의 X1_Y16 12.79M vs X8_Y2 6.21M), 최소값 정규화는 그
   // 차이를 후보 집합 안에서만 재서 놓치고, 나쁜 하위 모듈이 위층 입력이 된다.
   const rA = res.refArea, rW = res.refHpwl;
+  // 연속 단계가 얼마나 "무르게" 풀었는지. lamRatio 를 낮추면 넷이 더 세게
+  // 당겨 겹침이 많이 남고, 높이면 퍼뜨려 겹침이 적게 남는다. legalize 가
+  // 어차피 0 으로 만들지만, 남은 양이 많을수록 legalize 가 배치를 더 많이
+  // 흔든다 — 이 값이 그 저울의 눈금이다.
+  const ovs = res.candidates.map((c) => c.overlap).sort((a, b) => a - b);
+  const medOverlap = ovs.length ? ovs[ovs.length >> 1] : 0;
   const plan = flipPlan(design, groups);
   // Order 제약이 있으면 그 쌍의 분리 방향을 박는다 (부등식이라 영공간엔 못 넣는다).
   const forced = res.candidates.length
@@ -115,7 +141,11 @@ export function placeDesign(input, {
   }
   for (const c of res.candidates) push(c);
 
-  let tried = 0, fail = 0, best = null;
+  let tried = 0, fail = 0, rescued = 0, best = null;
+  // 왜 실패했는지 세어둔다. "legalize 12/96 성공" 만으로는 고칠 데를 못 찾는다 —
+  // 방향 조합이 안 맞는 것(INFEASIBLE)과 격자 정수를 못 맞춘 것(GRID_*)은
+  // 처방이 다르다.
+  const failBy = new Map();
   // 모양(종횡비)별로도 최선을 하나씩 남긴다. 계층에서 상위 모듈이 고를 수 있게
   // **여러 모양**을 내보내기 위해서다 — 하위 모듈은 면적이 같아도 모양이 다르면
   // 위층에서 전혀 다른 레이아웃이 된다. ALIGN 도 하위 모듈을 여러 개 만들어
@@ -131,10 +161,29 @@ export function placeDesign(input, {
     const anchors = grid
       ? [Array.from(c.problem.w, (v) => v / 2), Array.from(c.problem.h, (v) => v / 2)]
       : null;
-    const r = legalize({ z0: c.z0, N: c.N, n: c.problem.n, w: c.problem.w,
-                         h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region,
-                         forced, grid, anchors });
-    if (r.status !== "OPTIMAL") { fail++; continue; }
+    // legalize 가 INFEASIBLE 이면 **여유 영역을 넓혀 다시 푼다.**
+    //
+    // 영역 제약은 X_i in [rx0+w/2, rx1-w/2] 라 slack 을 키우면 실행가능
+    // 집합이 **커지기만 한다** — 되던 것이 안 되는 일은 없다. 목적함수에
+    // 반둘레가 들어 있어 넓혀줘도 알아서 좁게 푼다.
+    //
+    // 왜 필요한가: 계층 설계에서 실패가 후보의 대부분이었다 (hsc 120/144,
+    // cascode 28/34 — 전부 INFEASIBLE). 실패한 후보는 그냥 버려지므로
+    // "변이를 고른다"가 사실상 살아남은 스무 개 안에서만 일어났다.
+    const args = { z0: c.z0, N: c.N, n: c.problem.n, w: c.problem.w,
+                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region,
+                   forced, grid, anchors };
+    let r = legalize(args);
+    for (const sl of retrySlack) {
+      if (r.status === "OPTIMAL" || r.status === "NODIRECTION") break;
+      r = legalize({ ...args, slack: sl });
+      if (r.status === "OPTIMAL") rescued++;
+    }
+    if (r.status !== "OPTIMAL") {
+      fail++;
+      failBy.set(r.status, (failBy.get(r.status) ?? 0) + 1);
+      continue;
+    }
     // 반전까지 정한 뒤에 잰다. 반전은 좌표를 안 건드리고 배선길이만 바꾸니
     // 여기서 정해도 늦지 않고, 정하지 않고 재면 내보낼 것과 다른 값으로 고르게 된다.
     const fr = flips ? refineFlips(c.problem, plan, r.cx, r.cy) : null;
@@ -152,8 +201,12 @@ export function placeDesign(input, {
   }
 
   if (!best)
-    return { ok: false, reason: "legalize 가 모든 후보에서 실패했다",
-             tried, legalizeFail: fail, design, groups, candidates: res.candidates };
+    return { ok: false,
+             reason: `legalize 가 ${tried} 후보에서 모두 실패했다 ` +
+                     `(${[...failBy].map(([k, v]) => `${k} ${v}`).join(", ")})`,
+             tried, legalizeFail: fail, legalizeRescued: rescued,
+             legalizeFailBy: Object.fromEntries(failBy),
+             design, groups, candidates: res.candidates };
 
   /** 후보 하나를 바깥에 내보낼 모양으로 편다. */
   const shape = (k) => {
@@ -186,9 +239,12 @@ export function placeDesign(input, {
     overlap: ov, flipBits: fr ? fr.bits : null,
     grid, gridOff: grid ? gridOffgrid(P, lg.cx, lg.cy, sx, sy, grid) : null,
     assignment: picked.assignment, region: picked.region,
-    tried, legalizeFail: fail, legalScore: best.sc,
+    tried, legalizeFail: fail, legalizeFailBy: Object.fromEntries(failBy),
+    legalizeRescued: rescued,
+    legalScore: best.sc,
     alternatives: alts,
     configs: res.configs, assignments: res.assignments,
+    starts: res.starts, rounds: res.rounds, medOverlap,
     totalAssignments: res.totalAssignments,
     design, groups, problem: P, candidates: res.candidates,
   };
@@ -345,13 +401,21 @@ export function synthesizeTemplate(design, result, grid = null) {
  *  변이 선택 기계가 그대로 고른다. ALIGN 도 같은 구조다 —
  *  PRIMITIVE_38447703_PG0_0 ~ _PG0_3 을 만들어 두고 상위가 고른다.
  */
+/** 하위 모듈을 몇 가지 모양으로 상위에 올릴지.
+ *
+ *  job.mjs 가 배선용 덤프를 만들 때 **같은 수**로 spreadShapes 를 다시 돌려
+ *  `__v{k}` 가 어느 후보였는지 되찾는다. 두 곳이 어긋나면 배선기에 엉뚱한
+ *  모양이 간다. 그래서 상수를 한 곳에 둔다.
+ */
+export const SUB_VARIANTS = 3;
+
 export function placeHierarchy({ topology, primitives, templates }, opts = {}) {
   // subBatch: 하위 모듈에만 주는 시작점 예산. 하위 모듈은 블록이 두세 개라
   // 설정 수가 적고 한 번이 싸다 — 같은 예산을 줘도 최상위보다 훨씬 깊이 판다.
   // 그리고 하위의 모양이 곧 상위의 입력이라 여기 쓰는 돈이 제일 남는다.
   // 실측(hsc): batch 96 -> 1.053/1.333, batch 288 -> 1.000/1.000 인데
   // 최상위는 설정이 192 개라 둘 다 설정당 1 개다. 좋아진 건 하위 쪽이다.
-  const { subVariants = 3, subBatch = null, ...rest } = opts;
+  const { subVariants = SUB_VARIANTS, subBatch = null, ...rest } = opts;
   const order = moduleOrder(topology);
   const prim = { ...primitives };
   const tpl = { ...templates };
@@ -366,7 +430,8 @@ export function placeHierarchy({ topology, primitives, templates }, opts = {}) {
     const opt = isTop || !subBatch ? { ...rest } : { ...rest, batch: subBatch };
     // 중간 과정 콜백에 모듈 이름을 얹는다 (계층이면 어느 층인지 알아야 한다)
     if (rest.onConfig)
-      opt.onConfig = (i, total, best) => rest.onConfig(name, isTop, i, total, best);
+      opt.onConfig = (i, total, best, phase) =>
+        rest.onConfig(name, isTop, i, total, best, phase);
     const r = placeDesign({ design }, opt);
     if (!r.ok) return { ok: false, module: name, reason: r.reason, detail: r };
     results.set(name, r);

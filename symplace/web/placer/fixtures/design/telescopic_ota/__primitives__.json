@@ -1,0 +1,234 @@
+{
+  "SCM_NMOS_57015810_X1_Y2": {
+    "value": "8",
+    "x_cells": 1,
+    "y_cells": 2,
+    "parameters": {
+      "M1": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "4",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "M2": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "4",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "model": "NMOS"
+    },
+    "vt_type": "RVT",
+    "abstract_template_name": "SCM_NMOS_57015810",
+    "concrete_template_name": "SCM_NMOS_57015810_X1_Y2"
+  },
+  "SCM_NMOS_57015810_X2_Y1": {
+    "value": "8",
+    "x_cells": 2,
+    "y_cells": 1,
+    "parameters": {
+      "M1": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "4",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "M2": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "4",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "model": "NMOS"
+    },
+    "vt_type": "RVT",
+    "abstract_template_name": "SCM_NMOS_57015810",
+    "concrete_template_name": "SCM_NMOS_57015810_X2_Y1"
+  },
+  "CMC_PMOS_51983143_X1_Y2": {
+    "value": "8",
+    "x_cells": 1,
+    "y_cells": 2,
+    "parameters": {
+      "M1": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "4",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "M2": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "4",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "model": "PMOS"
+    },
+    "vt_type": "RVT",
+    "abstract_template_name": "CMC_PMOS_51983143",
+    "concrete_template_name": "CMC_PMOS_51983143_X1_Y2"
+  },
+  "CMC_PMOS_51983143_X2_Y1": {
+    "value": "8",
+    "x_cells": 2,
+    "y_cells": 1,
+    "parameters": {
+      "M1": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "4",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "M2": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "4",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "model": "PMOS"
+    },
+    "vt_type": "RVT",
+    "abstract_template_name": "CMC_PMOS_51983143",
+    "concrete_template_name": "CMC_PMOS_51983143_X2_Y1"
+  },
+  "CMC_S_NMOS_B_73061948_X1_Y1": {
+    "value": "5",
+    "x_cells": 1,
+    "y_cells": 1,
+    "parameters": {
+      "M1": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "5",
+        "NF": "2",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "M2": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "5",
+        "NF": "2",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "model": "NMOS"
+    },
+    "vt_type": "RVT",
+    "abstract_template_name": "CMC_S_NMOS_B_73061948",
+    "concrete_template_name": "CMC_S_NMOS_B_73061948_X1_Y1"
+  },
+  "CMC_S_PMOS_B_41456065_X1_Y1": {
+    "value": "8",
+    "x_cells": 1,
+    "y_cells": 1,
+    "parameters": {
+      "M1": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "2",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "M2": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "8",
+        "NF": "2",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "model": "PMOS"
+    },
+    "vt_type": "RVT",
+    "abstract_template_name": "CMC_S_PMOS_B_41456065",
+    "concrete_template_name": "CMC_S_PMOS_B_41456065_X1_Y1"
+  },
+  "DP_NMOS_B_44742353_X3_Y1": {
+    "value": "12",
+    "x_cells": 3,
+    "y_cells": 1,
+    "parameters": {
+      "M1": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "12",
+        "NF": "6",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "M2": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "12",
+        "NF": "6",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "model": "NMOS"
+    },
+    "vt_type": "RVT",
+    "abstract_template_name": "DP_NMOS_B_44742353",
+    "concrete_template_name": "DP_NMOS_B_44742353_X3_Y1"
+  },
+  "DP_NMOS_B_44742353_X1_Y3": {
+    "value": "12",
+    "x_cells": 1,
+    "y_cells": 3,
+    "parameters": {
+      "M1": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "12",
+        "NF": "6",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "M2": {
+        "W": "2.7E-07",
+        "L": "2E-08",
+        "NFIN": "12",
+        "NF": "6",
+        "M": "1",
+        "PARALLEL": "1",
+        "STACK": "1"
+      },
+      "model": "NMOS"
+    },
+    "vt_type": "RVT",
+    "abstract_template_name": "DP_NMOS_B_44742353",
+    "concrete_template_name": "DP_NMOS_B_44742353_X1_Y3"
+  }
+}

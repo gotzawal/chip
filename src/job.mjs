@@ -18,10 +18,11 @@ import { readDesign, topIndex, moduleOrder, variantGroups,
          countAssignments } from "./design.mjs";
 import { baseline, axes } from "./baseline.mjs";
 import { placeHierarchy, symmetryResidual, orderViolations,
-         spreadShapes } from "./place.mjs";
+         spreadShapes, SUB_VARIANTS } from "./place.mjs";
 
 export async function runJob(data, post) {
-  const { name, blob, batch, previewOnly, grid = [80, 84] } = data;
+  const { name, blob, batch, previewOnly, grid = [80, 84],
+          hpwlWeight, lamRatio } = data;
   try {
     const topName = blob.topology.modules[topIndex(blob.topology)].name;
     const order = moduleOrder(blob.topology);
@@ -38,6 +39,8 @@ export async function runJob(data, post) {
     let seen = 0, frames = 0, lastFrame = 0;
     const r = placeHierarchy(blob, {
       batch, iters: 600, seed: 1, grid,
+      ...(hpwlWeight ? { hpwlWeight } : {}),
+      ...(lamRatio ? { lamRatio } : {}),
       onProgress: (done, total) => {
         seen++;
         if (seen % 8 === 0)
@@ -46,7 +49,7 @@ export async function runJob(data, post) {
       },
       // 설정 하나가 끝날 때마다 그때의 최선을 보낸다. 너무 자주 보내면
       // 메인 스레드가 그리느라 밀리므로 120ms 간격으로 솎는다.
-      onConfig: (mod, isTop, i, total, best) => {
+      onConfig: (mod, isTop, i, total, best, phase) => {
         if (!best || !best.cx) return;
         const now = performance.now();
         if (now - lastFrame < 120 && i < total) return;
@@ -55,6 +58,7 @@ export async function runJob(data, post) {
         const pr = best.problem;
         post({
           type: "frame", module: mod, isTop, i, total, frame: frames,
+          phase: phase ?? "설정",
           t: (now - t0) / 1000,
           score: best.score,
           bbox: [0, 0, best.box[2] - best.box[0], best.box[3] - best.box[1]],
@@ -85,14 +89,14 @@ export async function runJob(data, post) {
     // 하위 모듈의 **실제 배치**. 배선기는 최상위만으로는 못 돈다 — 덤프의
     // 최상위 대안이 하위 모듈의 module 항목(bbox + 인스턴스)까지 품어야 한다.
     // emit.mjs 와 같은 규칙으로 고른다: __v{k} 는 alternatives[k] 가 아니라
-    // spreadShapes(alternatives, 3)[k] 다.
+    // spreadShapes(alternatives, SUB_VARIANTS)[k] 다 (place.mjs 와 같은 상수).
     const subModules = [];
     for (const [nm, m] of r.modules) {
       if (nm === topName) continue;
       const used = [...new Set(top.concrete.filter(
         (c) => c === nm || c.startsWith(nm + "__v")))];
       for (const cn of used) {
-        const picks = spreadShapes(m.alternatives ?? [m], 3);
+        const picks = spreadShapes(m.alternatives ?? [m], SUB_VARIANTS);
         const vi = cn.includes("__v") ? Number(cn.split("__v")[1]) : 0;
         const pl = picks[Math.min(vi, picks.length - 1)] ?? m;
         const pp = pl.problem, [sx0, sy0] = [pl.box[0], pl.box[1]];
@@ -128,7 +132,10 @@ export async function runJob(data, post) {
       nOrder: (P.constraints ?? []).filter((c) => c.constraint === "Order").length,
       axes: axes(P, top.cx, top.cy).map((a) => ({ ...a, at: a.at - (a.vert ? ox0 : oy0) })),
       combos: top.totalAssignments, configs: top.configs,
+      hpwlWeight, lamRatio, medOverlap: top.medOverlap,
+      starts: top.starts, rounds: top.rounds,
       tried: top.tried, legalFail: top.legalizeFail,
+      legalFailBy: top.legalizeFailBy, legalRescued: top.legalizeRescued,
       hpwlBeforeFlip: top.hpwlBeforeFlip,
       subs, subModules,
       secs: (performance.now() - t0) / 1000,

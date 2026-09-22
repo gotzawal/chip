@@ -10,8 +10,8 @@
  */
 import { area } from "./energy.mjs";
 import { exactOverlap } from "./legalize.mjs";
-import { buildProblem, countAssignments, enumerateAssignments, makeObjective,
-         regionCandidates, sampleAssignment } from "./design.mjs";
+import { buildProblem, countAssignments, enumerateAssignments, flipPlan,
+         makeObjective, regionCandidates, sampleAssignment } from "./design.mjs";
 
 /** 결정론적 난수 (mulberry32). 시드를 주면 파이썬 쪽과 별개로 재현된다. */
 export function rng(seed = 0) {
@@ -45,10 +45,16 @@ export function adamState(n) {
  *  state 를 주고받으면 여러 번 나눠 불러도 한 번에 돌린 것과 같다.
  */
 export function adam(obj, theta, { iters = 1200, lr, lamGrow = 1.3, muGrow = 1.25,
-                                   calibrate = true, state = null, onStep = null } = {}) {
+                                   calibrate = true, lamRatio = 1.0, muRatio = 4.0,
+                                   state = null, onStep = null } = {}) {
   const n = theta.length;
   const st = state ?? adamState(n);
-  if (calibrate) obj.calibrate(theta);
+  // lamRatio 는 **연속 단계의 저울**이다. calibrate 가 lam 을
+  // "밀도 기울기 = lamRatio x 배선 기울기" 가 되게 잡으므로,
+  //   낮추면  넷이 더 세게 당긴다 -> 배선은 짧고 겹침은 많이 남는다
+  //   높이면  더 퍼뜨린다        -> 겹침은 적고 배선은 길어진다
+  // legalize 가 겹침을 어차피 0 으로 만들므로 "얼마나 무른 유체로 둘 것인가" 다.
+  if (calibrate) obj.calibrate(theta, lamRatio, muRatio);
   const b1 = 0.9, b2 = 0.999, eps = 1e-8;
   let last = null;
   for (let k = 0; k < iters; k++) {
@@ -123,7 +129,7 @@ export function hpwl(cx, cy, pinInst, pinOff, pinNet, nNet, sx, sy) {
  */
 export function multiStart(obj, {
   batch = 64, iters = 800, seed = 0, lamGrow = 1.3, muGrow = 1.25,
-  refArea = 1, refHpwl = 1, onProgress = null,
+  lamRatio = 1.0, refArea = 1, refHpwl = 1, onProgress = null,
 } = {}) {
   const rand = rng(seed);
   const span = Math.max(obj.region[2] - obj.region[0], obj.region[3] - obj.region[1]);
@@ -133,7 +139,7 @@ export function multiStart(obj, {
   for (let b = 0; b < batch; b++) {
     obj.lam = lam0; obj.mu = mu0;
     const theta = initTheta(obj, rand);
-    adam(obj, theta, { iters, lr, lamGrow, muGrow });
+    adam(obj, theta, { iters, lr, lamGrow, muGrow, lamRatio });
     const r = obj.eval(theta);
     const ea = exactArea(r.cx, r.cy, obj.w, obj.h);
     const of = obj.dens.overflow(r.cx, r.cy, obj.w, obj.h);
@@ -208,21 +214,39 @@ export function multiStart(obj, {
 export function multiStartVariants(design, groups, {
   batch = 64, iters = 800, seed = 0, M = 48,
   lamGrow = 1.3, muGrow = 1.25,
+  // 연속 단계의 저울 (adam 의 설명 참고). 1 이면 시작점에서 밀도와 배선의
+  // 기울기가 같다. 낮추면 배선 쪽으로, 높이면 퍼뜨리는 쪽으로 기운다.
+  lamRatio = 1.0,
   slack = 1.25, aspects = null,
-  maxConfigs = 64, refArea = null, refHpwl = null,
+  // null 이면 예산에서 정한다 (아래). 배정이 이보다 많으면 전수가 아니라 추첨이다.
+  maxConfigs = null, refArea = null, refHpwl = null,
+  // 면적 대 배선의 무게. placeDesign 이 legalize 뒤 점수에 쓰는 것과 **같은 값**을
+  // 여기서도 써야 한다 — 후보를 고르는 저울과 최종 저울이 다르면, 여기서 고른
+  // 상위 후보가 정작 최종 점수로는 상위가 아니다.
+  hpwlWeight = 1,
+  // 후보 점수를 **거울 반전을 고른 뒤**의 배선길이로 매긴다.
+  // 반전은 좌표를 안 건드리고 핀 위치만 바꾸므로 여기서 골라도 공짜에 가깝고,
+  // 실측으로 HPWL 이 0.64~0.77 배로 줄어든다. 반전 전 값으로 줄을 세우면
+  // 그 30% 가 후보마다 다르게 붙어 순위가 통째로 흔들린다.
+  flipAware = true,
   onProgress = null, onConfig = null,
 } = {}) {
   const rand = rng(seed);
   const total = countAssignments(groups);
 
-  // 배정 목록: 작으면 전수, 크면 추첨(중복 제거)
+  // 배정 목록: 작으면 전수, 크면 추첨(중복 제거).
+  //
+  // 상한을 예산에 묶는다. 64 로 고정해두면 예산을 아무리 올려도 배정은 64 개만
+  // 보고, **ALIGN 이 고른 조합이 추첨에 아예 안 들어오는** 일이 생긴다
+  // (high_speed_comparator 는 조합이 108 개다 — 64 면 40% 를 못 본다).
+  const cap = maxConfigs ?? Math.max(64, batch);
   let assigns;
-  if (total <= maxConfigs) {
+  if (total <= cap) {
     assigns = [...enumerateAssignments(groups)];
   } else {
     const seen = new Set();
     assigns = [];
-    for (let g = 0; g < maxConfigs * 20 && assigns.length < maxConfigs; g++) {
+    for (let g = 0; g < cap * 20 && assigns.length < cap; g++) {
       const a = sampleAssignment(groups, rand);
       const k = a.join(",");
       if (seen.has(k)) continue;
@@ -244,50 +268,114 @@ export function multiStartVariants(design, groups, {
   }
   // 배정 전체에 걸쳐 **하나의** 기준. 배정마다 바꾸면 면적비가 채움률이 되어
   // "이 변이는 실리콘을 두 배 쓴다"를 못 본다 (위 설명 참고).
-  const rA = refArea ?? minTot;
+  //
+  // 그런데 "본 배정들 중 최소" 를 쓰면 **추첨이 바뀔 때마다 기준이 흔들린다** —
+  // 조합이 많아 추첨으로 덮는 설계(hsc 108, five_transistor 60)에서는 예산을
+  // 바꾸면 기준이 달라지고, 면적 항과 배선 항의 저울이 같이 달라져 결과의
+  // 성격이 변한다. 기준은 추첨과 무관해야 한다.
+  //
+  // 다행히 정확한 최소를 전수 열거 없이 구할 수 있다. 블록 합계 면적은
+  // 그룹마다 독립이므로 그룹별 최소를 더하면 된다.
+  let sep = 0;
+  for (const g of groups) {
+    let m = Infinity;
+    for (const cn of g.choices) {
+      const t = design.info.get(cn);
+      if (t) m = Math.min(m, t.w * t.h);
+    }
+    if (Number.isFinite(m)) sep += m * g.members.length;
+  }
+  const rA = refArea ?? (sep > 0 ? Math.min(sep, minTot) : minTot);
   const rW = refHpwl ?? (Math.sqrt(minTot) * maxNet);
 
-  // 시작점을 설정에 고르게 나눈다. 설정마다 최소 1 개는 준다.
-  const per = Math.max(1, Math.floor(batch / configs.length));
-  const out = [];
-  configs.forEach((cfg, ci) => {
+  // --- 예산을 **라운드로 나눠 쓴다** ---
+  //
+  // 예전에는 per = floor(batch / 설정수) 를 설정마다 똑같이 흩뿌리고 끝이었다.
+  // 설정이 batch 보다 많으면 per 가 1 로 깔려서 두 가지가 깨졌다.
+  //   (1) 예산 설정이 아무 일도 안 한다 — high_speed_comparator 는 설정이
+  //       192 개라 48 을 고르든 288 을 고르든 똑같이 192 번을 돌았다.
+  //   (2) 예산을 늘려도 **깊이가 안 깊어진다** — 좋은 설정을 더 파볼 길이 없다.
+  //
+  // 이제 batch 는 진짜 총 시작점 수다 (설정 수가 하한이다 — 설정마다 최소
+  // 하나는 봐야 하므로).
+  //   1 라운드 (너비)     설정마다 하나씩. 모든 설정을 한 번은 본다.
+  //   2 라운드 이후 (깊이) 점수 상위 설정에만 하나씩 더. 볼 설정 수를 라운드마다
+  //                       반으로 줄여 잘 되는 쪽으로 예산을 몬다.
+  // 담금질에서 온도를 내리는 것과 같은 자리다 — 다만 여기서 식는 것은
+  // 좌표가 아니라 **어느 설정을 더 파볼지** 다.
+  const prep = [];
+  for (const cfg of configs) {
     const { obj, z0, N, rank, skipped } = makeObjective(cfg.problem, cfg.region, { M });
-    if (N.cols === 0) return;                       // 자유도 0 — 배치가 이미 결정됐다
+    if (N.cols === 0) continue;                     // 자유도 0 — 배치가 이미 결정됐다
     // 겹침은 "이 배정의 블록들이 서로 얼마나 파고들었나" 라 배정 자신의
     // 면적으로 나누는 게 맞다. 면적·배선과 달리 배정 간 절대 비교가 아니다.
     let tot = 0;
     for (let i = 0; i < cfg.problem.n; i++) tot += cfg.problem.w[i] * cfg.problem.h[i];
-
     const span = Math.max(cfg.region[2] - cfg.region[0], cfg.region[3] - cfg.region[1]);
-    const lr = span / 400;
-    let best = null;
-    for (let b = 0; b < per; b++) {
-      obj.lam = 1.0; obj.mu = 1.0;
-      const theta = initTheta(obj, rand);
-      adam(obj, theta, { iters, lr, lamGrow, muGrow });
-      const r = obj.eval(theta);
-      const ea = exactArea(r.cx, r.cy, obj.w, obj.h);
-      const ov = exactOverlap(r.cx, r.cy, obj.w, obj.h) / tot;
-      const hp = hpwl(r.cx, r.cy, obj.pinInst, obj.pinOff, obj.pinNet,
-                      obj.nNet, obj.sx, obj.sy);
-      const cand = {
-        theta: Float64Array.from(theta), cx: r.cx, cy: r.cy,
-        area: ea.area, box: ea.box, overlap: ov, hpwl: hp,
-        score: ea.area / rA + hp / rW + 3 * ov,
-        assignment: cfg.assignment, region: cfg.region,
-        concrete: cfg.problem.concrete, problem: cfg.problem,
-        obj, z0, N, rank, skipped,
-      };
-      out.push(cand);
-      if (!best || cand.score < best.score) best = cand;
-      if (onProgress) onProgress(out.length, configs.length * per, cand);
-    }
-    if (onConfig) onConfig(ci + 1, configs.length, best);
+    prep.push({ cfg, obj, z0, N, rank, skipped, tot, lr: span / 400, best: null });
+  }
+
+  const out = [];
+  const budget = Math.max(batch, prep.length);
+  let spent = 0;
+  const plan = flipAware ? flipPlan(design, groups) : null;
+
+  const runOne = (p) => {
+    const { obj, cfg } = p;
+    obj.lam = 1.0; obj.mu = 1.0;
+    const theta = initTheta(obj, rand);
+    adam(obj, theta, { iters, lr: p.lr, lamGrow, muGrow, lamRatio });
+    const r = obj.eval(theta);
+    const ea = exactArea(r.cx, r.cy, obj.w, obj.h);
+    const ov = exactOverlap(r.cx, r.cy, obj.w, obj.h) / p.tot;
+    const fr = plan ? refineFlips(cfg.problem, plan, r.cx, r.cy) : null;
+    const hp = fr ? fr.hpwl
+                  : hpwl(r.cx, r.cy, obj.pinInst, obj.pinOff, obj.pinNet,
+                         obj.nNet, obj.sx, obj.sy);
+    const cand = {
+      theta: Float64Array.from(theta), cx: r.cx, cy: r.cy,
+      area: ea.area, box: ea.box, overlap: ov, hpwl: hp,
+      score: ea.area / rA + hpwlWeight * (hp / rW) + 3 * ov,
+      assignment: cfg.assignment, region: cfg.region,
+      concrete: cfg.problem.concrete, problem: cfg.problem,
+      obj, z0: p.z0, N: p.N, rank: p.rank, skipped: p.skipped,
+    };
+    out.push(cand);
+    spent++;
+    if (!p.best || cand.score < p.best.score) p.best = cand;
+    if (onProgress) onProgress(spent, budget, cand);
+    return cand;
+  };
+
+  // 1 라운드 — 너비
+  prep.forEach((p, ci) => {
+    runOne(p);
+    if (onConfig) onConfig(ci + 1, prep.length, p.best, "설정");
   });
 
+  // 2 라운드 이후 — 깊이
+  let rounds = 1;
+  let k = Math.max(1, Math.floor(prep.length / 2));
+  while (spent < budget && prep.length) {
+    const top = prep.filter((p) => p.best)
+                    .sort((a, b) => a.best.score - b.best.score).slice(0, k);
+    if (!top.length) break;
+    rounds++;
+    for (const p of top) {
+      if (spent >= budget) break;
+      runOne(p);
+    }
+    if (onConfig) onConfig(spent, budget, top[0].best, `심화 ${rounds - 1}`);
+    // 반씩 좁히다가 하나까지 가면 다시 절반에서 시작한다. 안 그러면 남은 예산이
+    // 전부 **설정 하나**에 쏟아진다 — 같은 설정에 무작위 시작점을 수십 개 더
+    // 넣어봐야 금방 포화된다. 상위권을 여러 번 훑는 쪽이 낫다.
+    k = k > 1 ? Math.max(1, Math.floor(k / 2)) : Math.max(1, Math.floor(prep.length / 2));
+  }
+
   out.sort((a, b) => a.score - b.score);
-  return { candidates: out, configs: configs.length, assignments: assigns.length,
-           totalAssignments: total, refArea: rA, refHpwl: rW };
+  return { candidates: out, configs: prep.length, assignments: assigns.length,
+           totalAssignments: total, refArea: rA, refHpwl: rW,
+           starts: spent, rounds };
 }
 
 /** 거울 반전을 좌표 고정 상태에서 좌표하강으로 고른다.
