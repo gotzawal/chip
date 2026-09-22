@@ -45,10 +45,16 @@ export function adamState(n) {
  *  state 를 주고받으면 여러 번 나눠 불러도 한 번에 돌린 것과 같다.
  */
 export function adam(obj, theta, { iters = 1200, lr, lamGrow = 1.3, muGrow = 1.25,
-                                   calibrate = true, state = null, onStep = null } = {}) {
+                                   calibrate = true, lamRatio = 1.0, muRatio = 4.0,
+                                   state = null, onStep = null } = {}) {
   const n = theta.length;
   const st = state ?? adamState(n);
-  if (calibrate) obj.calibrate(theta);
+  // lamRatio 는 **연속 단계의 저울**이다. calibrate 가 lam 을
+  // "밀도 기울기 = lamRatio x 배선 기울기" 가 되게 잡으므로,
+  //   낮추면  넷이 더 세게 당긴다 -> 배선은 짧고 겹침은 많이 남는다
+  //   높이면  더 퍼뜨린다        -> 겹침은 적고 배선은 길어진다
+  // legalize 가 겹침을 어차피 0 으로 만들므로 "얼마나 무른 유체로 둘 것인가" 다.
+  if (calibrate) obj.calibrate(theta, lamRatio, muRatio);
   const b1 = 0.9, b2 = 0.999, eps = 1e-8;
   let last = null;
   for (let k = 0; k < iters; k++) {
@@ -123,7 +129,7 @@ export function hpwl(cx, cy, pinInst, pinOff, pinNet, nNet, sx, sy) {
  */
 export function multiStart(obj, {
   batch = 64, iters = 800, seed = 0, lamGrow = 1.3, muGrow = 1.25,
-  refArea = 1, refHpwl = 1, onProgress = null,
+  lamRatio = 1.0, refArea = 1, refHpwl = 1, onProgress = null,
 } = {}) {
   const rand = rng(seed);
   const span = Math.max(obj.region[2] - obj.region[0], obj.region[3] - obj.region[1]);
@@ -133,7 +139,7 @@ export function multiStart(obj, {
   for (let b = 0; b < batch; b++) {
     obj.lam = lam0; obj.mu = mu0;
     const theta = initTheta(obj, rand);
-    adam(obj, theta, { iters, lr, lamGrow, muGrow });
+    adam(obj, theta, { iters, lr, lamGrow, muGrow, lamRatio });
     const r = obj.eval(theta);
     const ea = exactArea(r.cx, r.cy, obj.w, obj.h);
     const of = obj.dens.overflow(r.cx, r.cy, obj.w, obj.h);
@@ -208,6 +214,9 @@ export function multiStart(obj, {
 export function multiStartVariants(design, groups, {
   batch = 64, iters = 800, seed = 0, M = 48,
   lamGrow = 1.3, muGrow = 1.25,
+  // 연속 단계의 저울 (adam 의 설명 참고). 1 이면 시작점에서 밀도와 배선의
+  // 기울기가 같다. 낮추면 배선 쪽으로, 높이면 퍼뜨리는 쪽으로 기운다.
+  lamRatio = 1.0,
   slack = 1.25, aspects = null,
   // null 이면 예산에서 정한다 (아래). 배정이 이보다 많으면 전수가 아니라 추첨이다.
   maxConfigs = null, refArea = null, refHpwl = null,
@@ -315,7 +324,7 @@ export function multiStartVariants(design, groups, {
     const { obj, cfg } = p;
     obj.lam = 1.0; obj.mu = 1.0;
     const theta = initTheta(obj, rand);
-    adam(obj, theta, { iters, lr: p.lr, lamGrow, muGrow });
+    adam(obj, theta, { iters, lr: p.lr, lamGrow, muGrow, lamRatio });
     const r = obj.eval(theta);
     const ea = exactArea(r.cx, r.cy, obj.w, obj.h);
     const ov = exactOverlap(r.cx, r.cy, obj.w, obj.h) / p.tot;

@@ -101,6 +101,14 @@
     border-radius: 7px; padding: 7px 10px;
   }
   select { min-width: 180px; }
+  /* 저울은 눈금이 아니라 **연속**이다 — 면적과 배선 사이 어디든 설 수 있다. */
+  .field.slide { min-width: 172px; }
+  .field.slide > span { display: flex; justify-content: space-between; gap: 8px; }
+  .field.slide b { color: var(--copper); font-weight: 600; font-variant-numeric: tabular-nums; }
+  input[type=range] {
+    width: 100%; margin: 0; height: 30px; accent-color: var(--copper);
+    background: transparent; cursor: ew-resize;
+  }
   button.run {
     background: var(--copper); border-color: var(--copper); color: #fff;
     font-weight: 600; padding: 8px 20px; cursor: pointer;
@@ -280,15 +288,22 @@
         <option value="288">288 — 넓게</option>
       </select>
     </label>
-    <label class="field"
-           title="점수의 면적 대 배선 무게. 점수는 면적/기준 + 무게 x HPWL/기준 이다.
-무게 1 에서는 면적이 배선을 2:1 로 눌러, 면적을 조금 얻고 배선을 크게 내주는
-변이를 골랐다 (five_transistor_ota 0.862x / 1.404x). 2 가 실측으로 균형이다."><span>면적 ↔ 배선</span>
-      <select id="hw">
-        <option value="1">1 — 면적 우선</option>
-        <option value="2" selected>2 — 균형</option>
-        <option value="4">4 — 배선 우선</option>
-      </select>
+    <label class="field slide"
+           title="고를 때의 저울. 후보 점수 = (1-a) x 면적/기준 + a x HPWL/기준 이고,
+순위만 보므로 면적 1 : 배선 a/(1-a) 와 같다. 무게 1 에서는 면적이 배선을 2:1 로
+눌러 면적을 조금 얻고 배선을 크게 내주는 변이를 골랐다 (five_transistor_ota
+0.862x / 1.404x). 2 가 실측으로 균형이다. 다음 배치 실행부터 먹는다.">
+      <span>면적 ↔ 배선 <b id="hwVal">1 : 2.00</b></span>
+      <input type="range" id="hw" min="-40" max="40" step="1" value="10">
+    </label>
+    <label class="field slide"
+           title="연속 단계의 저울. 시작점에서 밀도(퍼뜨리는 힘)의 기울기를
+배선(당기는 힘)의 몇 배로 둘지다 (calibrate 의 lamRatio). 낮추면 넷이 더 세게
+당겨 배선이 짧고 겹침이 많이 남고, 높이면 퍼뜨려 겹침이 적게 남는다.
+겹침은 legalize 가 어차피 0 으로 만든다 — 얼마나 무른 유체로 둘 것인가의 문제다.
+five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
+      <span>배선 ↔ 퍼뜨리기 <b id="lamVal">1.00×</b></span>
+      <input type="range" id="lam" min="-20" max="20" step="1" value="0">
     </label>
     <button class="run" id="run">배치 실행</button>
     <button class="run" id="routeRun" disabled
@@ -637,6 +652,29 @@ for (const btn of $("whatSeg").querySelectorAll("button"))
 for (const btn of $("whoSeg").querySelectorAll("button"))
   btn.addEventListener("click", () => setView(null, btn.dataset.who));
 
+// ---------------------------------------------------------------- 저울
+//
+// 같은 트레이드오프가 두 단계에 걸쳐 있다. 하나는 **어떤 해가 나오는지**를
+// 바꾸고(연속 단계), 하나는 **나온 해 중에서 무엇을 고를지**를 바꾼다(선택).
+// 둘 다 연속으로 돌릴 수 있어야 한다 — 설계마다 맞는 자리가 다르다.
+//
+// 둘 다 **로그 눈금**이다. 저울은 비율이라 곱셈이 자연스럽다 — 2 배와 1/2 배가
+// 슬라이더에서 같은 거리여야 한다. 한 칸이 2^0.1 = 1.072 배다.
+//
+//   면적 ↔ 배선     v in [-40, 40] -> hpwlWeight = 2^(v/10), 즉 1/16 ~ 16
+//                   점수는 면적/기준 + w x HPWL/기준. 순위만 보므로
+//                   (1-a)면적 + a배선 의 a = w/(1+w) 와 같은 저울이다.
+//   배선 ↔ 퍼뜨리기  v in [-20, 20] -> lamRatio  = 2^(v/10), 즉 1/4 ~ 4
+const hpwlWeight = () => Math.pow(2, Number($("hw").value) / 10);
+const lamRatio = () => Math.pow(2, Number($("lam").value) / 10);
+function showWeights() {
+  $("hwVal").textContent = `1 : ${hpwlWeight().toFixed(2)}`;
+  $("lamVal").textContent = `${lamRatio().toFixed(2)}×`;
+}
+$("hw").addEventListener("input", showWeights);
+$("lam").addEventListener("input", showWeights);
+showWeights();
+
 // ---------------------------------------------------------------- 표시
 const mkRow = (dl, k, v, cls) => {
   const d = document.createElement("div"); d.className = "m";
@@ -706,7 +744,11 @@ function showResult(r) {
     r.offgrid === 0 ? "win" : "lose");
   mkRow(dl, "변이 조합", `${r.combos} <small>중 ${r.configs} 설정 탐색</small>`);
   if (r.hpwlWeight)
-    mkRow(dl, "점수 무게", `면적 1 : 배선 ${r.hpwlWeight}`);
+    mkRow(dl, "저울", `면적 1 : 배선 ${r.hpwlWeight.toFixed(2)}` +
+      `<small> · 퍼뜨리기 ${(r.lamRatio ?? 1).toFixed(2)}×</small>`);
+  if (r.medOverlap != null)
+    mkRow(dl, "연속 단계 겹침", `${r.medOverlap.toFixed(3)} <small>후보 중앙값 · ` +
+      `legalize 전</small>`);
   mkRow(dl, "시작점", `${r.starts ?? "—"} <small>라운드 ${r.rounds ?? 1}</small>`);
   {
     const why = Object.entries(r.legalFailBy ?? {})
@@ -1297,7 +1339,7 @@ async function run() {
     const name = $("ex").value;
     const blob = await loadExample(name);
     startJob({ name, blob, batch: Number($("batch").value),
-               hpwlWeight: Number($("hw").value) });
+               hpwlWeight: hpwlWeight(), lamRatio: lamRatio() });
   } catch (err) {
     busy = false; $("run").disabled = false;
     clearDownloads();

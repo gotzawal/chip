@@ -53,6 +53,10 @@ export function placeDesign(input, {
   // 나쁜 해에 빠진다). 나머지 둘에서는 무게 2 가 분명히 낫다.
   // 면적만 보고 싶으면 1 로 내리면 된다.
   hpwlWeight = 2,
+  // 연속 단계의 저울. calibrate 가 lam 을 "밀도 기울기 = lamRatio x 배선
+  // 기울기" 로 잡는다. hpwlWeight 가 **다 나온 해 중에서 고르는** 저울이라면
+  // 이건 **어떤 해가 나오는지**를 바꾸는 저울이다.
+  lamRatio = 1.0,
   // PDK 금속 pitch. [qx, qy] 를 주면 블록 원점이 그 배수가 되도록 legalize 가
   // 정수 제약으로 푼다. ALIGN 배선기가 이걸 요구한다 (FinFET14nm Mock: 80, 84).
   // null 이면 격자 없이 — 배선기로 넘길 수 없다.
@@ -72,7 +76,7 @@ export function placeDesign(input, {
   const res = multiStartVariants(design, groups, {
     batch, iters, seed, M, slack, aspects, maxConfigs, refArea, refHpwl,
     // 후보를 고르는 저울과 legalize 뒤 저울을 같게 둔다.
-    hpwlWeight,
+    hpwlWeight, lamRatio,
     onProgress, onConfig,
   });
 
@@ -98,6 +102,12 @@ export function placeDesign(input, {
   // (NMOS_4T_85599263 의 X1_Y16 12.79M vs X8_Y2 6.21M), 최소값 정규화는 그
   // 차이를 후보 집합 안에서만 재서 놓치고, 나쁜 하위 모듈이 위층 입력이 된다.
   const rA = res.refArea, rW = res.refHpwl;
+  // 연속 단계가 얼마나 "무르게" 풀었는지. lamRatio 를 낮추면 넷이 더 세게
+  // 당겨 겹침이 많이 남고, 높이면 퍼뜨려 겹침이 적게 남는다. legalize 가
+  // 어차피 0 으로 만들지만, 남은 양이 많을수록 legalize 가 배치를 더 많이
+  // 흔든다 — 이 값이 그 저울의 눈금이다.
+  const ovs = res.candidates.map((c) => c.overlap).sort((a, b) => a - b);
+  const medOverlap = ovs.length ? ovs[ovs.length >> 1] : 0;
   const plan = flipPlan(design, groups);
   // Order 제약이 있으면 그 쌍의 분리 방향을 박는다 (부등식이라 영공간엔 못 넣는다).
   const forced = res.candidates.length
@@ -234,7 +244,7 @@ export function placeDesign(input, {
     legalScore: best.sc,
     alternatives: alts,
     configs: res.configs, assignments: res.assignments,
-    starts: res.starts, rounds: res.rounds,
+    starts: res.starts, rounds: res.rounds, medOverlap,
     totalAssignments: res.totalAssignments,
     design, groups, problem: P, candidates: res.candidates,
   };
