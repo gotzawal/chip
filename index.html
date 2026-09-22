@@ -270,11 +270,14 @@
     <label class="field"><span>회로</span>
       <select id="ex"></select>
     </label>
-    <label class="field"><span>시작점</span>
+    <label class="field"
+           title="총 시작점 예산. 설정(변이 배정 x 영역 후보) 수가 하한이라,
+설정이 많은 계층 설계에서는 주로 **넓이**로 쓰인다 — 배정을 몇 개까지 훑을지가
+같이 늘어난다. 남는 예산은 점수 상위 설정에 라운드로 더 준다."><span>시작점</span>
       <select id="batch">
-        <option value="48">48 — 빠름</option>
+        <option value="48">48 — 빠르게</option>
         <option value="96" selected>96 — 기본</option>
-        <option value="288">288 — 깊게</option>
+        <option value="288">288 — 넓게</option>
       </select>
     </label>
     <button class="run" id="run">배치 실행</button>
@@ -1268,6 +1271,11 @@ $("routeRun").addEventListener("click", runRoute);
 async function run() {
   if (busy) return;
   busy = true; $("run").disabled = true; ours = null; frame = null;
+  // 새 배치를 풀기 시작하면 **이전 배치의 배선 결과는 더 이상 이 배치의 것이
+  // 아니다.** 우리 쪽만 지운다 — ALIGN 기준선은 배치와 무관하므로 남긴다.
+  if (routed?.ours) routed = { ...routed, ours: null };
+  liveRec = null;
+  showDrc();
   $("subCard").hidden = true;
   clearDownloads("계산 중…");
   $("vt").innerHTML = '<tr><td colspan="5" class="dim">계산 중…</td></tr>';

@@ -229,6 +229,15 @@ bottom up routing for PRIMITIVE_98739713_PG0 (2)   GcellGlobalRouter → Runtime
 빠뜨린 간접 호출 대상이거나, 첫 회차가 남긴 상태를 두 번째가 밟는 것으로 보인다.
 `-sASSERTIONS=2` 디버그 빌드로 어느 테이블 슬롯인지 짚는 것이 다음 순서다.
 
+**이 진단의 근거.** 배선 경로는 `router_mode="bottom_up"` 으로 돈다
+(`frontworker.mjs` 의 `schematic2layout(..., router_mode="bottom_up")`).
+그쪽 구현(`align/pnr/router.py` 의 `route_bottom_up`)은 `DB.TraverseHierTree()`
+순서로 모듈마다 `route_single_variant` 를 한 번씩 부른다. 평면 설계는 모듈이
+하나라 그 호출이 한 번뿐이고, 계층 설계는 모듈 수만큼이다 — 실패하는 예제 둘이
+정확히 계층 설계 둘이고, 예전에 평면 설계에서 났던 실패도 "한 인스턴스 안에서
+두 번째 호출" 이었다. 실행 로그로 마지막 확인을 하려면 Pyodide(CDN)를 받을 수
+있는 환경에서 아래 로그를 보면 된다.
+
 그때까지 **화면에서 어디까지 갔는지는 보인다.** 배선 중에는 ALIGN 의 로그
 (`bottom up routing for <모듈>`) 와 C++ 쪽 표준출력을 워커가 그대로 흘려준다.
 실패하면 마지막 줄을 같이 띄운다 — "그냥 멈췄다" 가 아니라 "어느 모듈에서

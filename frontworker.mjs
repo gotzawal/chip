@@ -143,7 +143,7 @@ def run(sp_text, name, subckt, const_text):
 `;
 
 const PYROUTE = String.raw`
-import base64, json, os, pathlib, shutil, traceback
+import base64, json, logging, os, pathlib, shutil, traceback
 
 def write_dump(work, top_level, placement):
     """우리 배치로 __placer_dump__.json 을 만든다.
@@ -325,7 +325,6 @@ def _log_to_js():
     그 줄만 받아 넘겨도 어디까지 갔는지 바로 보인다. 워커 안에서 부르는
     postMessage 는 메인 스레드가 바로 받으므로 진행이 그대로 보인다.
     """
-    import logging
     try:
         import js
     except ImportError:
