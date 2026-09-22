@@ -313,7 +313,42 @@ def _skip_cap_placer():
         return [], ''
     cp.cap_placer_driver = driver
     pm.cap_placer_driver = driver
+def _log_to_js():
+    """ALIGN 의 로그를 페이지로 흘린다.
+
+    배선은 한 번의 runPython 안에서 몇 분씩 돈다. 그 동안 화면에는
+    "배선 중" 한 줄뿐이라, 계층 설계에서 **어느 모듈에서 멈췄는지**
+    알 길이 없었다 ("작동하다가 멈춘다"의 실체다).
+
+    align/pnr/router.py 가 모듈마다
+    'bottom up routing for <이름> (<idx>) placement version <j>' 를 찍으므로,
+    그 줄만 받아 넘겨도 어디까지 갔는지 바로 보인다. 워커 안에서 부르는
+    postMessage 는 메인 스레드가 바로 받으므로 진행이 그대로 보인다.
+    """
+    import logging
+    try:
+        import js
+    except ImportError:
+        return None
+
+    class JsLog(logging.Handler):
+        def emit(self, rec):
+            try:
+                js.routeLog(rec.getMessage()[:300])
+            except Exception:
+                pass
+
+    h = JsLog(logging.INFO)
+    root = logging.getLogger()
+    root.addHandler(h)
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+    logging.getLogger('align').setLevel(logging.INFO)
+    return h
+
+
 def route(work, name, top_level, placement_json):
+    handler = _log_to_js()
     try:
         _skip_cap_placer()
         placement = json.loads(placement_json)
@@ -360,6 +395,9 @@ def route(work, name, top_level, placement_json):
         })
     except Exception:
         return json.dumps({"ok": False, "error": traceback.format_exc()[-2500:]})
+    finally:
+        if handler is not None:
+            logging.getLogger().removeHandler(handler)
 `;
 
 
@@ -377,11 +415,35 @@ self.onmessage = async (e) => {
       if (!lastWork) throw new Error("앞단을 먼저 돌려야 합니다");
       say("배선 — ALIGN 배선기 (wasm)", 7);
       const t0 = performance.now();
-      p.runPython(PYROUTE);
-      const out = p.globals.get("route")(lastWork, lastName, lastTop,
-                                         JSON.stringify(placement));
-      const r = JSON.parse(out);
-      postMessage({ type: "route", ...r, secs: (performance.now() - t0) / 1000 });
+      // 배선이 도는 동안 무슨 일이 일어나는지 흘려보낸다. 계층 설계는
+      // 하위 모듈부터 하나씩 도는데, 그 중간에서 멈추면 어디였는지 알아야
+      // 한다. 파이썬 로그(_log_to_js)와 C++ 쪽 표준출력을 둘 다 받는다.
+      let where = "", nlog = 0;
+      const push = (t) => {
+        for (const raw of String(t).split("\n")) {
+          const l = raw.trim();
+          if (!l) continue;
+          where = l.slice(0, 200);
+          // 다 보내면 메시지가 수천 개가 된다. 어디쯤인지 알려주는 줄만.
+          if (nlog < 400 && /rout|module|primitive|error|fail|Traceback/i.test(l)) {
+            nlog++;
+            say(l.slice(0, 160), 7);
+          }
+        }
+      };
+      globalThis.routeLog = push;
+      try { p.setStdout({ batched: push }); p.setStderr({ batched: push }); } catch { /* 구버전 */ }
+      let r;
+      try {
+        p.runPython(PYROUTE);
+        const out = p.globals.get("route")(lastWork, lastName, lastTop,
+                                           JSON.stringify(placement));
+        r = JSON.parse(out);
+      } finally {
+        try { p.setStdout({}); p.setStderr({}); } catch { /* 구버전 */ }
+      }
+      postMessage({ type: "route", ...r, where,
+                    secs: (performance.now() - t0) / 1000 });
       return;
     }
 

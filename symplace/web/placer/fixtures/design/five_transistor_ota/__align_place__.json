@@ -1,0 +1,309 @@
+{
+  "global_signals": [
+    {
+      "actual": "VSS",
+      "formal": "supply0",
+      "prefix": "global_power"
+    },
+    {
+      "actual": "VDD",
+      "formal": "supply1",
+      "prefix": "global_power"
+    }
+  ],
+  "leaves": [
+    {
+      "abstract_name": "SCM_PMOS_89741265",
+      "bbox": [
+        0,
+        0,
+        1760,
+        2352
+      ],
+      "concrete_name": "SCM_PMOS_89741265_X4_Y1",
+      "terminals": [
+        {
+          "name": "DA",
+          "rect": [
+            620,
+            48,
+            660,
+            960
+          ]
+        },
+        {
+          "name": "DB",
+          "rect": [
+            444,
+            152,
+            1316,
+            184
+          ]
+        },
+        {
+          "name": "S",
+          "rect": [
+            780,
+            216,
+            820,
+            1800
+          ]
+        }
+      ]
+    },
+    {
+      "abstract_name": "DP_NMOS_B_29120057",
+      "bbox": [
+        0,
+        0,
+        3040,
+        3528
+      ],
+      "concrete_name": "DP_NMOS_B_29120057_X8_Y2",
+      "terminals": [
+        {
+          "name": "B",
+          "rect": [
+            284,
+            2924,
+            2756,
+            2956
+          ]
+        },
+        {
+          "name": "DA",
+          "rect": [
+            1180,
+            48,
+            1220,
+            1296
+          ]
+        },
+        {
+          "name": "DB",
+          "rect": [
+            1260,
+            132,
+            1300,
+            1380
+          ]
+        },
+        {
+          "name": "GA",
+          "rect": [
+            1340,
+            888,
+            1380,
+            2136
+          ]
+        },
+        {
+          "name": "GB",
+          "rect": [
+            1420,
+            972,
+            1460,
+            2220
+          ]
+        },
+        {
+          "name": "S",
+          "rect": [
+            1500,
+            216,
+            1540,
+            1464
+          ]
+        }
+      ]
+    },
+    {
+      "abstract_name": "NMOS_S_73699613",
+      "bbox": [
+        0,
+        0,
+        1120,
+        3528
+      ],
+      "concrete_name": "NMOS_S_73699613_X4_Y2",
+      "terminals": [
+        {
+          "name": "D",
+          "rect": [
+            300,
+            48,
+            340,
+            1296
+          ]
+        },
+        {
+          "name": "G",
+          "rect": [
+            380,
+            888,
+            420,
+            2136
+          ]
+        },
+        {
+          "name": "S",
+          "rect": [
+            460,
+            132,
+            500,
+            2976
+          ]
+        }
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "abstract_name": "FIVE_TRANSISTOR_OTA",
+      "bbox": [
+        0,
+        0,
+        4160,
+        5880
+      ],
+      "concrete_name": "FIVE_TRANSISTOR_OTA_0",
+      "constraints": [
+        {
+          "constraint": "PowerPorts",
+          "ports": [
+            "VDD"
+          ],
+          "propagate": true
+        },
+        {
+          "constraint": "GroundPorts",
+          "ports": [
+            "VSS"
+          ],
+          "propagate": true
+        },
+        {
+          "constraint": "SymmetricBlocks",
+          "direction": "V",
+          "pairs": [
+            [
+              "X_MN2_MN3"
+            ],
+            [
+              "X_MP4_MP5"
+            ]
+          ]
+        },
+        {
+          "constraint": "SymmetricNets",
+          "direction": "V",
+          "net1": "VIN",
+          "net2": "VIP",
+          "pins1": [
+            "X_MN2_MN3/GA",
+            "VIN"
+          ],
+          "pins2": [
+            "X_MN2_MN3/GB",
+            "VIP"
+          ]
+        }
+      ],
+      "instances": [
+        {
+          "abstract_template_name": "SCM_PMOS_89741265",
+          "concrete_template_name": "SCM_PMOS_89741265_X4_Y1",
+          "fa_map": [
+            {
+              "actual": "VOP",
+              "formal": "DA"
+            },
+            {
+              "actual": "VON",
+              "formal": "DB"
+            },
+            {
+              "actual": "VDD",
+              "formal": "S"
+            }
+          ],
+          "instance_name": "X_MP4_MP5",
+          "transformation": {
+            "oX": 1760,
+            "oY": 2352,
+            "sX": 1,
+            "sY": -1
+          }
+        },
+        {
+          "abstract_template_name": "DP_NMOS_B_29120057",
+          "concrete_template_name": "DP_NMOS_B_29120057_X8_Y2",
+          "fa_map": [
+            {
+              "actual": "VSS",
+              "formal": "B"
+            },
+            {
+              "actual": "VON",
+              "formal": "DA"
+            },
+            {
+              "actual": "VOP",
+              "formal": "DB"
+            },
+            {
+              "actual": "VIN",
+              "formal": "GA"
+            },
+            {
+              "actual": "VIP",
+              "formal": "GB"
+            },
+            {
+              "actual": "TAIL",
+              "formal": "S"
+            }
+          ],
+          "instance_name": "X_MN2_MN3",
+          "transformation": {
+            "oX": 1120,
+            "oY": 2352,
+            "sX": 1,
+            "sY": 1
+          }
+        },
+        {
+          "abstract_template_name": "NMOS_S_73699613",
+          "concrete_template_name": "NMOS_S_73699613_X4_Y2",
+          "fa_map": [
+            {
+              "actual": "TAIL",
+              "formal": "D"
+            },
+            {
+              "actual": "VBIAS",
+              "formal": "G"
+            },
+            {
+              "actual": "VSS",
+              "formal": "S"
+            }
+          ],
+          "instance_name": "X_MN1",
+          "transformation": {
+            "oX": 1120,
+            "oY": 3864,
+            "sX": -1,
+            "sY": -1
+          }
+        }
+      ],
+      "parameters": [
+        "VBIAS",
+        "VON",
+        "VIN",
+        "VIP"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+diff --git a/align/pnr/placer.py b/align/pnr/placer.py
+index 76d96e6..d91398f 100644
+--- a/align/pnr/placer.py
++++ b/align/pnr/placer.py
+@@ -248,10 +248,31 @@ def process_placements(*, DB, verilog_d, lambda_coeff, scale_factor, opath):
+ 
+ 
+ 
++def _has_place_on_grid(verilog_d, primitives):
++    """설계 어디에도 PlaceOnGrid 가 없으면 격자 제약 생성은 공집합이다."""
++    for prim in (primitives or {}).values():
++        md = prim.get('metadata') or {}
++        for c in md.get('constraints') or []:
++            if (c.get('constraint') if isinstance(c, dict) else getattr(c, 'constraint', None)) == 'PlaceOnGrid':
++                return True
++    mods = verilog_d.get('modules') if isinstance(verilog_d, dict) else getattr(verilog_d, 'modules', [])
++    for m in mods or []:
++        cs = m.get('constraints') if isinstance(m, dict) else getattr(m, 'constraints', [])
++        for c in cs or []:
++            if (c.get('constraint') if isinstance(c, dict) else getattr(c, 'constraint', None)) == 'PlaceOnGrid':
++                return True
++    return False
++
++
+ def update_grid_constraints(grid_constraints, DB, idx, verilog_d, primitives, scale_factor):
+     assert verilog_d is not None
+     assert primitives is not None
+ 
++    if not _has_place_on_grid(verilog_d, primitives):
++        # 설계에 PlaceOnGrid 가 없다 -> 결과는 반드시 공집합.
++        # 무거운 중간물(gen_placement_verilog/scale_placement_verilog)을 만들지 않는다.
++        return
++
+     # for each layout, generate a placement_verilog_d, make sure the constraints are attached to the leaves, then generate the restrictions
+     # convert the restrictions into the form needed for the subsequent placements
+ 
+@@ -298,7 +319,7 @@ def update_grid_constraints(grid_constraints, DB, idx, verilog_d, primitives, sc
+ 
+ def hierarchical_place(*, DB, opath, fpath, numLayout, effort, verilog_d,
+                        lambda_coeff, scale_factor,
+-                       placement_verilog_d, select_in_ILP, place_using_ILP, seed, use_analytical_placer, ilp_solver, primitives, placer_sa_iterations, placer_ilp_runtime, black_box_flow):
++                       placement_verilog_d, select_in_ILP, place_using_ILP, seed, use_analytical_placer, ilp_solver, primitives, placer_sa_iterations, placer_ilp_runtime, black_box_flow, emit_placements=True):
+ 
+     logger.debug(f'Calling hierarchical_place with {"existing placement" if placement_verilog_d is not None else "no placement"}')
+ 
+@@ -328,6 +349,10 @@ def hierarchical_place(*, DB, opath, fpath, numLayout, effort, verilog_d,
+         update_grid_constraints(grid_constraints, DB, idx, verilog_d, primitives, scale_factor)
+ 
+ 
++    if not emit_placements:
++        # 배선 단계는 DB 부작용만 필요하다. 배치 대안 생성(pydantic 대량 구축)은 건너뛴다.
++        return None, None, None, None
++
+     top_level, leaf_map, placement_verilog_alternatives, metrics = process_placements(DB=DB, verilog_d=verilog_d,
+                                                                                       lambda_coeff=lambda_coeff, scale_factor=scale_factor,
+                                                                                       opath=opath)
+diff --git a/align/pnr/router.py b/align/pnr/router.py
+index 8821d7f..f7afa64 100644
+--- a/align/pnr/router.py
++++ b/align/pnr/router.py
+@@ -414,7 +414,8 @@ def router_driver(*, cap_map, cap_lef_s,
+                                placement_verilog_d=scaled_placement_verilog_d.dict(),
+                                select_in_ILP=False, place_using_ILP=False, seed=0,
+                                use_analytical_placer=False, ilp_solver='symphony',
+-                               primitives=primitives, placer_sa_iterations=10000, placer_ilp_runtime=1, black_box_flow=False)
++                               primitives=primitives, placer_sa_iterations=10000, placer_ilp_runtime=1, black_box_flow=False,
++                               emit_placements=False)  # 반환값을 쓰지 않는다
+ 
+             placements_to_run = None
+ 
