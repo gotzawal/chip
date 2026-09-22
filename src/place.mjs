@@ -37,10 +37,22 @@ export function placeDesign(input, {
   // ALIGN 과 견주려고 그쪽 값을 넣어도 되지만, 그건 벤치마크용이지
   // 배치에 필요한 정보가 아니다.
   refArea = null, refHpwl = null,
-  // 면적 대 배선의 무게. 1 이면 면적/refArea 와 HPWL/refHpwl 을 그대로 더한다.
-  // 기본값에서 배선 항이 0.5 쯤에서 놀아 면적이 조금 앞선다 — 아날로그에서
-  // 면적이 1차 비용이라 그쪽이 맞다고 보고 두었다. 배선을 더 보고 싶으면 올려라.
-  hpwlWeight = 1,
+  // 면적 대 배선의 무게. 점수는 `면적/refArea + hpwlWeight x HPWL/refHpwl`.
+  //
+  // **1 이 아니라 2 가 기본이다.** refHpwl = sqrt(refArea) x 넷수 로 두면 배선
+  // 항이 0.5 언저리에서 놀아, 무게 1 에서는 면적이 배선을 2:1 로 눌렀다.
+  // 그래서 면적을 조금 얻고 배선을 크게 내주는 변이를 계속 골랐다. 실측:
+  //
+  //     예제                        무게 1          무게 2
+  //     five_transistor_ota         0.862 / 1.404   1.077 / 0.803
+  //     cascode_current_mirror_ota  0.988 / 1.348   0.988 / 1.156
+  //     current_mirror_ota          1.000 / 1.000   1.000 / 1.000
+  //     telescopic_ota              씨앗 4 개에서 둘 다 3/4 는 1.000 / 0.987
+  //
+  // telescopic 은 무게가 아니라 **씨앗 운**이다 (양쪽 다 네 번 중 한 번은
+  // 나쁜 해에 빠진다). 나머지 둘에서는 무게 2 가 분명히 낫다.
+  // 면적만 보고 싶으면 1 로 내리면 된다.
+  hpwlWeight = 2,
   // PDK 금속 pitch. [qx, qy] 를 주면 블록 원점이 그 배수가 되도록 legalize 가
   // 정수 제약으로 푼다. ALIGN 배선기가 이걸 요구한다 (FinFET14nm Mock: 80, 84).
   // null 이면 격자 없이 — 배선기로 넘길 수 없다.
@@ -59,6 +71,8 @@ export function placeDesign(input, {
   const groups = variantGroups(design);
   const res = multiStartVariants(design, groups, {
     batch, iters, seed, M, slack, aspects, maxConfigs, refArea, refHpwl,
+    // 후보를 고르는 저울과 legalize 뒤 저울을 같게 둔다.
+    hpwlWeight,
     onProgress, onConfig,
   });
 

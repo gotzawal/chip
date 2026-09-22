@@ -10,8 +10,8 @@
  */
 import { area } from "./energy.mjs";
 import { exactOverlap } from "./legalize.mjs";
-import { buildProblem, countAssignments, enumerateAssignments, makeObjective,
-         regionCandidates, sampleAssignment } from "./design.mjs";
+import { buildProblem, countAssignments, enumerateAssignments, flipPlan,
+         makeObjective, regionCandidates, sampleAssignment } from "./design.mjs";
 
 /** 결정론적 난수 (mulberry32). 시드를 주면 파이썬 쪽과 별개로 재현된다. */
 export function rng(seed = 0) {
@@ -211,6 +211,15 @@ export function multiStartVariants(design, groups, {
   slack = 1.25, aspects = null,
   // null 이면 예산에서 정한다 (아래). 배정이 이보다 많으면 전수가 아니라 추첨이다.
   maxConfigs = null, refArea = null, refHpwl = null,
+  // 면적 대 배선의 무게. placeDesign 이 legalize 뒤 점수에 쓰는 것과 **같은 값**을
+  // 여기서도 써야 한다 — 후보를 고르는 저울과 최종 저울이 다르면, 여기서 고른
+  // 상위 후보가 정작 최종 점수로는 상위가 아니다.
+  hpwlWeight = 1,
+  // 후보 점수를 **거울 반전을 고른 뒤**의 배선길이로 매긴다.
+  // 반전은 좌표를 안 건드리고 핀 위치만 바꾸므로 여기서 골라도 공짜에 가깝고,
+  // 실측으로 HPWL 이 0.64~0.77 배로 줄어든다. 반전 전 값으로 줄을 세우면
+  // 그 30% 가 후보마다 다르게 붙어 순위가 통째로 흔들린다.
+  flipAware = true,
   onProgress = null, onConfig = null,
 } = {}) {
   const rand = rng(seed);
@@ -300,6 +309,7 @@ export function multiStartVariants(design, groups, {
   const out = [];
   const budget = Math.max(batch, prep.length);
   let spent = 0;
+  const plan = flipAware ? flipPlan(design, groups) : null;
 
   const runOne = (p) => {
     const { obj, cfg } = p;
@@ -309,12 +319,14 @@ export function multiStartVariants(design, groups, {
     const r = obj.eval(theta);
     const ea = exactArea(r.cx, r.cy, obj.w, obj.h);
     const ov = exactOverlap(r.cx, r.cy, obj.w, obj.h) / p.tot;
-    const hp = hpwl(r.cx, r.cy, obj.pinInst, obj.pinOff, obj.pinNet,
-                    obj.nNet, obj.sx, obj.sy);
+    const fr = plan ? refineFlips(cfg.problem, plan, r.cx, r.cy) : null;
+    const hp = fr ? fr.hpwl
+                  : hpwl(r.cx, r.cy, obj.pinInst, obj.pinOff, obj.pinNet,
+                         obj.nNet, obj.sx, obj.sy);
     const cand = {
       theta: Float64Array.from(theta), cx: r.cx, cy: r.cy,
       area: ea.area, box: ea.box, overlap: ov, hpwl: hp,
-      score: ea.area / rA + hp / rW + 3 * ov,
+      score: ea.area / rA + hpwlWeight * (hp / rW) + 3 * ov,
       assignment: cfg.assignment, region: cfg.region,
       concrete: cfg.problem.concrete, problem: cfg.problem,
       obj, z0: p.z0, N: p.N, rank: p.rank, skipped: p.skipped,

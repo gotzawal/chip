@@ -145,7 +145,230 @@ def run(sp_text, name, subckt, const_text):
 const PYROUTE = String.raw`
 import base64, json, logging, os, pathlib, shutil, traceback
 
-def write_dump(work, top_level, placement):
+def _emit_dump(pnr, prim, top_level, alts):
+    """덤프 두 파일을 쓴다 (계층으로 넘기든 펼쳐 넘기든 같은 꼬리)."""
+    # leaf_map: abstract -> {concrete -> [{width,height}, [[rect,label,...]], None]}
+    # 단위는 마이크론이다 (2_primitives 는 정수 좌표, ScaleFactor 1000).
+    prims = json.loads((prim / "__primitives__.json").read_text())
+    leaf_map = {}
+    for cn, meta in prims.items():
+        ab = meta["abstract_template_name"]
+        p = prim / (cn + ".json")
+        if not p.exists():
+            continue
+        bb = json.loads(p.read_text())["bbox"]
+        w, h = (bb[2] - bb[0]) / 1000.0, (bb[3] - bb[1]) / 1000.0
+        leaf_map.setdefault(ab, {})[cn] = [
+            {"width": w, "height": h},
+            [[[0, 0, w, h], "%s<br>0 0 %g %g" % (cn, w, h), True, 0, False]],
+            None,
+        ]
+
+    with open(pnr / "__placer_dump__.json", "w") as f:
+        json.dump([top_level, leaf_map, alts, {a[0]: {} for a in alts}], f)
+    with open(pnr / "__placements_to_run__.json", "w") as f:
+        json.dump([0], f)
+    return str(pnr / "__placer_dump__.json")
+
+
+def _mentions(node, dead):
+    """제약이 사라진 인스턴스 이름을 쓰는가.
+
+    제약마다 이름이 들어 있는 열쇠가 다르다 (blocks, instances, pairs,
+    block1/block2 ...). 전부 세는 대신 값 전체를 훑어 **사라진 이름**이
+    보이면 그 제약을 버린다. 남겨두면 C++ 이 블록을 못 찾는다.
+    """
+    if isinstance(node, str):
+        return node in dead
+    if isinstance(node, dict):
+        return any(_mentions(v, dead) for v in node.values())
+    if isinstance(node, (list, tuple)):
+        return any(_mentions(v, dead) for v in node)
+    return False
+
+
+def _pin_key(v):
+    """핀 참조면 (인스턴스, 핀) 을 돌려준다. 두 모양을 다 본다 —
+    덤프 쪽의 "XDP/P1" 문자열과, PnR 제약 파일 쪽의
+    {"type": "pin", "name": "XDP", "pin": "P1"} 사전."""
+    if isinstance(v, str) and "/" in v:
+        a, b = v.split("/", 1)
+        return (a, b)
+    if isinstance(v, dict) and v.get("type") == "pin" and "name" in v and "pin" in v:
+        return (v["name"], v["pin"])
+    return None
+
+
+def _pin_like(v, nm, pn):
+    if isinstance(v, str):
+        return "%s/%s" % (nm, pn)
+    d = dict(v)
+    d["name"] = nm
+    d["pin"] = pn
+    return d
+
+
+def _remap_pins(node, pinmap):
+    """하위 모듈의 포트를 가리키던 핀 참조를 펼친 뒤의 소자 핀들로 바꾼다.
+
+    하나가 여럿이 될 수 있다 (포트 하나에 소자 핀이 여러 개 붙는다).
+    그래서 목록 자리에서 편다.
+    """
+    if isinstance(node, list):
+        out = []
+        for v in node:
+            k = _pin_key(v)
+            if k is not None and k in pinmap:
+                out.extend(_pin_like(v, nm, pn) for nm, pn in pinmap[k])
+            else:
+                out.append(_remap_pins(v, pinmap))
+        return out
+    if isinstance(node, dict):
+        return dict((k, _remap_pins(v, pinmap)) for k, v in node.items())
+    return node
+
+
+def _fix_constraints(consts, dead, pinmap):
+    """핀 참조는 옮기고, 그래도 사라진 이름이 남는 제약은 버린다."""
+    out, dropped = [], 0
+    for c in consts:
+        c2 = _remap_pins(c, pinmap)
+        if _mentions(c2, dead):
+            dropped += 1          # SymmetricBlocks/Order/Align — 블록 자체를 가리킨다
+            continue
+        out.append(c2)
+    return out, dropped
+
+
+def _prune_constraints(inputs, top_level, dead, pinmap):
+    """inputs/<TOP>.pnr.const.json 에서도 같은 제약을 걷어낸다.
+
+    배선 단계는 이 파일을 두 곳에서 읽는다 — C++ 이 블록 제약으로
+    (_attach_constraint_files), 파이썬이 Route 의 min/max layer 로
+    (route_single_variant). 앞의 것만 걷어내고 뒤는 남겨야 한다.
+    파일은 매 회차 prep 이 다시 쓰므로 여기서 고쳐도 남지 않는다.
+    """
+    p = pathlib.Path(inputs) / (top_level + ".pnr.const.json")
+    if not p.exists():
+        return 0
+    d = json.loads(p.read_text())
+    cs = d.get("constraints", [])
+    keep, dropped = _fix_constraints(cs, dead, pinmap)
+    d["constraints"] = keep
+    p.write_text(json.dumps(d, indent=2))
+    return dropped
+
+
+def _flat_instances(mods, tinst, placement, gs):
+    """하위 모듈을 최상위로 펼친다 — 배치는 그대로, 넷리스트만 편다.
+
+    ## 왜
+
+    축소 wasm 배선기는 **한 인스턴스 안에서 두 번째 모듈**을 돌 때 죽는다
+    (null function). 평면 설계 셋이 끝까지 가는 이유는 모듈이 하나뿐이라
+    route_single_variant 가 한 번만 불리기 때문이다. 그래서 계층 설계도
+    모듈 하나로 만들어 넘긴다.
+
+    배선기가 보는 계층은 **우리 덤프가 정한다** — router_driver 가
+    gen_abstract_verilog_d(우리 덤프) 로 DB 를 짓기 때문이다. 덤프의 최상위
+    모듈이 소자만 담고 있으면 hierTree 가 하나고, 배선기는 한 번만 돈다.
+
+    ## 좌표
+
+    변환을 합성한다. 점 p 는 자식에서 (sX_c*p + oX_c), 그것이 다시 상위에서
+    sX_t*(...) + oX_t 이므로
+
+        sX = sX_t * sX_c,   oX = sX_t * oX_c + oX_t
+
+    레이아웃은 한 점도 안 움직인다. 넷리스트의 계층만 사라진다.
+
+    ## 넷 이름
+
+    prep 의 manipulate_hierarchy 가 하위 모듈 사본(<이름>_PG0)을 만들면서
+    전원핀을 걷어내고 그 자리에 **전역 넷 이름을 직접** 써뒀다. 그래서
+    자식의 actual 은 셋 중 하나다.
+      하위 모듈의 포트   -> 상위 fa_map 으로 상위 넷 이름으로 바꾼다
+      전역 넷(VSS 등)    -> 그대로 둔다
+      그 밖(내부 넷)     -> "<인스턴스>_<넷>" 으로 가른다. 안 가르면 다른
+                            하위 모듈의 같은 이름과 붙어버린다.
+
+    반환: (덤프용 instances, {leaf concrete: abstract}, 사라진 이름들)
+    """
+    glob = {g["actual"] for g in gs}
+    subs = {sm["concrete"]: sm for sm in placement.get("subModules", [])}
+    used = {q["name"] for q in placement["instances"]
+            if tinst[q["name"]]["abstract_template_name"] not in mods}
+
+    def uniq(n):
+        m, k = n, 1
+        while m in used:
+            k += 1
+            m = "%s_%d" % (n, k)
+        used.add(m)
+        return m
+
+    insts, leaf_used, dead, pinmap = [], {}, set(), {}
+    for q in placement["instances"]:
+        src = tinst[q["name"]]
+        ab = src["abstract_template_name"]
+        if ab not in mods:                       # 소자 — 그대로 둔다
+            leaf_used[q["concrete"]] = ab
+            insts.append({
+                "instance_name": q["name"],
+                "abstract_template_name": ab,
+                "concrete_template_name": q["concrete"],
+                "fa_map": [dict(f) for f in src.get("fa_map", [])],
+                "transformation": {"oX": int(q["oX"]), "oY": int(q["oY"]),
+                                   "sX": int(q["sX"]), "sY": int(q["sY"])},
+            })
+            continue
+
+        sm = subs.get(q["concrete"])
+        if sm is None:
+            raise RuntimeError("하위 모듈 배치가 없다: %s" % q["concrete"])
+        dead.add(q["name"])
+        placed = {i["name"]: i for i in sm["instances"]}
+        parent = {f["formal"]: f["actual"] for f in src.get("fa_map", [])}
+        for child in mods[ab]["instances"]:
+            c = placed.get(child["instance_name"])
+            if c is None:
+                raise RuntimeError("하위 모듈 %s 의 %s 배치가 없다"
+                                   % (ab, child["instance_name"]))
+            cab = child["abstract_template_name"]
+            if cab in mods:
+                raise RuntimeError("두 단 넘는 계층은 아직 못 편다: %s" % cab)
+            fa = []
+            for f in child.get("fa_map", []):
+                a = f["actual"]
+                if a in parent:
+                    a = parent[a]
+                elif a not in glob:
+                    a = "%s_%s" % (q["name"], a)
+                fa.append({"formal": f["formal"], "actual": a})
+            leaf_used[c["concrete"]] = cab
+            nm = uniq("%s_%s" % (q["name"], child["instance_name"]))
+            # 핀 참조를 옮길 표: (하위모듈 인스턴스, 포트) -> [(소자, 핀), ...]
+            # SymmetricNets 가 "XDP/P1" 처럼 하위 모듈의 포트를 가리키는데,
+            # 펼치고 나면 XDP 가 없다. 버리면 대칭 배선을 잃으므로 옮긴다.
+            for f in child.get("fa_map", []):
+                if f["actual"] in parent:
+                    pinmap.setdefault((q["name"], f["actual"]), []).append((nm, f["formal"]))
+            insts.append({
+                "instance_name": nm,
+                "abstract_template_name": cab,
+                "concrete_template_name": c["concrete"],
+                "fa_map": fa,
+                "transformation": {
+                    "oX": int(q["sX"]) * int(c["oX"]) + int(q["oX"]),
+                    "oY": int(q["sY"]) * int(c["oY"]) + int(q["oY"]),
+                    "sX": int(q["sX"]) * int(c["sX"]),
+                    "sY": int(q["sY"]) * int(c["sY"]),
+                },
+            })
+    return insts, leaf_used, dead, pinmap
+
+
+def write_dump(work, top_level, placement, flatten=None):
     """우리 배치로 __placer_dump__.json 을 만든다.
 
     ALIGN 의 place 단계가 쓰는 것과 같은 모양이어야 route 가 읽는다.
@@ -179,8 +402,44 @@ def write_dump(work, top_level, placement):
         return {"abstract_name": ab, "concrete_name": cn,
                 "bbox": list(d["bbox"]), "terminals": terms}
 
-    # --- 하위 모듈 이름 짓기 ---
+    key = "%s_0" % top_level
+    has_sub = any(tinst[q["name"]]["abstract_template_name"] in mods
+                  for q in placement["instances"])
+    if flatten is None:
+        flatten = has_sub
+
+    # --- 펼쳐서 넘기기 (기본) ---
     #
+    # 배선기가 보는 계층은 이 덤프가 정한다. 모듈 하나만 담으면 배선기가
+    # 한 번만 돈다 — 평면 설계 셋이 끝까지 가는 바로 그 경로다.
+    # 배치는 안 건드린다. 좌표만 절대 좌표로 합성해 적는다.
+    if flatten and has_sub:
+        try:
+            insts, leaf_used, dead, pinmap = _flat_instances(mods, tinst, placement, gs)
+        except Exception as e:
+            # 못 펴면 계층 그대로 넘긴다. 거기서 죽더라도 "왜 못 폈는지" 는 남는다.
+            print("cannot flatten (%s) - handing the hierarchy over as is" % e)
+            insts = None
+        if insts is not None:
+            dropped = _prune_constraints(pnr / "inputs", top_level, dead, pinmap)
+            kept, _ = _fix_constraints(tmod.get("constraints", []), dead, pinmap)
+            print("flattened %d sub-module instances into %s "
+                  "(%d leaf instances, %d block constraints dropped)"
+                  % (len(dead), top_level, len(insts), dropped))
+            top_entry = {"abstract_name": top_level, "concrete_name": key,
+                         "bbox": list(placement["bbox"]),
+                         "parameters": tmod.get("parameters", []),
+                         "constraints": kept,
+                         "instances": insts}
+            return _emit_dump(pnr, prim, top_level, [[key, {
+                "global_signals": gs,
+                "leaves": [leaf_entry(c, a) for c, a in sorted(leaf_used.items())],
+                "modules": [top_entry],
+            }]])
+
+    # --- 계층 그대로 넘기기 (wasm 배선기가 고쳐지면 이쪽이 맞다) ---
+    #
+    # 하위 모듈 이름 짓기.
     # 우리 배치기는 하위 모듈을 여러 모양으로 올려 "<이름>__v0" 꼴을 쓴다.
     # 덤프 쪽 이름은 "<abstract>_<번호>" 여야 한다 — 배선 단계가
     # change_concrete_names_for_routing 에서 ^(.+)_(\d+)$ 로 풀어 쓴다.
@@ -197,7 +456,6 @@ def write_dump(work, top_level, placement):
         sub_name[q["concrete"]] = "%s_%d" % (ab, n)
 
     # --- 최상위 module 항목 ---
-    key = "%s_0" % top_level
     insts, leaf_used = [], {}
     for q in placement["instances"]:
         src = tinst[q["name"]]
@@ -264,29 +522,7 @@ def write_dump(work, top_level, placement):
            "leaves": [leaf_entry(c, a) for c, a in sorted(leaf_used.items())],
            "modules": [top_entry] + sub_entries}
 
-    # leaf_map: abstract -> {concrete -> [{width,height}, [[rect,label,...]], None]}
-    # 단위는 마이크론이다 (2_primitives 는 정수 좌표, ScaleFactor 1000).
-    prims = json.loads((prim / "__primitives__.json").read_text())
-    leaf_map = {}
-    for cn, meta in prims.items():
-        ab = meta["abstract_template_name"]
-        p = prim / (cn + ".json")
-        if not p.exists():
-            continue
-        bb = json.loads(p.read_text())["bbox"]
-        w, h = (bb[2] - bb[0]) / 1000.0, (bb[3] - bb[1]) / 1000.0
-        leaf_map.setdefault(ab, {})[cn] = [
-            {"width": w, "height": h},
-            [[[0, 0, w, h], "%s<br>0 0 %g %g" % (cn, w, h), True, 0, False]],
-            None,
-        ]
-
-    alts = extra_alts + [[key, alt]]
-    with open(pnr / "__placer_dump__.json", "w") as f:
-        json.dump([top_level, leaf_map, alts, {a[0]: {} for a in alts}], f)
-    with open(pnr / "__placements_to_run__.json", "w") as f:
-        json.dump([0], f)
-    return str(pnr / "__placer_dump__.json")
+    return _emit_dump(pnr, prim, top_level, extra_alts + [[key, alt]])
 
 
 
@@ -351,6 +587,8 @@ def route(work, name, top_level, placement_json):
     try:
         _skip_cap_placer()
         placement = json.loads(placement_json)
+        # 기본은 "계층이 있으면 편다". 페이지가 flatten:false 를 주면 계층 그대로.
+        flatten = placement.get("flatten")
         from align.main import schematic2layout
         w = pathlib.Path(work)
         pdk = pathlib.Path("/align/pdks/FinFET14nm_Mock_PDK")
@@ -370,7 +608,7 @@ def route(work, name, top_level, placement_json):
                          nvariants=1, effort=0)
 
         # 그 다음 우리 배치를 덤프에 심는다 (prep 이 덮어쓰지 않도록 순서가 중요)
-        write_dump(work, top_level, placement)
+        write_dump(work, top_level, placement, flatten)
         # bottom_up 이 CLI 기본값이고, WSL 에서 DRC 를 닫은 경로도 이쪽이다.
         # 파이썬 API 기본값 top_down 은 축소 빌드에서 불안정하다.
         schematic2layout(w / "netlist", pdk, subckt=top_level, working_dir=w,

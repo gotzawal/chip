@@ -21,7 +21,7 @@ import { placeHierarchy, symmetryResidual, orderViolations,
          spreadShapes, SUB_VARIANTS } from "./place.mjs";
 
 export async function runJob(data, post) {
-  const { name, blob, batch, previewOnly, grid = [80, 84] } = data;
+  const { name, blob, batch, previewOnly, grid = [80, 84], hpwlWeight } = data;
   try {
     const topName = blob.topology.modules[topIndex(blob.topology)].name;
     const order = moduleOrder(blob.topology);
@@ -38,6 +38,7 @@ export async function runJob(data, post) {
     let seen = 0, frames = 0, lastFrame = 0;
     const r = placeHierarchy(blob, {
       batch, iters: 600, seed: 1, grid,
+      ...(hpwlWeight ? { hpwlWeight } : {}),
       onProgress: (done, total) => {
         seen++;
         if (seen % 8 === 0)
@@ -128,7 +129,7 @@ export async function runJob(data, post) {
       offgrid: top.gridOff, grid,
       nOrder: (P.constraints ?? []).filter((c) => c.constraint === "Order").length,
       axes: axes(P, top.cx, top.cy).map((a) => ({ ...a, at: a.at - (a.vert ? ox0 : oy0) })),
-      combos: top.totalAssignments, configs: top.configs,
+      combos: top.totalAssignments, configs: top.configs, hpwlWeight,
       starts: top.starts, rounds: top.rounds,
       tried: top.tried, legalFail: top.legalizeFail,
       legalFailBy: top.legalizeFailBy, legalRescued: top.legalizeRescued,

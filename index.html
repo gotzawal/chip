@@ -280,6 +280,16 @@
         <option value="288">288 — 넓게</option>
       </select>
     </label>
+    <label class="field"
+           title="점수의 면적 대 배선 무게. 점수는 면적/기준 + 무게 x HPWL/기준 이다.
+무게 1 에서는 면적이 배선을 2:1 로 눌러, 면적을 조금 얻고 배선을 크게 내주는
+변이를 골랐다 (five_transistor_ota 0.862x / 1.404x). 2 가 실측으로 균형이다."><span>면적 ↔ 배선</span>
+      <select id="hw">
+        <option value="1">1 — 면적 우선</option>
+        <option value="2" selected>2 — 균형</option>
+        <option value="4">4 — 배선 우선</option>
+      </select>
+    </label>
     <button class="run" id="run">배치 실행</button>
     <button class="run" id="routeRun" disabled
             title="배치한 뒤 ALIGN 배선기(wasm)로 배선한다">배선 실행</button>
@@ -695,6 +705,8 @@ function showResult(r) {
     : `${r.offgrid} <small>블록이 격자 밖</small>`,
     r.offgrid === 0 ? "win" : "lose");
   mkRow(dl, "변이 조합", `${r.combos} <small>중 ${r.configs} 설정 탐색</small>`);
+  if (r.hpwlWeight)
+    mkRow(dl, "점수 무게", `면적 1 : 배선 ${r.hpwlWeight}`);
   mkRow(dl, "시작점", `${r.starts ?? "—"} <small>라운드 ${r.rounds ?? 1}</small>`);
   {
     const why = Object.entries(r.legalFailBy ?? {})
@@ -1250,10 +1262,12 @@ function placeDownloads() {
               "배치 (좌표·변이·반전)");
 }
 
-/** 내려받을 배치 JSON — emit.mjs 가 내는 것과 같은 모양. */
+/** 내려받을 배치 JSON — emit.mjs 가 내는 것과 같은 모양.
+ *  하위 모듈까지 담는다. 계층 설계는 최상위 좌표만으로는 배선기에 못 넘긴다. */
 function placementJson() {
   return {
     top: designName(), bbox: ours.bbox, grid: ours.grid ?? [80, 84],
+    subModules: ours.subModules ?? [],
     instances: ours.rects.map((r) => ({
       name: r.name, concrete: r.concrete,
       oX: Math.round(r.sx > 0 ? r.x : r.x + r.w),
@@ -1282,7 +1296,8 @@ async function run() {
   try {
     const name = $("ex").value;
     const blob = await loadExample(name);
-    startJob({ name, blob, batch: Number($("batch").value) });
+    startJob({ name, blob, batch: Number($("batch").value),
+               hpwlWeight: Number($("hw").value) });
   } catch (err) {
     busy = false; $("run").disabled = false;
     clearDownloads();
