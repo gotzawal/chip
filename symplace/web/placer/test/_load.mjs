@@ -1,6 +1,6 @@
 /** 예제 파일(data/<이름>.json)을 Design 으로 읽는다. node 전용(fs).
  *
- *  페이지가 fetch 로 읽는 바로 그 파일이다 — {topology, primitives, templates, place}.
+ *  페이지가 fetch 로 읽는 바로 그 파일이다 — {topology, primitives, templates}.
  *  검사와 사이트가 같은 입력을 보므로, 예제를 더 넣거나 고치면 검사가 그것을 그대로 본다.
  *  (예전에는 fixtures/design/ 에 같은 앞단 출력을 펼쳐 두고 따로 읽었다 — 사본이라 갈라질 수 있어 걷어냈다.)
  */
@@ -8,7 +8,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readDesign } from "../../../../src/design.mjs";
-import { baseline } from "../../../../src/baseline.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const J = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
@@ -19,21 +18,6 @@ export function exampleNames() {
 }
 
 export function loadDesign(name) {
-  const { topology, primitives, templates, place = null } = J(path.join(ROOT, "data", name + ".json"));
-  return {
-    topology, primitives, templates,
-    design: readDesign({ topology, primitives, templates }),
-    // ALIGN 배치 결과는 **대조용**이다. 배치에는 쓰지 않는다.
-    place,
-  };
-}
-
-/** ALIGN 의 place 결과에서 기준선(면적, HPWL)을 직접 잰다.
- *  페이지가 쓰는 src/baseline.mjs 와 같은 자다 — 핀 경계 사각형으로 잰 HPWL.
- */
-export function alignBaseline(place, topName) {
-  const b = baseline(place, topName);
-  const top = place.modules.find((m) => m.abstract_name === topName)
-           ?? place.modules[place.modules.length - 1];
-  return { area: b.area, hpwl: b.hpwl, bbox: b.bbox, top };
+  const { topology, primitives, templates } = J(path.join(ROOT, "data", name + ".json"));
+  return { topology, primitives, templates, design: readDesign({ topology, primitives, templates }) };
 }

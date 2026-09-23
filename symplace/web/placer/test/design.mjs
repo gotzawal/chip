@@ -1,12 +1,10 @@
-/** 앞단 출력에서 만든 문제가, ALIGN 배치 결과에서 뽑았던 고정값과 같은가.
+/** 앞단 출력에서 만든 문제가, 고정값(fixtures/<예제>.json)의 문제와 같은가.
  *
- *  이게 변이 선택의 근거가 되는 검사다. 지금까지는 블록 크기·핀·영역을 전부
- *  ALIGN 의 **place 단계 출력**에서 읽었다. 거기엔 ALIGN 이 이미 고른 변이가
- *  박혀 있다. design.mjs 는 그 앞 단계(2_primitives)에서 읽어 변이를 고르지
- *  않고 남긴다 — 그러려면 먼저 "같은 변이를 고르면 같은 문제가 나온다"가
- *  성립해야 한다.
+ *  이게 변이 선택의 근거가 되는 검사다. 고정값은 변이가 이미 정해진 배치 문제(블록 크기·핀·넷)다.
+ *  design.mjs 는 그 앞 단계(2_primitives)에서 읽어 변이를 고르지 않고 남긴다 — 그러려면 먼저
+ *  "같은 변이를 고르면 같은 문제가 나온다"가 성립해야 한다.
  *
- *  그래서 ALIGN 이 고른 concrete 를 그대로 배정해 놓고 고정값과 맞대 본다.
+ *  그래서 고정값의 블록 크기와 같은 변이를 배정해 놓고 고정값과 맞대 본다.
  *  블록 순서와 핀 순서는 자료구조 순회 순서라 의미가 없으므로 이름으로 맞춘다.
  */
 import fs from "node:fs";
@@ -14,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadDesign, exampleNames } from "./_load.mjs";
 import { variantGroups, buildProblem, countAssignments, enumerateAssignments,
-         regionCandidates, structuralBound, topIndex, moduleOrder } from "../../../../src/design.mjs";
+         regionCandidates, structuralBound, moduleOrder } from "../../../../src/design.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(HERE, "..", "fixtures");
@@ -26,7 +24,7 @@ const ok = (c, msg) => { if (!c) { fails++; console.log("  실패 " + msg); } };
 
 for (const ex of exampleNames()) {
   console.log("\n=== " + ex + " ===");
-  const { topology, design, place } = loadDesign(ex);
+  const { topology, design } = loadDesign(ex);
   const groups = variantGroups(design);
 
   console.log("  인스턴스 %d, 변이 그룹 %d, 조합 %d",
@@ -36,8 +34,6 @@ for (const ex of exampleNames()) {
                 g.members.map((i) => design.instances[i].name).join(","),
                 g.abstract, g.choices.length, g.choices.join(" "));
 
-  if (!place) { console.log("  (ALIGN 배치 결과 없음 — 대조 생략)"); continue; }
-
   // 이 검사는 **평면 설계** 전용이다. 계층 설계는 최상위 인스턴스가 하위 모듈을
   // 가리켜서 leaf 템플릿 대조가 성립하지 않고, 고정값 파일도 계층을 거쳐
   // 만들어진 것이라 블록 수부터 다르다. 계층 경로는 test/place.mjs 가 본다.
@@ -46,26 +42,26 @@ for (const ex of exampleNames()) {
     continue;
   }
 
-  // --- ALIGN 이 고른 변이를 배정으로 되돌린다 ---
-  const topName = topology.modules[topIndex(topology)].name;
-  const mod = place.modules.find((m) => m.abstract_name === topName)
-           ?? place.modules[place.modules.length - 1];
-  const chosen = new Map(mod.instances.map((i) => [i.instance_name, i.concrete_template_name]));
+  // --- 고정값의 블록 크기와 같은 변이를 배정으로 되찾는다 ---
+  const fp = path.join(FIX, ex + ".json");
+  if (!fs.existsSync(fp)) { console.log("  (고정값 없음 — 배정 생성만 본다)"); }
+  const fx = fs.existsSync(fp) ? J(fp) : null;
+  const fxSize = new Map((fx?.names ?? []).map((n, i) => [n, [fx.w[i], fx.h[i]]]));
   const assign = groups.map((g) => {
     const nm = design.instances[g.members[0]].name;
-    const k = g.choices.indexOf(chosen.get(nm));
-    ok(k >= 0, `${nm}: ALIGN 이 고른 ${chosen.get(nm)} 이 후보에 없다`);
+    const want = fxSize.get(nm);
+    const k = want ? g.choices.findIndex((c) => {
+      const t = design.info.get(c);
+      return t && Math.abs(t.w - want[0]) < 1e-9 && Math.abs(t.h - want[1]) < 1e-9;
+    }) : -1;
+    if (want) ok(k >= 0, `${nm}: 고정값 크기 ${want.join("x")} 의 변이가 후보에 없다`);
     return Math.max(0, k);
   });
-  console.log("  ALIGN 의 선택 = 배정 [%s]  (%s)", assign.join(","),
+  console.log("  고정값의 변이 = 배정 [%s]  (%s)", assign.join(","),
               groups.map((g, i) => g.choices[assign[i]]).join(" "));
 
   const prob = buildProblem(design, groups, assign);
-
-  // --- 고정값과 대조 ---
-  const fp = path.join(FIX, ex + ".json");
-  if (!fs.existsSync(fp)) { console.log("  (고정값 없음)"); continue; }
-  const fx = J(fp);
+  if (!fx) continue;
 
   ok(prob.n === fx.n, `블록 수 ${prob.n} vs ${fx.n}`);
   const fi = new Map(fx.names.map((n, i) => [n, i]));

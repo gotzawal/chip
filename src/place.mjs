@@ -348,6 +348,24 @@ export function spreadShapes(alts, k) {
 /** 대칭 잔차 — 같은 대칭 그룹의 블록들이 정말 한 축 위에 있는가.
  *  legalize 가 theta 공간에서 풀므로 기계 정밀도로 0 이어야 한다.
  */
+/** 대칭축 위치 (세로축이면 x). 그림에 점선으로 그린다. */
+export function axes(problem, cx, cy) {
+  const idx = new Map(problem.names.map((n, i) => [n, i]));
+  const out = [];
+  for (const c of problem.constraints ?? []) {
+    if (c.constraint !== "SymmetricBlocks") continue;
+    const vert = (c.direction ?? "V") === "V";
+    const vals = [];
+    for (const pr of c.pairs ?? []) {
+      const ids = pr.map((p) => idx.get(p)).filter((v) => v !== undefined);
+      if (!ids.length) continue;
+      vals.push(ids.reduce((s, i) => s + (vert ? cx[i] : cy[i]), 0) / ids.length);
+    }
+    if (vals.length) out.push({ vert, at: vals[0] });
+  }
+  return out;
+}
+
 export function symmetryResidual(problem, cx, cy) {
   const idx = new Map(problem.names.map((n, i) => [n, i]));
   let worst = 0;

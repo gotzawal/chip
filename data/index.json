@@ -2,61 +2,61 @@
  {
   "name": "telescopic_ota",
   "label": "Telescopic OTA",
-  "bytes": 13256
+  "bytes": 9799
  },
  {
   "name": "current_mirror_ota",
   "label": "Current-Mirror OTA",
-  "bytes": 8994
+  "bytes": 6238
  },
  {
   "name": "five_transistor_ota",
   "label": "5-Transistor OTA",
-  "bytes": 12220
+  "bytes": 10997
  },
  {
   "name": "cascode_current_mirror_ota",
   "label": "Cascode Current-Mirror OTA",
-  "bytes": 25796
+  "bytes": 18122
  },
  {
   "name": "high_speed_comparator",
   "label": "High-Speed Comparator",
-  "bytes": 25493
+  "bytes": 18186
  },
  {
   "name": "inverter_v1",
   "label": "Inverter v1",
-  "bytes": 3647
+  "bytes": 2169
  },
  {
   "name": "buffer",
   "label": "Buffer",
-  "bytes": 6824
+  "bytes": 4488
  },
  {
   "name": "inverter_v2",
   "label": "Inverter v2",
-  "bytes": 3647
+  "bytes": 2169
  },
  {
   "name": "inverter_v3",
   "label": "Inverter v3",
-  "bytes": 4751
+  "bytes": 2885
  },
  {
   "name": "common_source",
   "label": "Common Source",
-  "bytes": 5040
+  "bytes": 4150
  },
  {
   "name": "block_spacing_bug",
   "label": "Block Spacing",
-  "bytes": 9402
+  "bytes": 8827
  },
  {
   "name": "five_transistor_ota_high_frequency",
   "label": "5-Transistor OTA (High Frequency)",
-  "bytes": 10558
+  "bytes": 9001
  }
 ]

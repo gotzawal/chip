@@ -1,17 +1,17 @@
-/** 앞단 출력만으로 배치까지 — ALIGN 배치기 없이.
+/** 앞단 출력만으로 배치까지 — 예제 전부를 돌려 구조를 검사한다.
  *
  *  이 검사가 성립하면 "넷리스트를 주면 브라우저가 배치한다"가 참이 된다.
- *  ALIGN 의 place 결과는 **기준선으로만** 쓴다 (면적/HPWL 비교, 변이·반전 대조).
  *
  *  보는 것:
- *    변이 배정   우리가 고른 것 vs ALIGN 이 고른 것
- *    거울 반전   같은 비교
- *    품질        면적비, HPWL비, 겹침, 대칭 잔차
+ *    겹침 정확히 0, 대칭 잔차 ~0, Order 위반 0, (GRID=1 이면) 격자 밖 블록 0
+ *    면적이 블록 합계 면적의 3 배 안쪽 (구조가 깨졌는지)
+ *    변이 배정·반전·bbox·HPWL 은 보고만 한다
  *    legalize    상위 후보 중 몇 개가 풀렸나 (영역 후보가 나쁘면 INFEASIBLE)
+ *
+ *  실행:  node test/place.mjs [예제 ...]     (BATCH=, ITERS=, GRID=1, GPU=<설정당 시작점>)
  */
-import { loadDesign, alignBaseline, exampleNames } from "./_load.mjs";
+import { loadDesign, exampleNames } from "./_load.mjs";
 import { placeHierarchy, symmetryResidual, orderViolations } from "../../../../src/place.mjs";
-import { topIndex } from "../../../../src/design.mjs";
 
 const BATCH = Number(process.env.BATCH ?? 96);
 const ITERS = Number(process.env.ITERS ?? 600);
@@ -33,17 +33,7 @@ const wanted = process.argv.slice(2);          // 예제 이름을 주면 그것
 for (const ex of exampleNames()) {
   if (wanted.length && !wanted.includes(ex)) continue;
   console.log("\n=== " + ex + " ===");
-  const { topology, primitives, templates, place } = loadDesign(ex);
-
-  // ALIGN 기준선은 예제에 든 place JSON 에서 **직접** 잰다 (페이지와 같은 자).
-  let refArea = 1, refHpwl = 1, alignTop = null;
-  if (place) {
-    const topName = topology.modules[topIndex(topology)].name;
-    const base = alignBaseline(place, topName);
-    refArea = base.area; refHpwl = base.hpwl; alignTop = base.top;
-    console.log(`  ALIGN 기준  bbox ${base.bbox[2] - base.bbox[0]}x${base.bbox[3] - base.bbox[1]}  ` +
-                `면적 ${base.area.toExponential(3)}  HPWL ${base.hpwl.toFixed(0)}`);
-  }
+  const { topology, primitives, templates } = loadDesign(ex);
 
   const t0 = Date.now();
   const hr = await placeHierarchy({ topology, primitives, templates },
@@ -63,10 +53,9 @@ for (const ex of exampleNames()) {
   const resid = symmetryResidual(r.problem, r.cx, r.cy);
   console.log(`  블록 ${r.names.length}  변이조합 ${r.totalAssignments}  설정 ${r.configs}  방향뒤집기 ${r.dirFlips ?? 0}  ` +
               `시작점 ${r.starts} (${r.runner})  legalize ${r.tried - r.legalizeFail}/${r.tried} 격자 ${r.gridTried}  ${dt.toFixed(1)}s (탐색 ${r.secs.search.toFixed(1)} legalize ${r.secs.legalize.toFixed(1)})`);
-  const hpwlRatio = refHpwl > 0 ? (r.hpwl / refHpwl).toFixed(3) + "x" : "—";   // 넷이 없는 설계(inverter)는 0/0
-  console.log(`  면적 ${(r.area / refArea).toFixed(3)}x  HPWL ${hpwlRatio}  ` +
-              `겹침 ${(r.overlap / blockArea).toExponential(1)}  대칭잔차 ${resid.toExponential(1)}  ` +
-              `bbox ${Math.round(bw)}x${Math.round(bh)}` + (r.grid ? `  격자밖 ${r.gridOff}` : ""));
+  console.log(`  bbox ${Math.round(bw)}x${Math.round(bh)}  채움 ${(blockArea / Math.max(1, r.area)).toFixed(3)}  HPWL ${r.hpwl.toFixed(0)}  ` +
+              `겹침 ${(r.overlap / blockArea).toExponential(1)}  대칭잔차 ${resid.toExponential(1)}` +
+              (r.grid ? `  격자밖 ${r.gridOff}` : ""));
   if (r.grid) ok(r.gridOff === 0, `격자 밖 블록 ${r.gridOff}`);
   if (r.hpwlBeforeFlip != null)
     console.log(`  반전 고르기 전 HPWL ${r.hpwlBeforeFlip.toFixed(0)} -> 후 ${r.hpwl.toFixed(0)}` +
@@ -79,21 +68,10 @@ for (const ex of exampleNames()) {
                           (ordBad.length ? ": " + ordBad.join(", ") : ""));
   ok(ordBad.length === 0, `Order 위반 ${ordBad.join(", ")}`);
   // 품질은 수치로 보고하되, 구조가 깨졌을 때만 실패로 본다.
-  // (면적 3 배는 "다른 절충"이 아니라 무언가 고장난 것이다)
-  ok(r.area / refArea < 3, `면적이 기준의 ${(r.area / refArea).toFixed(1)} 배다 — 구조 문제`);
-
-  if (alignTop) {
-    const ac = new Map(alignTop.instances.map((i) => [i.instance_name, i.concrete_template_name]));
-    const at = new Map(alignTop.instances.map((i) => [i.instance_name, i.transformation]));
-    const vAgree = r.names.filter((n, i) => ac.get(n) === r.concrete[i]).length;
-    const fAgree = r.names.filter((n, i) =>
-      at.get(n) && Math.sign(at.get(n).sX) === Math.sign(r.sx[i])
-                && Math.sign(at.get(n).sY) === Math.sign(r.sy[i])).length;
-    console.log(`  ALIGN 과 일치 — 변이 ${vAgree}/${r.names.length}, 반전 ${fAgree}/${r.names.length}`);
-    const diff = r.names.filter((n, i) => ac.get(n) !== r.concrete[i]);
-    if (diff.length) console.log("    변이 다른 블록: " +
-      diff.map((n) => `${n} 우리=${r.concrete[r.names.indexOf(n)]} ALIGN=${ac.get(n)}`).join(", "));
-  }
+  // (블록 합계 면적의 3 배는 "다른 절충"이 아니라 무언가 고장난 것이다)
+  ok(r.area < 3 * blockArea, `면적이 블록 합계의 ${(r.area / blockArea).toFixed(1)} 배다 — 구조 문제`);
+  console.log(`  변이 ${r.concrete.map((c) => c.replace(/^.*_(X\d+_Y\d+)$/, "$1")).join(" ")}  ` +
+              `반전 ${r.names.map((_, i) => (r.sx[i] > 0 ? "+" : "-") + (r.sy[i] > 0 ? "+" : "-")).join(" ")}`);
 }
 console.log(fails ? `\n실패 ${fails} 건` : "\n전부 통과");
 process.exit(fails ? 1 : 0);
