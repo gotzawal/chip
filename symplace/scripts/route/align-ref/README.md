@@ -21,6 +21,9 @@ node align-ref/db/dumphn.mjs <예제> ~/.cache/symplace/aligndb/<예제>
 node -e 'import("../../../src/route/pdk.mjs").then(m=>process.stdout.write(JSON.stringify(m.MOCK_PDK)))' > /tmp/layers.json
 python3 align-ref/db/build_db.py ~/.cache/symplace/aligndb/<예제> /tmp/layers.json   # ALL OK
 python3 align-ref/db/wires.py <11_..._route_out_<모듈>.json> ~/.cache/symplace/check/<예제>.json
+node ../../web/placer/test/aligndb.mjs              # JS 판(src/route/align/)을 tap·aligndb·check 와 대조 (10 판)
+node align-ref/db/refrun.mjs <예제> <배치.json> <out> [--const=<제약.json>]   # 새 경우의 기준을 한 뿌리에
+SYMPLACE_CACHE=<out> node ../../web/placer/test/aligndb.mjs --ex=<예제> --tag=ours --data=<out>/data
 align-ref/ilp/build-native.sh                     # 합성 ILP 생성기 (lp_solve 를 같이 빌드)
 DUMP=lps.jsonl ~/.cache/symplace/lpsolve-wasi/native/harness 1 12 400   # 씨앗 1..399, 넷 12 개
 node align-ref/ilp/wasm_lp.mjs lps.jsonl ref.jsonl                 # 기준 휠의 lp_solve 로
