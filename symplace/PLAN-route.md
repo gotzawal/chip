@@ -19,10 +19,14 @@
    첫 배선만 살고, 계층 설계는 두 번째 모듈에서, 같은 설계를 두 번 배선하면 두 번째에서
    죽는다. JS 한 줄로 우회된다(검증함). 이러면 **펼치기(flatten)도 필요 없다** —
    계층 그대로 5/5 가 끝까지 간다.
-3. **계획: 배선에서 파이썬을 뺀다.** C++ 배선기만 독립 wasm(`route(json) -> json`,
-   1.5 MB 안팎)으로 빌드하고, 그 앞(prep)과 뒤(도형 합성·DRC/LVS·GDS)는 JS 로 옮긴다.
+3. **계획: 배선에서 파이썬을 빼고, 배선기는 Rust 로 새로 짠다.** ALIGN 의 C++ 배선기를
+   옮기는 대신(우리 경로만 2 만 4 천 줄) 이 PDK 와 이 크기에 맞춘 격자 배선기를 새로 짜서
+   wasm 하나로 돌린다. 심판(DRC/LVS)은 ALIGN 의 검사기를 JS 로 옮겨 파이썬과 대조한다.
    예제는 리프 도형만 더 실으면(5 개 합계 gzip 82 KB) Pyodide 없이 배선된다.
-   Pyodide 워커는 `.sp` 를 올릴 때(앞단)만 뜬다.
+   Pyodide 워커는 `.sp` 를 올릴 때(앞단)만 뜬다. (4 절)
+
+**진행.** 0 단계 끝남 (`4c907d4`): 워커의 BLAS 우회로 5 예제가 두 번 연속, 계층 그대로
+배선된다 (DRC 0/4/0/1/0). 나머지는 4 절의 순서대로.
 
 ---
 
@@ -193,6 +197,8 @@ Object.defineProperty(py._module.LDSO.loadedLibsByName, "libmyBLAS.so",
 lp_solve 원본에서 이 호출을 가르는 매크로(`lp_lib.h` 의 `libBLAS`, 또는
 `LoadableBlasLib`)를 확인해 끈다. 합격선은 매크로 이름과 무관하다 —
 **결과물의 import 에 `env.dlopen` 이 없어야 한다** (`wasm-objdump -x -j Import`).
+(배선기를 Rust 로 새로 짜기로 했으므로(4 절) 이 휠은 다시 빌드하지 않는다. JS 우회는
+파이썬 배선 경로를 걷어낼 때 같이 사라진다.)
 
 ---
 
@@ -221,122 +227,129 @@ lp_solve 원본에서 이 호출을 가르는 매크로(`lp_lib.h` 의 `libBLAS`
 
 ---
 
-## 4. 계획
+## 4. 계획 — 배선기를 Rust 로 새로 짠다
 
-### 목표 모양
+### 4.1 왜 C++ 을 옮기지 않고 새로 짜는가
+
+ALIGN 원본(`8d3cc2e`, 이 저장소가 고정한 판)을 재 봤다. 옛 라우터(모드 0·1)는
+`assert(0)` 로 막혀 있어 죽은 코드고, 우리 경로(RouteWork 4·5·2·3)는
+`RawRouter -> GcellGlobalRouter -> GcellDetailRouter -> PowerRouter` 에 격자·그래프·A* 다.
+
+| 1:1 로 옮긴다면 | 규모 |
+|---|---|
+| 라우터 중 우리 경로 (옛 라우터 3.8K 제외) | 19.4K 줄 |
+| PnRDB (데이터 모델, PDK/LEF/제약 읽기, 계층 연산 — WriteJSON 제외) | 4.6K 줄 |
+| lp_solve — 전역 배선의 0-1 ILP (후보 스타이너 트리 고르기) | Rust MILP 로 바꿔야 한다 |
+| placer 13.5K 줄 | 필요 없다 — 배치는 좌표로 바로 넘긴다 |
+
+2 만 4 천 줄을 옮겨도 가벼워지는 몫은 작다. 무거운 것은 C++ 이 아니라 파이썬 스택이었고,
+C++ 알맹이는 이미 1~4.5 초, 독립 빌드로 1.5 MB 안팎이다. 대신 문제가 작고 규칙이 단순하다:
+
+| 예제 | 크기 | 트랙 M1/M2/M3/M4 | 격자 노드 | 넷 (모든 모듈) |
+|---|---|---|---|---|
+| telescopic_ota | 1492 x 11844 | 18/141/18/141 | 12k | 15 |
+| current_mirror_ota | 8852 x 2436 | 110/29/110/29 | 15k | 10 |
+| five_transistor_ota | 4212 x 5964 | 52/71/52/71 | 17k | 8 |
+| cascode_current_mirror_ota | 6532 x 11844 | 81/141/81/141 | 53k | 24 |
+| high_speed_comparator | 6132 x 10668 | 76/127/76/127 | 45k | 30 |
+
+PDK(FinFET14nm_Mock_PDK/layers.json)는 층마다 한 방향, 고정 피치·고정 폭이다.
+
+| 층 | 방향 | 피치 | 폭 | MinL | EndToEnd |
+|---|---|---|---|---|---|
+| M1 / M3 | 세로 | 80 | 32 / 40 | 180 / 210 | 48 |
+| M2 / M4 | 가로 | 84 | 32 / 40 | 200 / 140 | 48 / 65 |
+| M5 / M6 | 세로 / 가로 | 144 | 64 | 100 / 360 | 65 / 70 |
+
+비아 V1·V2 는 32x32 (V3 40x40), 둘러싸기는 금속 방향으로 20, 비아 간격(V1 48/52,
+V2 48/40, V3 40/44)은 **이웃 격자점끼리 정확히 맞게** 잡혀 있다 — 격자 위에 놓기만 하면
+비아 간격은 저절로 지켜진다. 남는 규칙은 끝단 간격(EndToEnd), 최소 길이(MinL),
+비아 둘러싸기뿐이다. 트랙 격자 위의 A* 에 맞는 모양이다.
+
+언어: 이 크기면 JS 로도 A* 한 번이 수 ms 라 성능 때문에 Rust 가 필요하지는 않다.
+Rust 를 고른 것은 기하 코드에서 타입이 실수를 잡아 주고, 더 큰 설계로 갈 여유가 있어서다.
+`wasm32-unknown-unknown` 으로 빌드하면 JS 접착 코드가 없다 — serde_json 을 넣은 시험
+모듈이 97 KB, import 0 개였다. 경계를 JSON 으로 두므로 나중에 언어를 바꿔도 앞뒤는 그대로다.
+
+### 4.2 목표 모양
 
 ```
 index.html
- ├─ worker.mjs -> src/job.mjs                   배치 (그대로)
- ├─ routeworker.mjs  (새로)                     배선 — Pyodide 없음
- │    src/route/prep.mjs    설계 + 배치 -> 라우터 입력 JSON
- │                          전원핀 걷기(manipulate_hierarchy), 제약 변환(PnRConstraintWriter),
- │                          리프 LEF 를 리프 JSON 에서
- │    py/router/router.mjs + router.wasm        C++ 배선기 단독 빌드, route(json) -> json
- │    src/route/post.mjs    도형 합성 · DRC/LVS · GDS
- └─ frontworker.mjs  (앞단만)                   .sp 를 올릴 때만 — Pyodide + libz3
-data/<예제>.leaves.json                          리프 전체 도형 (배선할 때만 받는다)
+ ├─ worker.mjs -> src/job.mjs                  배치 (그대로)
+ ├─ routeworker.mjs  (새로)                    배선 — Pyodide 없음
+ │    src/route/problem.mjs   설계 + 배치 + 리프 도형 -> 배선 문제
+ │                            (펼친 넷리스트, 핀, 장애물, 대칭 넷, 전원 넷)
+ │    route/router.wasm       Rust 배선기 (소스 symplace/router), route(json) -> json
+ │    src/route/compose.mjs   리프 도형 + 배선 도형 -> 레이어별 사각형
+ │    src/route/check.mjs     DRC/LVS (ALIGN cell_fabric 이식)
+ │    src/route/gds.mjs       GDS 쓰기
+ └─ frontworker.mjs  (앞단만)                  .sp 를 올릴 때만 — Pyodide + libz3
+data/<예제>.leaves.json                         리프 전체 도형 (배선할 때만 받는다)
 ```
 
 | | 지금 | 목표 |
 |---|---|---|
-| 예제 배선에 받는 것 | 약 42 MB | 라우터 1.5 MB 안팎 + 리프 도형 수십 KB |
-| 차가운 클릭 (node) | 13~20 s | C++ 알고리즘 1.0~4.5 s + JS 앞뒤 |
-| 두 번째 배선 · 계층 설계 | 죽는다 | 된다 (원인 제거) |
+| 예제 배선에 받는 것 | 약 40 MB | 배선기 수백 KB + 리프 도형 수십 KB |
+| 차가운 클릭 (node) | 13~20 s | 배선기 시간 + JS 앞뒤 |
 | 앞단과 배선 | 같은 워커에 묶여 있다 | 떨어진다 |
 
-라우터 크기는 NOTES-phase0 S6 의 독립 링크(router + PnRDB + lp_solve = 1.3 MB)에
-placer 를 더해 어림한 값이다. 2 단계에서 잰다.
+### 4.3 순서와 합격선
 
-### 0 단계 — 지금 구조에서 바로 (작고, 되돌리기 쉽다)
+**0 단계 — 끝남** (`4c907d4`). BLAS 우회 한 줄, 펼치기 제거, 워커 재사용, align-front.zip
+1.9 -> 0.2 MB, README. 5 예제 두 번 연속 배선, DRC 0/4/0/1/0. 새 배선기가 합격할 때까지
+이 경로가 폴백이자 기준선이다.
 
-1. BLAS 우회 한 줄을 `frontworker.mjs` 의 `boot()` 끝에 넣는다 (2.4).
-2. 펼치기를 기본에서 끈다. 부록 A 로 확인한 뒤 `_flat_instances`·`_remap_pins`·
-   `_fix_constraints`·`_prune_constraints` 와 `write_dump` 의 펼침 분기를 지운다.
-3. `rm -rf 3_pnr` 의 주석을 바로잡는다 (null function 과 무관하다).
-4. `align-front.zip` 에서 PDF 2 개·PPT·PNG·`examples/` 를 뺀다: 1.9 MB -> 약 0.2 MB.
-5. 앞단 워커를 설계마다 죽이지 않는다 (`runFront` 의 `fresh`). 1 이 있어야 안전하다.
-6. README 의 "배선 3/5" 표와 "멈추는 지점" 진단 절을 고친다.
-7. (선택) `gen_abstract_verilog_d` 를 dict 왕복으로, 중간 덤프(최종 GDS 쓰기 한 번만 남긴다)를
-   끄는 패치를 align-front.zip 에 — telescopic 배선 단계 6.1 s -> 약 2 s. 2 단계에서 어차피 사라진다.
+**1 단계 — 리프 도형과 배선 문제 (JS).**
+- `data/<예제>.leaves.json`: 리프 전체 도형의 압축 표현 (`[layer, net, pin, x0, y0, x1, y1]`).
+  앞단 워커(`.sp` 업로드)도 같은 모양을 낸다.
+- `src/route/problem.mjs`: 하위 모듈을 펼쳐 절대 좌표로(변환 합성), 넷 이름 가르기
+  (하위 모듈 포트 -> 상위 넷, 전역 넷은 그대로, 내부 넷은 `<인스턴스>_<넷>`), 핀·장애물을
+  리프 도형에서, `SymmetricNets` 의 핀 참조를 펼친 소자 핀으로 옮기기, 전원 넷.
+- 합격선: 지운 `test/flatten.py` 의 검사를 JS 로 — 이름이 안 겹친다, 개수, 좌표가 계층으로
+  읽은 것과 정확히 같다, bbox 안, 넷 묶음(핀의 분할)이 계층 넷리스트와 같다, 대칭 넷의 핀이
+  실재한다. 더해서 ALIGN 이 배선한 결과(`<TOP>_0.json`)의 핀 넷 이름과 우리 핀 넷 이름이 같다.
 
-합격선: 부록 A 로 5 예제 각각 **두 번 연속** 배선 성공, DRC 건수가 지금과 같다
-(0 / 0 / 4 / 1 / 0).
+**2 단계 — 심판: DRC/LVS · 도형 합성 · GDS (JS).** 새 배선기의 좋고 나쁨을 가를 기준이라
+배선기보다 먼저다.
+- `check.mjs`: `cell_fabric/remove_duplicates.py`(SHORT·OPEN·DIFFERENT WIDTH, 355 줄) +
+  `drc.py`(255 줄) + `postprocess.py`(47 줄) + `gen_viewer_json` 의 격자 밖 검사.
+- `compose.mjs`: `gen_viewer_json` 이 하는 도형 합성. `gds.mjs`: `gen_gds_json.translate` +
+  GDSII 쓰기.
+- 합격선: ALIGN 이 배선한 5 예제(하네스 `--dump` 로 뽑은 검사기 입력)에서 오류 목록이
+  파이썬과 같다. 일부러 망가뜨린 배치(도형을 옮겨 SHORT·OPEN·간격·최소 길이 위반을 만든 것)
+  에서도 같다. GDS 는 ALIGN 의 `.python.gds` 와 경계·라벨 다중집합이 같다.
 
-### 1 단계 — 라우터 입력을 우리 데이터에서 만든다 (JS, 파이썬과 대조)
+**3 단계 — Rust 배선기** (`symplace/router`).
+- 격자: x 는 M1/M3 트랙(80), y 는 M2/M4 트랙(84). 신호는 M1~M4, 필요하면 M5/M6.
+- 장애물: 리프 도형(M1·M2·V1·V2), 다른 넷의 도형과 그 끝단 간격 후광.
+- 핀 접근: 리프 핀(M2) 안의 격자점 중 비아 둘러싸기를 지키는 곳.
+- 넷: 다중 핀은 이미 이은 트리에서 가장 가까운 핀으로 A*. 충돌은 협상형 재배선(PathFinder).
+- 규칙 마무리: 최소 길이 늘리기, 끝단 간격, 비아 둘러싸기를 **정확한 구간 계산**으로.
+- 대칭 넷: 한쪽을 배선하고 축에 대해 거울로. 축은 40 의 배수라 거울 경로도 트랙 위다.
+- 합격선, 차례로: (a) telescopic 신호 넷 DRC/LVS 0 -> (b) 평면 셋 (current_mirror 는
+  리프 고유 4 건만) -> (c) 대칭 넷 거울 배선 -> (d) 전원 넷 -> (e) 계층 둘 DRC/LVS 0 ->
+  (f) 배선 길이·비아 수·시간을 ALIGN 과 표로, 페이지 "배선 · 나란히" 로 눈으로.
+- 빌드: `cargo build --release --target wasm32-unknown-unknown`, 산출물 `route/router.wasm` 을
+  커밋한다. 내보내는 함수는 `alloc` · `route` · `out_len` 셋. node 와 브라우저가 같은 파일을 쓴다.
 
-- **리프 도형을 예제에 싣는다.** 5 예제 합계: 원본 1.8 MB, 압축 표현
-  (`[layer, net, pin, x0, y0, x1, y1]`) 543 KB, gzip 82 KB. 첫 화면을 무겁게 하지 않도록
-  `data/<예제>.leaves.json` 으로 떼어 배선할 때만 받는다. `pack-example.mjs` 와
-  앞단 워커(`.sp` 업로드)가 같은 모양을 낸다.
-- **`src/route/prep.mjs`**
-  - `manipulate_hierarchy` 이식 — `remove_pg_pins` 재귀, `<이름>_PG<k>` 사본,
-    `clean_if_extra` (파이썬 약 100 줄).
-  - `PnRConstraintWriter.map_valid_const` 이식 — 예제가 쓰는 것부터: PowerPorts,
-    GroundPorts, ClockPorts, SymmetricBlocks, SymmetricNets, Align, Order,
-    HorizontalDistance, VerticalDistance, AspectRatio. **모르는 제약은 조용히 넘기지 않고 멈춘다.**
-  - 리프 LEF 생성 (3 절의 규칙).
-- 합격선: 5 예제에서 JS 산출물이 파이썬 prep 산출물
-  (`3_pnr/inputs/<TOP>.verilog.json`, `*.pnr.const.json`, `<TOP>.lef`) 과 같다.
-  기준값은 부록 A 의 `--dump` 로 뽑는다.
+**4 단계 — 갈아끼우고 걷어낸다.**
+- `index.html`: `runRoute` 가 routeworker 를 부른다. `ensureFront` 와 앞단-배선 결합이 사라진다.
+  앞단 출력 JSON 을 올린 경우도 리프 도형이 있으면 배선된다.
+- `frontworker.mjs`: PYROUTE 와 PnR 휠 적재를 지운다. PYROUTE 는 하네스로 옮겨 ALIGN 기준
+  경로로 남긴다 (대조용).
+- 지운다: `py/pnr/`, `scripts/wasm/` 의 휠 경로. README 의 구성·실측 표를 갱신한다.
 
-### 2 단계 — C++ 배선기를 독립 wasm 으로
-
-NOTES-phase0 **S5 의 원래 결정(C ABI `route(json) -> json`)으로 돌아간다.**
-S10/S11 에서 pybind11 로 바꾼 이유는 "router.py 450 줄을 한 줄도 안 건드리려고" 였다.
-그런데 우리 경로에서 실제로 쓰는 파이썬은 300 줄 안팎이고, 전부 C++ 메서드를 부르는
-접착 코드다. 그 대가로 Pyodide 판 고정, 휠 재태깅, `-sWASM_BIGINT` 맞추기,
-파이썬 흐름 전체를 떠안았다.
-
-| 파이썬 (ALIGN) | C++ 드라이버에서 |
-|---|---|
-| `build_pnr_model._ReadVerilogJson` (60 줄) | JSON 에서 hierNode 를 직접 짓는다 |
-| `_attach_constraint_files` | 모듈마다 `ReadConstraint_Json(node, 문자열)` |
-| `PnRdatabase()` | `ReadPDKJSON`, `ReadLEFFromString`, `semantic0/1/2` |
-| `placer.place()` | `AddingPowerPins` -> `PlacerIfc(use_external_placement_info)` -> `Extract_RemovePowerPins` -> `CheckinHierNode` |
-| `router.route_bottom_up` (70 줄) | 그대로 옮긴다 — `TraverseHierTree`, `CheckinChildnodetoBlock`, `AppendToHierTree` |
-| `route_single_variant` | `ExtractPinsToPowerPins`, `RouteWork` 4·5 (+최상위 2·3). 중간 덤프 없음 |
-| `gen_viewer_json` 이 hN 에서 읽는 것 | 모듈마다 넷 금속·비아·전원 격자·블록 변환을 JSON 으로 내보낸다 |
-
-- 빌드: emcc 직접. `-sMODULARIZE -sEXPORT_ES6 -sALLOW_MEMORY_GROWTH -sENVIRONMENT=worker,node`,
-  lp_solve 는 BLAS 외부 적재를 끈다 (2.4). pyodide-build 와 파이썬 판에 묶이지 않는다.
-- 1차는 placer 를 그대로 링크한다 — 배치 주입(`setPlacementInfoFromJson`)은 변이·반전·
-  핀·HPWL 까지 채우는 코드라 다시 쓰는 위험을 지금 지지 않는다(S12 후속과 같은 판단).
-  2차에 직접 주입으로 바꾸면 321 KB 가 빠진다.
-- 합격선: 같은 입력에서 **모듈별 배선 사각형 다중집합**이 파이썬 경로와 같다.
-  같은 C++ 코드라 같아야 한다 — 다르면 순서 의존을 찾는다. `env.dlopen` import 없음.
-
-### 3 단계 — 후처리를 JS 로
-
-- 도형 합성: 리프 도형을 블록 변환으로 옮기고 배선 도형을 더한다. 계층이면 자식 모듈
-  결과를 재귀로. 지금의 `<TOP>_0.json` 과 같은 모양이라 `view.mjs` 의 `drawRouted` 는 그대로다.
-- DRC/LVS: `cell_fabric/remove_duplicates.py`(SHORT·OPEN·DIFFERENT WIDTH, 355 줄) +
-  `drc.py`(비아·금속 규칙, 255 줄) + `postprocess.py`(47 줄) 이식. `DoNotRoute` 넷은
-  열려도 된다(지금과 같다).
-- GDS: 평면 GDSII 쓰기 (`layers.json` 의 GDS 층 번호). ALIGN 이 내는 `.python.gds` 와 같은 방식이다.
-- 합격선: 5 예제에서 오류 목록이 파이썬과 같다. **일부러 망가뜨린 배치**(도형을 옮겨
-  SHORT·OPEN·간격 위반을 만든 것)에서도 같다. GDS 는 `.python.gds` 와 경계 다중집합이 같다.
-
-### 4 단계 — 갈아끼우고 걷어낸다
-
-- `index.html`: `runRoute` 가 routeworker 를 부른다. `ensureFront` 와 앞단-배선 결합
-  (`frontFor`, "같은 워커여야 한다")이 사라진다. 앞단 출력 JSON 을 올린 경우도 리프 도형이
-  있으면 배선된다 (지금은 배치까지만).
-- `frontworker.mjs`: PYROUTE 와 PnR 휠 적재를 지운다 — 앞단만 남는다 (704 줄 -> 200 줄 안팎).
-- 지운다: `py/pnr/`, `scripts/wasm/` 의 휠 경로(축소 바인딩, retag-wheel), align-front.zip 의 pnr 쪽.
-- README 의 구성·실측 표를 갱신한다.
-
-### 위험
+### 4.4 위험
 
 | 위험 | 대응 |
 |---|---|
-| C++ 드라이버가 hierNode 를 파이썬과 다르게 짓는다 | 1 단계 기준값 + 2 단계 사각형 다중집합 대조. 단계마다 파이썬 경로가 기준으로 남아 있다 |
-| DRC 이식이 미묘하게 다르다 | 정상 5 예제 + 망가뜨린 배치로 대조 |
-| 빌드 재료(ALIGN-public C++ 원본, boost 헤더, spdlog 1.9.2, nlohmann/json 3.7.3, lp_solve 5.5.2.11)가 이 저장소에 없다 | `symplace/setup.sh` 가 ALIGN-public @ 8d3cc2e 를 받는다. 나머지는 S6 에서 한 번 빌드해 본 판을 그대로 쓴다 |
-| 커패시터·가드링 설계 | 지금도 안 된다 (`_skip_cap_placer` 가 멈춘다). 범위 밖으로 두고 입력에서 분명히 거절한다 |
-| `.sp` 업로드는 여전히 Pyodide + libz3 가 필요하다 | 이번 범위 밖. 배선과 떨어지므로 나중에 따로 줄일 수 있다 |
-
----
+| 새 배선기가 어떤 설계에서 DRC 0 에 못 닿는다 | 전환 기간에는 0 단계 경로를 폴백으로 둔다. 5 예제 합격 뒤 걷어낸다 |
+| 핀 접근이 까다롭다 (핀은 M2, 그 아래 M1 은 소자 내부 배선) | 핀 안의 격자점만 쓰고 V2 로 올라간다. 둘러싸기를 격자점 단위로 미리 거른다 |
+| 끝단 간격과 최소 길이가 서로 걸린다 | 라우터 안에서 정확한 구간으로 검사하고, 어긴 자리는 비용을 올려 다시 배선한다 |
+| 대칭 거울 경로가 막힌다 | 대칭을 깨고 따로 배선하되 보고한다 |
+| 심판 이식이 미묘하게 다르다 | 정상 5 예제 + 망가뜨린 배치로 파이썬과 대조 |
+| 커패시터·가드링 | 지금도 안 된다. 입력에서 분명히 거절한다 |
+| `.sp` 업로드는 여전히 Pyodide + libz3 | 이번 범위 밖. 배선과 떨어지므로 나중에 따로 |
 
 ## 부록 A — 재현 도구 (`scripts/route/node/`)
 
@@ -344,10 +357,10 @@ S10/S11 에서 pybind11 로 바꾼 이유는 "router.py 450 줄을 한 줄도 �
 cd symplace/scripts/route/node
 ./setup.sh                                  # npm: pyodide@0.27.8, PyPI: 휠 4 개
 node place.mjs telescopic_ota               # 페이지와 같은 배치 (10 s)
-node route.mjs telescopic_ota --twice               # 두 번째 배선에서 죽는다
-node route.mjs telescopic_ota --twice --blasfix     # 둘 다 산다
+node route.mjs telescopic_ota --twice               # 워커 그대로: 둘 다 산다
+node route.mjs telescopic_ota --twice --no-blasfix  # 우회를 끄면 두 번째에서 죽는다
 node place.mjs high_speed_comparator        # 3~4 분
-node route.mjs high_speed_comparator --flatten=0 --blasfix --prof   # 계층 그대로 + 단계별 시간
+node route.mjs high_speed_comparator --prof # 계층 그대로 + 단계별 시간
 ```
 
 받은 것과 배치 결과는 저장소 밖에 둔다 (`~/.cache/symplace/`, `PYODIDE_CACHE`·`SYMPLACE_CACHE` 로 바꾼다).
