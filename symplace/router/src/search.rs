@@ -88,8 +88,8 @@ pub struct Query<'a> {
     pub is_target: &'a dyn Fn(u32) -> bool,
     /// 목표 덩이들의 좌표 상자 (추정 거리)
     pub boxes: &'a [[i32; 4]],
-    /// 노드마다 덤 비용 (대칭 경로를 권할 때 음수 아닌 값으로 깎는다) — 없으면 0
-    pub discount: Option<&'a dyn Fn(u32) -> i64>,
+    /// 노드마다 더하는 값 (대칭 넷: 거울 노드는 깎고, 축에 붙는 노드는 올린다) — 없으면 0
+    pub extra: Option<&'a dyn Fn(u32) -> i64>,
 }
 
 impl Astar {
@@ -178,8 +178,8 @@ impl Astar {
                     let (_, j2, i2) = grid.split(n2);
                     let dist = if grid.vertical[li] { (grid.ys[j2] - grid.ys[j]).abs() } else { (grid.xs[i2] - grid.xs[i]).abs() } as i64;
                     let mut cost = dist * par.unit[li] + congestion(grid, occ, hist, q.net, par.pres, n2);
-                    if let Some(dc) = q.discount {
-                        cost = (cost - dc(n2)).max(1);
+                    if let Some(ex) = q.extra {
+                        cost = (cost + ex(n2)).max(1);
                     }
                     relax(n2 * 2 + 1, cost, &mut self.heap);
                 }
@@ -201,8 +201,8 @@ impl Astar {
                     }
                     let k2 = if grid.covered_by(net, n2) || (q.in_tree)(n2) { 1 } else { 0 };
                     let mut cost = par.via + congestion(grid, occ, hist, q.net, par.pres, n2);
-                    if let Some(dc) = q.discount {
-                        cost = (cost - dc(n2)).max(1);
+                    if let Some(ex) = q.extra {
+                        cost = (cost + ex(n2)).max(1);
                     }
                     relax(n2 * 2 + k2, cost, &mut self.heap);
                 }

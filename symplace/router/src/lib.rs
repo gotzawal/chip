@@ -14,6 +14,7 @@ pub mod legal;
 pub mod model;
 pub mod router;
 pub mod search;
+pub mod sym;
 
 use std::cell::RefCell;
 

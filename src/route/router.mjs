@@ -2,7 +2,8 @@
  *
  *    const router = await loadRouter(wasmBytes)
  *    const out = router.route(problem, { minLayer: "M2", maxLayer: "M4" })
- *      -> { wires: [{netName, layer, rect}], failed: [넷 이름], iterations, violations, ms }
+ *      -> { wires: [{netName, layer, rect}], failed: [넷 이름], iterations, violations,
+ *           mirrored, pairs (대칭 넷 쌍 중 거울 경로 그대로인 수 / 쌍 수), ms }
  *
  *  문제(problem.mjs 의 buildProblem().problem)는 i32 배열 하나로 넘긴다 (symplace/router/src/model.rs).
  */
@@ -38,14 +39,14 @@ export function unpackSolution(out, problem) {
     const bytes = Uint8Array.from(out.subarray(8, 8 + out[1]));
     throw new Error("배선기: " + new TextDecoder().decode(bytes));
   }
-  const [, nWires, nFailed, iterations, violations, mirrored] = out;
+  const [, nWires, nFailed, iterations, violations, mirrored, pairs] = out;
   const layerName = (c) => (c >= VIA_BASE ? problem.vias[c - VIA_BASE].name : problem.layers[c].name);
   const wires = [];
   let p = 8;
   for (let k = 0; k < nWires; k++, p += 6)
     wires.push({ layer: layerName(out[p]), netName: problem.nets[out[p + 1]].name, rect: [out[p + 2], out[p + 3], out[p + 4], out[p + 5]] });
   const failed = Array.from(out.subarray(p, p + nFailed), (k) => problem.nets[k].name);
-  return { wires, failed, iterations, violations, mirrored };
+  return { wires, failed, iterations, violations, mirrored, pairs };
 }
 
 /** wasm 바이트 -> 배선기 */

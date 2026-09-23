@@ -6,6 +6,7 @@ use crate::grid::Grid;
 use crate::legal;
 use crate::model::{Problem, Solution};
 use crate::search::{Astar, Occ, Params, Query};
+use crate::sym;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Default, Debug)]
@@ -26,6 +27,10 @@ struct Comp {
 
 const PRES0: i64 = 1000;
 const HIST_STEP: i64 = 600;
+/// 대칭 넷: 앞선 넷 경로의 거울 노드에 깎아 주는 값 (한 걸음 값이 800 남짓)
+const MIRROR_DISCOUNT: i64 = 500;
+/// 대칭 넷: 앞선 넷이 축에 붙는 노드(거울상이 자기와 겹치는 곳)를 쓸 때 더하는 값
+const AXIS_PENALTY: i64 = 2400;
 
 /// 넷마다 배선층에서 닿을 수 있는 연결 덩이 (고정 도형이 덮고, 쓸 수 있는 노드들)
 fn components(p: &Problem, grid: &Grid) -> (Vec<Vec<Comp>>, Vec<bool>) {
@@ -67,7 +72,9 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn route_net(&mut self, net: usize, comps: &[Comp]) -> Route {
+    /// prefer: 값을 깎아 줄 노드 (정렬) — 대칭 넷의 거울 경로
+    /// lead: 이 넷이 대칭 쌍을 이끌면 그 쌍 — 축에 붙는 노드에 값을 올린다
+    fn route_net(&mut self, net: usize, comps: &[Comp], prefer: Option<&[u32]>, lead: Option<&sym::Pair>) -> Route {
         let mut r = Route::default();
         if comps.len() < 2 {
             return r;
@@ -88,7 +95,18 @@ impl Ctx<'_> {
                 let mark = &self.mark;
                 let is_target = |n: u32| grid.cover_net[n as usize] == net as i32 && ids.contains(&grid.cover_comp[n as usize]);
                 let in_tree = |n: u32| mark[n as usize] == st;
-                let q = Query { net, sources: &tree, in_tree: &in_tree, is_target: &is_target, boxes: &boxes, discount: None };
+                let extra = |n: u32| {
+                    let mut e = 0;
+                    if prefer.is_some_and(|v| v.binary_search(&n).is_ok()) {
+                        e -= MIRROR_DISCOUNT;
+                    }
+                    if lead.is_some_and(|pr| sym::self_clash(grid, pr, n)) {
+                        e += AXIS_PENALTY;
+                    }
+                    e
+                };
+                let q = Query { net, sources: &tree, in_tree: &in_tree, is_target: &is_target, boxes: &boxes,
+                                extra: if prefer.is_some() || lead.is_some() { Some(&extra) } else { None } };
                 self.astar.search(grid, &self.occ, &self.hist, &self.par, &q)
             };
             let Some(path) = found else {
@@ -162,7 +180,29 @@ pub fn solve(p: &Problem) -> Result<Solution, String> {
         });
         (b[2] - b[0]) as i64 + (b[3] - b[1]) as i64
     };
-    order.sort_by_key(|&k| (p.nets[k].power, span(k), k));
+    // 대칭 쌍을 먼저 (거울 경로를 다른 넷이 막기 전에), 그다음 신호, 전원은 마지막
+    let paired = |k: usize| p.nets[k].sym >= 0 && p.nets[k].sym_dir != 0 && comps[p.nets[k].sym as usize].len() >= 2;
+    order.sort_by_key(|&k| (!paired(k), p.nets[k].power, span(k), k));
+    // 대칭 쌍: 따르는 넷을 앞선 넷 바로 뒤로
+    let pairs = sym::pairs(p, &order);
+    let mut follows: Vec<Option<sym::Pair>> = vec![None; nn];
+    let mut leads: Vec<Option<usize>> = vec![None; nn];
+    for pr in &pairs {
+        follows[pr.follower] = Some(*pr);
+        leads[pr.leader] = Some(pr.follower);
+        order.retain(|&k| k != pr.follower);
+        let at = order.iter().position(|&k| k == pr.leader).unwrap();
+        order.insert(at + 1, pr.follower);
+    }
+    let rank: Vec<usize> = {
+        let mut r = vec![usize::MAX; nn];
+        for (k, &net) in order.iter().enumerate() {
+            r[net] = k;
+        }
+        r
+    };
+    let comp_nodes: Vec<Vec<(i32, Vec<u32>)>> = comps.iter().map(|cs| cs.iter().map(|c| (c.id, c.nodes.clone())).collect()).collect();
+    let mut no_mirror = vec![false; nn];
 
     let unit = (0..grid.nl).map(|li| if grid.l0 + li == 0 { 30 } else { 10 }).collect();
     let mut cx = Ctx {
@@ -185,7 +225,24 @@ pub fn solve(p: &Problem) -> Result<Solution, String> {
             for &n in &routes[net].nodes {
                 cx.occ.remove(net, n);
             }
-            routes[net] = cx.route_net(net, &comps[net]);
+            routes[net] = match follows[net] {
+                Some(pr) if !routes[pr.leader].failed && !routes[pr.leader].nodes.is_empty() => {
+                    let lead = &routes[pr.leader];
+                    let exact = if no_mirror[net] { None } else { sym::try_mirror(&grid, &cx.occ, &pr, lead, net, &comp_nodes[net]) };
+                    match exact {
+                        Some(r) => r,
+                        None => {
+                            let mut m: Vec<u32> = lead.nodes.iter().filter_map(|&n| sym::mirror(&grid, &pr, n)).collect();
+                            m.sort_unstable();
+                            cx.route_net(net, &comps[net], Some(&m), None)
+                        }
+                    }
+                }
+                _ => {
+                    let lp = leads[net].and_then(|f| follows[f]);
+                    cx.route_net(net, &comps[net], None, lp.as_ref())
+                }
+            };
             for &n in &routes[net].nodes {
                 cx.occ.add(net, n);
             }
@@ -201,6 +258,12 @@ pub fn solve(p: &Problem) -> Result<Solution, String> {
             for &(n, net) in &l.bad {
                 cx.hist[n as usize] += 4 * HIST_STEP;
                 again.insert(net);
+                // 거울상 그대로가 규칙을 못 맞췄으면 그 넷은 이제 비슷하게만 따른다
+                if let Some(pr) = follows[net] {
+                    if sym::is_mirror(&grid, &pr, &routes[pr.leader], &routes[net]) {
+                        no_mirror[net] = true;
+                    }
+                }
             }
             todo = again.into_iter().collect();
         } else {
@@ -210,6 +273,11 @@ pub fn solve(p: &Problem) -> Result<Solution, String> {
             cx.par.pres = (cx.par.pres * 3 / 2).min(PRES0 * 1000);
             todo = cnets;
         }
+        // 앞선 넷을 다시 잇으면 따르는 넷도 다시 (거울이 낡는다). 순서는 order 대로.
+        let extra: Vec<usize> = todo.iter().filter_map(|&k| leads[k]).collect();
+        todo.extend(extra);
+        todo.sort_by_key(|&k| rank[k]);
+        todo.dedup();
     }
     // 끝내 못 푼 것은 걷어낸다: 겹친 넷(SHORT 가 된다)과 규칙을 못 맞춘 넷은 배선을 지우고
     // 못 이은 넷으로 알린다. 합선보다 열린 넷이 낫다 — 검사기가 OPEN 으로 정직하게 보여 준다.
@@ -255,6 +323,8 @@ pub fn solve(p: &Problem) -> Result<Solution, String> {
     };
     sol.violations = 0;
     sol.wires = std::mem::take(&mut l.wires);
+    sol.mirrored = pairs.iter().filter(|pr| sym::is_mirror(&grid, pr, &routes[pr.leader], &routes[pr.follower])).count() as i32;
+    sol.pairs = pairs.len() as i32;
     for k in 0..nn {
         if (comps[k].len() >= 2 && routes[k].failed) || (blind[k] && p.nets[k].parts >= 2) || ripped.contains(&k) {
             sol.failed.push(k as i32);

@@ -142,8 +142,9 @@ pub struct Solution {
     /// 규칙을 다 못 지킨 곳의 수 (최소 길이를 못 늘린 토막 등)
     pub violations: i32,
     pub iterations: i32,
-    /// 대칭 넷 쌍 중 거울 경로를 그대로 쓴 것의 수
+    /// 대칭 넷 쌍 중 거울 경로를 그대로 쓴 것의 수 / 쌍의 수
     pub mirrored: i32,
+    pub pairs: i32,
 }
 
 pub fn encode(s: &Solution) -> Vec<i32> {
@@ -154,6 +155,7 @@ pub fn encode(s: &Solution) -> Vec<i32> {
     out[3] = s.iterations;
     out[4] = s.violations;
     out[5] = s.mirrored;
+    out[6] = s.pairs;
     for w in &s.wires {
         out.extend_from_slice(w);
     }

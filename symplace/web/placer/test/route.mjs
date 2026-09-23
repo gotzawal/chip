@@ -5,6 +5,7 @@
  *    - SHORT · OPEN · DRC · 후처리 · 격자 오류가 0 이다
  *    - DIFFERENT WIDTH 는 소자층(리프 안)의 것뿐이다 — ALIGN 결과에도 똑같이 있다
  *  배선이 더한 금속 길이(층별)와 비아 수를 찍는다 — 배선 뒤와 배선 전을 검사기로 합친 도형의 차.
+ *  대칭 넷 쌍은 거울 경로를 그대로 쓴 쌍 수와, 두 넷의 배선 길이 차(가장 큰 것)를 찍는다.
  *  캐시에 ALIGN 배선 기록(checkref.mjs capture)이 있으면 같은 배치의 ALIGN 배선도 같은 잣대로
  *  나란히 찍는다 (ALIGN 은 M5/M6 전원 격자까지 친다).
  *
@@ -72,8 +73,14 @@ for (const { name: ex } of rows) {
     if (r.failed.length) errs.push(`못 이은 넷: ${r.failed.join(", ")}`);
     const lines = errorLines({ ...res, differentWidths: wide }, grid);
     if (lines.length) errs.push(`${lines.length} 오류: ${lines.slice(0, 4).join("\n      ")}`);
+    // 대칭 넷 쌍: 배선 금속 길이가 얼마나 같은가 (정합의 잣대), 거울 그대로인 쌍 수
+    const wl = (name) => wires.filter((w) => w.netName === name && DIR[w.layer])
+      .reduce((a, w) => a + (DIR[w.layer] === "v" ? w.rect[3] - w.rect[1] : w.rect[2] - w.rect[0]), 0);
+    const bal = problem.nets.map((x, k) => [x, k]).filter(([x, k]) => x.sym > k && x.parts > 1)
+      .map(([x]) => { const a = wl(x.name), b = wl(problem.nets[x.sym].name); return Math.abs(a - b) / Math.max(a, b, 1); });
+    const symText = r.pairs ? `  대칭 ${r.mirrored}/${r.pairs} 거울, 길이 차 최대 ${(100 * Math.max(0, ...bal)).toFixed(0)}%` : "";
     console.log(`${ex.padEnd(28)} ${tag.padEnd(5)} 넷 ${String(problem.nets.filter((x) => x.parts > 1).length).padStart(2)}` +
-                `  ${added(res.terminals, pre.terminals)}  배선기 ${r.ms.toFixed(0)}ms 전체 ${ms.toFixed(0)}ms  ${errs.length ? "틀림" : "OK"}`);
+                `  ${added(res.terminals, pre.terminals)}${symText}  배선기 ${r.ms.toFixed(0)}ms  ${errs.length ? "틀림" : "OK"}`);
     if (tag === "우리") {
       const cf = path.join(CACHE, "check", ex + ".json");
       if (fs.existsSync(cf)) {
