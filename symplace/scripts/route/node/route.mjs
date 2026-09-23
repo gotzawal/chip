@@ -9,8 +9,7 @@
  *
  *    --place=파일   배선할 배치 (기본: place.mjs 가 쓴 ~/.cache/symplace/place-<예제>.json)
  *    --twice        같은 인스턴스에서 배선을 두 번 (페이지에서 배치를 다시 풀고 배선을 또 누른 경우)
- *    --blasfix      lp_solve BLAS 우회책을 켠다 (아래 "lp_solve BLAS 우회책" 절)
- *    --flatten=0|1  계층 설계를 펼칠지 (기본은 워커 기본값 = 계층이면 편다)
+ *    --no-blasfix   워커의 lp_solve BLAS 우회책을 끈다 — 예전의 "두 번째 LP 에서 죽음" 재현용
  *    --prof         배선 단계 안의 시간을 단계별로 찍는다 (prof.py)
  *    --dump=<폴더>  Pyodide 안의 작업 디렉터리(/work/<예제>)를 꺼내 둔다
  *    --no-route     앞단만
@@ -95,7 +94,7 @@ py.runPython("import browser_stubs; browser_stubs.install()");
 py.runPython("import align, z3, PnR");
 log("import align · z3 · PnR");
 
-// --- lp_solve BLAS 우회책 (--blasfix) ---
+// --- lp_solve BLAS 우회책 (워커 boot() 와 같다. --no-blasfix 로 끈다) ---
 //
 // lp_solve 의 make_lp() 는 LP 를 만들 때마다 load_BLAS("myBLAS") 로
 // dlopen("libmyBLAS.so") 를 시도한다. Emscripten 은 적재에 실패한 라이브러리 이름을
@@ -105,10 +104,10 @@ log("import align · z3 · PnR");
 // "null function or function signature mismatch".
 // 이 이름이 영영 적재되지 않은 것으로 보이게 막으면 매번 제대로 실패한다.
 let blasOpens = 0;
-if (flag("blasfix")) {
+if (!flag("no-blasfix")) {
   Object.defineProperty(M.LDSO.loadedLibsByName, "libmyBLAS.so", {
     get() { return undefined; }, set() { blasOpens++; }, configurable: true });
-  log("blasfix: libmyBLAS.so 를 적재 안 된 것으로 고정");
+  log("BLAS 우회: libmyBLAS.so 를 적재 안 된 것으로 고정");
 }
 /** BLAS 함수 포인터 상태. idamax 가 0 이면 다음 LP 에서 죽는다. */
 const blasState = () => {
@@ -118,7 +117,7 @@ const blasState = () => {
   return `BLAS_idamax=${a ? M.HEAPU32[a >>> 2] : "?"} (my_idamax=${G.my_idamax?.value})` +
          ` mustinitBLAS=${G.mustinitBLAS ? M.HEAPU8[G.mustinitBLAS.value] : "?"}` +
          ` libmyBLAS.so=${stale ? "남아 있음(" + typeof stale.exports + ")" : "없음"}` +
-         (flag("blasfix") ? ` make_lp 수=${blasOpens}` : "") +
+         (flag("no-blasfix") ? "" : ` make_lp 수=${blasOpens}`) +
          `  wasm 힙 ${(M.HEAP8.length / 2 ** 20).toFixed(0)}MB`;
 };
 
@@ -168,7 +167,6 @@ if (flag("no-route")) { if (opt("dump")) dumpWork(opt("dump")); process.exit(0);
 
 // --- 배선 (frontworker.mjs 의 cmd === "route" 와 같다) ---
 const placement = JSON.parse(fs.readFileSync(placeFile, "utf8"));
-if (opt("flatten") !== null) placement.flatten = opt("flatten") !== "0";
 
 let where = "", quiet = 0;
 globalThis.routeLog = (t) => {
@@ -177,7 +175,7 @@ globalThis.routeLog = (t) => {
     if (!l) continue;
     where = l;
     if (!flag("verbose") && /feasible path might not be found/.test(l)) { quiet++; continue; }
-    if (flag("verbose") || /bottom up routing|flatten|error|fail|Traceback/i.test(l)) console.log("         |", l.slice(0, 200));
+    if (flag("verbose") || /bottom up routing|error|fail|Traceback/i.test(l)) console.log("         |", l.slice(0, 200));
   }
 };
 py.setStdout({ batched: globalThis.routeLog });

@@ -65,7 +65,7 @@ src/*.mjs         배치기 본체 (의존성 없는 ES 모듈)
 data/*.json       예제 5 개의 ALIGN 앞단 출력 (미리 만들어둬 첫 화면이 빠르다)
 netlists/*.sp     예제 5 개의 원본 회로 — 배선 버튼이 이걸로 앞단을 다시 돌린다
 routed/*.align.json  네이티브 ALIGN 이 낸 배선 기하 (비교용 기준선)
-py/               Pyodide 스택 (25 MB, 첫 방문에만 받는다)
+py/               Pyodide 스택 (원본 약 40 MB, 첫 방문에만 받는다)
 symplace/         소스 — 파이썬 배치기, 검사, 빌드 스크립트, ALIGN 패치
 ```
 
@@ -101,7 +101,7 @@ ALIGN). 기본은 `배치 · 나란히` 다. 왼쪽이 ALIGN, 오른쪽이 우�
 .sp 넷리스트
   -> 앞단  1_topology + 2_primitives   Pyodide 에서 0.7 ~ 9 s
   -> 배치  변이·반전·영역·격자          JS 에서 9 ~ 180 s
-  -> 배선  전역·상세·전원              wasm 에서 1.5 ~ 2 s
+  -> 배선  전역·상세·전원              Pyodide + wasm 에서 4 ~ 13 s (C++ 알고리즘은 1 ~ 4.5 s)
   -> GDS + DRC/LVS
 ```
 
@@ -342,92 +342,39 @@ high_speed_comparator 를 같은 코드로 조건만 바꿔 재보면 이렇다.
 
 ## 브라우저 배선 — 실측
 
-배치는 5/5 다 돈다. 배선은 **평면 설계 3/5** 가 브라우저에서 끝까지 간다.
+배치도 배선도 **5/5** 가 브라우저 경로로 끝까지 간다. 아래는 워커 코드를 node 에서
+그대로 돌려 잰 값이다 (`symplace/scripts/route/node/`, 받는 시간 제외). 같은 배치를
+한 세션에서 두 번 연속 배선해도 결과가 같다.
 
-| 예제 | 배치 | 배선 | GDS | DRC/LVS | 네이티브 DRC |
-|---|---|---|---|---|---|
-| telescopic_ota | 9 s | 1.7 s | 78K | **0** | 0 |
-| current_mirror_ota | 15 s | 1.7 s | 79K | 4 | 4 (ALIGN 도 4) |
-| five_transistor_ota | 31 s | 1.9 s | 92K | **0** | 0 |
-| cascode_current_mirror_ota | 66 s | 멈춤 | — | — | 4 |
-| high_speed_comparator | 177 s | 멈춤 | — | — | 0 |
+| 예제 | 배선 | GDS | DRC/LVS | ALIGN 자신 (`routed/`) |
+|---|---|---|---|---|
+| telescopic_ota | 4.9 s | 80K | **0** | 0 |
+| current_mirror_ota | 4.1 s | 79K | 4 | 4 (같은 DIFFERENT WIDTH) |
+| five_transistor_ota | 4.1 s | 86K | **0** | 0 |
+| cascode_current_mirror_ota | 12.9 s | 194K | 1 | 6 |
+| high_speed_comparator | 7.5 s | 173K | **0** | 0 |
 
-DRC 건수가 네이티브와 같다 — 같은 배선기, 같은 배치, 같은 결과다.
+계층 설계 둘은 **계층 그대로** 넘긴다. ALIGN 의 `bottom_up` 배선기가 하위 모듈부터
+하나씩 돈다. 한때 하위 모듈을 최상위로 펼쳐 넘겼는데 (두 번째 모듈에서 죽던 것을 피하려고),
+원인이 모듈 수가 아니었으므로 되돌렸다. 펼치면 블록을 가리키는 제약
+(`SymmetricBlocks`, `Order`, `Align`)을 버려야 했다 (hsc 13 개 중 5 개).
 
-### 계층 설계는 **펼쳐서** 넘긴다
+### "두 번째에서 죽는다" 의 원인 — lp_solve 의 BLAS 적재
 
-배선기가 보는 계층은 우리가 정한다 — `router_driver` 가
-`gen_abstract_verilog_d(우리 덤프)` 로 DB 를 짓기 때문이다. 덤프의 최상위
-모듈에 소자만 담으면 `hierTree` 가 하나가 되고, 배선기는 **한 번만 돈다**.
-평면 설계 셋이 끝까지 가는 바로 그 경로다.
+전역 배선의 LP 를 푸는 lp_solve 는 LP 를 만들 때마다(`make_lp`) `dlopen("libmyBLAS.so")`
+로 외부 BLAS 를 찾는다. Emscripten 은 적재에 실패한 라이브러리 이름을 지우지 않고
+남겨 두어서, **두 번째** dlopen 이 "이미 적재됨" 으로 성공하고 dlsym 은 전부 NULL 을
+준다. lp_solve 는 그때 BLAS 함수 포인터를 NULL 로 둔 채 넘어가고, 다음 LP 의
+`idamax()` 에서 `null function or function signature mismatch` 로 죽는다.
 
-그래서 `__placer_dump__.json` 을 만들 때 하위 모듈을 최상위로 편다
-(`frontworker.mjs` 의 `_flat_instances`). **배치는 안 건드린다** — 변환을
-합성해 절대 좌표로 적으므로 레이아웃은 한 점도 안 움직인다.
+LP 는 배선하는 모듈마다 하나라서, 계층 설계의 **두 번째 모듈**과 같은 세션의
+**두 번째 배선**에서 죽었다. 평면 설계 셋이 첫 배선만 살던 이유도 이것이다.
+워커가 그 이름을 영영 적재되지 않은 것으로 보이게 막는다 (`frontworker.mjs` 의
+`boot()`). 짚은 과정과 근거(역어셈블, GOT·HEAP 을 직접 읽은 값)는
+`symplace/PLAN-route.md` 2 절에 있다.
 
-```
-sX = sX_상위 * sX_자식      oX = sX_상위 * oX_자식 + oX_상위
-```
-
-넷 이름은 셋으로 가른다. 하위 모듈의 포트는 상위 넷 이름으로 바꾸고, 전역
-넷(VSS 등)은 그대로 두고, 내부 넷은 `<인스턴스>_<넷>` 으로 가른다 — 안 가르면
-다른 하위 모듈의 같은 이름과 붙어버린다.
-
-제약도 따라 고친다. `SymmetricNets` 는 `XDP/P1` 처럼 하위 모듈의 포트를
-가리키는데, 펼치고 나면 `XDP` 가 없다. 그 핀 참조를 **펼친 뒤의 소자 핀들로
-옮긴다** (hsc 에서 22 자리). 블록 자체를 가리키는 제약(`SymmetricBlocks`,
-`Order`, `Align`)은 옮길 데가 없어 버린다 (hsc 13 개 중 5 개). 배치는 이미
-그 제약을 지킨 채 끝났으므로 레이아웃은 그대로고, 잃는 것은 배선 단계가
-그 그룹을 알아보는 것뿐이다.
-
-**Pyodide 를 못 받는 환경이라 배선기로 확인하지는 못했다.** 대신 덤프를 만드는
-쪽을 실제 배치로 검사했다 — 소자 15/14 개의 좌표가 계층으로 읽은 것과
-정확히 같고, 넷 묶음(핀의 분할)이 계층 넷리스트와 정확히 같고, 남은 제약의
-핀 참조가 전부 실재한다. 못 펴는 경우(세 단 이상 계층 등)에는 계층 그대로
-넘겨 예전 경로를 탄다.
-
-### 펼쳐도 안 되면 — 멈추는 지점 (예제 4·5)
-
-`cascode_current_mirror_ota` 와 `high_speed_comparator` 는 하위 모듈이 있다.
-ALIGN 의 `bottom_up` 배선기는 **모듈을 하나씩** 돈다 (`route_bottom_up` 이
-`TraverseHierTree()` 순서로 하위부터). 인수인계(`__placer_dump__.json`)는
-계층까지 맞춰 만들어 두었고 **첫 모듈은 성공한다**:
-
-```
-bottom up routing for PRIMITIVE_38447703_PG0 (1)   GcellGlobalRouter → GcellDetailRouter  OK
-bottom up routing for PRIMITIVE_98739713_PG0 (2)   GcellGlobalRouter → RuntimeError: null function
-```
-
-두 번째 모듈의 배선에서 **빈 함수 포인터**를 부른다. 평면 설계는 모듈이 하나라
-이 자리에 닿지 않는다 — 그래서 3/5 가 되고, 4·5 번 예제만 "돌다가 멈춘다".
-
-같은 증상을 전에 한 번 봤다. 평면 설계라도 **한 세션에서 배선을 두 번** 돌리면
-두 번째에 같은 `null function` 이 났고, 매번 `3_pnr` 을 지우고 prep 부터 다시
-돌게 해서 넘겼다. 둘 다 "한 wasm 인스턴스 안에서 배선기가 두 번째로 도는 자리"
-라는 공통점이 있다. 축소 wasm 빌드(`symplace/scripts/wasm/build-pnr-wasm.sh`)가
-빠뜨린 간접 호출 대상이거나, 첫 회차가 남긴 상태를 두 번째가 밟는 것으로 보인다.
-`-sASSERTIONS=2` 디버그 빌드로 어느 테이블 슬롯인지 짚는 것이 다음 순서다.
-
-이 아래는 **펼치기 전**의 진단이다. 펼친 뒤에도 같은 자리에서 멈춘다면
-원인이 모듈 수가 아니라는 뜻이므로, 그때는 아래를 다시 읽어야 한다.
-
-**이 진단의 근거.** 배선 경로는 `router_mode="bottom_up"` 으로 돈다
-(`frontworker.mjs` 의 `schematic2layout(..., router_mode="bottom_up")`).
-그쪽 구현(`align/pnr/router.py` 의 `route_bottom_up`)은 `DB.TraverseHierTree()`
-순서로 모듈마다 `route_single_variant` 를 한 번씩 부른다. 평면 설계는 모듈이
-하나라 그 호출이 한 번뿐이고, 계층 설계는 모듈 수만큼이다 — 실패하는 예제 둘이
-정확히 계층 설계 둘이고, 예전에 평면 설계에서 났던 실패도 "한 인스턴스 안에서
-두 번째 호출" 이었다. 실행 로그로 마지막 확인을 하려면 Pyodide(CDN)를 받을 수
-있는 환경에서 아래 로그를 보면 된다.
-
-그때까지 **화면에서 어디까지 갔는지는 보인다.** 배선 중에는 ALIGN 의 로그
-(`bottom up routing for <모듈>`) 와 C++ 쪽 표준출력을 워커가 그대로 흘려준다.
-실패하면 마지막 줄을 같이 띄운다 — "그냥 멈췄다" 가 아니라 "어느 모듈에서
-멈췄다" 가 나온다.
-
-이 두 예제의 배선 산출물은 **여기에 없다.** 네이티브 경로로 만든 GDS 를 올려두고
-내려받게 하던 때가 있었는데, 그건 "브라우저에서 돌렸다" 와 구분이 안 된다.
-비교용 ALIGN 배선 기하(`routed/*.align.json`)만 남겨 그림으로 쓴다.
+배선 중에는 ALIGN 의 로그(`bottom up routing for <모듈>`)와 C++ 쪽 표준출력을 워커가
+그대로 흘려준다. 실패하면 마지막 줄을 같이 띄운다.
 
 ### 여기까지 오면서 뚫은 것
 
@@ -444,11 +391,19 @@ bottom up routing for PRIMITIVE_98739713_PG0 (2)   GcellGlobalRouter → Runtime
    조용히 넘어가지만 wasm 은 즉사한다. 이제 덤프를 `1_topology` 가 아니라
    **`3_pnr/inputs/<TOP>.verilog.json`** 에서 만든다 — prep 이
    `manipulate_hierarchy` 로 전원핀을 걷어내 써둔, 배선 단계가 기대하는 그것이다.
-5. 두 번째 배선에서 `null function` — 이전 회차가 남긴 `3_pnr` 위에 또
-   돌렸기 때문이다. 이제 매번 prep 부터 다시 돌린다 (1 초 미만).
+5. 두 번째 배선·두 번째 모듈에서 `null function` — 처음엔 앞 회차가 남긴 `3_pnr`
+   탓으로 읽고 매번 prep 부터 다시 돌게 했는데, 그걸로는 안 고쳐졌다 (node 에서
+   재현했다). 원인은 위의 lp_solve BLAS 적재였다.
 
-메모리는 문제가 아니었다 — 계측상 C++ 배선기 본체는 72 MB 고, 8.4 GB 는
-배선 단계가 배치를 다시 돌리던 비용인데 이 경로엔 그게 없다.
+메모리: 브라우저 경로의 wasm 힙은 594 MB (평면) ~ 1,074 MB (cascode) 까지 오른다.
+네이티브에서 잰 C++ 배선기 본체는 72 MB 다 — 나머지는 파이썬 쪽 중간물이다.
+
+### 다음 — 배선에서 파이썬을 뺀다
+
+지금 배선 버튼 하나에 Pyodide 와 libz3 (원본 약 40 MB) 를 받고, 예제라도 앞단을
+다시 돌리고, ALIGN 의 파이썬 흐름을 통째로 탄다. 그중 C++ 배선 알고리즘은
+1~4.5 초뿐이다. 배선기를 **Rust 로 새로** 짜서 wasm 하나로 돌리고, DRC/LVS 검사와
+GDS 쓰기는 JS 로 옮기는 중이다. 계획과 합격선은 `symplace/PLAN-route.md`.
 
 ## 소스
 
@@ -476,5 +431,4 @@ node symplace/web/placer/test/parity.mjs     # 파이썬과 값 대조
 node symplace/web/placer/test/legalize.mjs   # 겹침 0 / 대칭 잔차 / 면적·배선
 node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 돌린 Adam
 node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 비교
-python3 symplace/web/placer/test/flatten.py  # 계층을 펼쳐 넘기는 덤프 (Pyodide 없이)
 ```
