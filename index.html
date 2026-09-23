@@ -1039,9 +1039,12 @@ function offerExample(blob, name) {
   const a = $("saveEx");
   if (exUrl) { URL.revokeObjectURL(exUrl); exUrl = null; }
   if (!blob?.topology) { a.hidden = true; return; }
-  const { topology, primitives, templates, place = null } = blob;
+  const { topology, primitives, templates, place = null, leaves = null } = blob;
+  // 리프 전체 도형이 있으면 같이 담는다 — 이 파일 하나로 배선까지 된다.
+  // (저장소의 예제는 첫 화면을 가볍게 하려고 data/<이름>.leaves.json 으로 뗐다.)
   exUrl = URL.createObjectURL(new Blob(
-    [JSON.stringify({ topology, primitives, templates, place })],
+    [JSON.stringify(leaves ? { topology, primitives, templates, place, leaves }
+                           : { topology, primitives, templates, place })],
     { type: "application/json" }));
   a.href = exUrl;
   a.download = name.replace(/[^\w.-]+/g, "_") + ".json";

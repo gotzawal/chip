@@ -3,7 +3,7 @@
  *  페이지가 읽는 예제는 {topology, primitives, templates, place} 한 덩이다
  *  (data/<이름>.json). 이 스크립트가 그걸 만든다.
  *
- *      node symplace/web/placer/pack-example.mjs <폴더> [이름] [--label "이름표"]
+ *      node symplace/web/placer/pack-example.mjs <폴더> [이름] [--label "이름표"] [--leaves-only]
  *
  *  <폴더> 는 둘 중 아무거나:
  *    - ALIGN 작업 디렉터리        (1_topology/ 와 2_primitives/ 가 있는 곳)
@@ -15,10 +15,17 @@
  *
  *  terminals 는 `netType == "pin"` 인 것만 남긴다. 나머지는 배선/GDS 단계의
  *  기하라 배치기가 안 읽고, 파일 크기의 대부분이다 (예제 하나가 84KB -> 13KB).
+ *
+ *  그 나머지 — 리프 전체 도형 — 는 **따로** data/<이름>.leaves.json 에 쓴다
+ *  (src/route/leaves.mjs 의 형식). 배선할 때만 받으므로 첫 화면은 그대로 가볍다.
+ *
+ *      --leaves-only   리프 도형만 쓴다. data/<이름>.json 과 index.json 은 안 건드린다
+ *                      (ALIGN 기준선이 든 예제 파일을 앞단 출력만 있는 폴더로 덮지 않게).
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { packLeaves } from "../../../src/route/leaves.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..", "..");      // 저장소 루트
@@ -27,6 +34,8 @@ const DATA = path.join(ROOT, "data");
 const argv = process.argv.slice(2);
 const li = argv.indexOf("--label");
 const label = li >= 0 ? argv.splice(li, 2)[1] : null;
+const lo = argv.indexOf("--leaves-only");
+const leavesOnly = lo >= 0 && argv.splice(lo, 1).length > 0;
 const [dir, nameArg] = argv;
 if (!dir) {
   console.error("쓰기: node symplace/web/placer/pack-example.mjs <폴더> [이름] [--label \"이름표\"]");
@@ -45,17 +54,25 @@ if (!vfiles.length) throw new Error(`${topoDir}: *.verilog.json 이 없다`);
 const topology = J(path.join(topoDir, vfiles[vfiles.length - 1]));
 const primitives = J(path.join(primDir, "__primitives__.json"));
 
-const templates = {};
+const templates = {}, full = {};
 let missing = [];
 for (const cn of Object.keys(primitives)) {
   const p = path.join(primDir, cn + ".json");
   if (!fs.existsSync(p)) { missing.push(cn); continue; }
   const d = J(p);
+  full[cn] = d;
   templates[cn] = {
     bbox: d.bbox,
     terminals: (d.terminals ?? []).filter((t) => t.netType === "pin" && t.netName),
   };
 }
+
+fs.mkdirSync(DATA, { recursive: true });
+const leavesOut = path.join(DATA, name + ".leaves.json");
+fs.writeFileSync(leavesOut, JSON.stringify(packLeaves(full)));
+console.log(`data/${name}.leaves.json  ${(fs.statSync(leavesOut).size / 1024).toFixed(1)}K` +
+            `  리프 ${Object.keys(full).length} 종`);
+if (leavesOnly) process.exit(0);
 
 // 비교 기준선 (있으면).
 let place = null;
@@ -72,7 +89,6 @@ else if (hasStages) {
   if (hit) place = J(path.join(res, hit));
 }
 
-fs.mkdirSync(DATA, { recursive: true });
 const out = path.join(DATA, name + ".json");
 fs.writeFileSync(out, JSON.stringify({ topology, primitives, templates, place }));
 const bytes = fs.statSync(out).size;

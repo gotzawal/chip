@@ -12,6 +12,7 @@
  *    --no-blasfix   워커의 lp_solve BLAS 우회책을 끈다 — 예전의 "두 번째 LP 에서 죽음" 재현용
  *    --prof         배선 단계 안의 시간을 단계별로 찍는다 (prof.py)
  *    --dump=<폴더>  Pyodide 안의 작업 디렉터리(/work/<예제>)를 꺼내 둔다
+ *    --blob=<파일>  앞단이 페이지에 돌려주는 한 덩이(topology, primitives, templates, leaves)를 쓴다
  *    --no-route     앞단만
  *    --verbose      배선기 로그를 거르지 않는다
  */
@@ -146,6 +147,7 @@ py.runPython(FRONT);
 const blob = JSON.parse(py.globals.get("run")(spText, ex, top, constText));
 log(`앞단 ${((performance.now() - tf) / 1000).toFixed(2)}s  모듈 ${blob.topology.modules.length}` +
     `  소자 ${Object.keys(blob.primitives).length} 종`);
+if (opt("blob")) fs.writeFileSync(opt("blob"), JSON.stringify(blob));
 
 function dumpWork(dst) {
   fs.rmSync(dst, { recursive: true, force: true });

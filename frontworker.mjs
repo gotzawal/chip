@@ -138,16 +138,25 @@ def run(sp_text, name, subckt, const_text):
     # 배치기가 먹는 한 덩이로 묶는다
     vfiles = sorted(topo.glob("*.verilog.json"))
     topology = json.loads(vfiles[-1].read_text())
-    templates = {}
-    for cn in prims:
+    templates, leaves = {}, {}
+    for cn in sorted(prims):
         p = prim / (cn + ".json")
         if p.exists():
             d = json.loads(p.read_text())
             templates[cn] = {"bbox": d["bbox"],
                              "terminals": [t for t in d.get("terminals", [])
                                            if t.get("netType") == "pin" and t.get("netName")]}
+            # 배선·DRC·GDS 에 쓸 리프 전체 도형 — src/route/leaves.mjs 의 "leaves/1" 형식
+            rows = []
+            for t in d.get("terminals", []):
+                row = [t["layer"], t.get("netName"), 1 if t.get("netType") == "pin" else 0] + list(t["rect"])
+                if t.get("terminal"):
+                    row.append(t["terminal"])
+                rows.append(row)
+            leaves[cn] = {"bbox": d["bbox"], "t": rows}
     return json.dumps({"topology": topology, "primitives": prims,
-                       "templates": templates, "place": None})
+                       "templates": templates, "place": None,
+                       "leaves": {"format": "leaves/1", "leaves": leaves}})
 `;
 
 const PYROUTE = String.raw`

@@ -136,6 +136,9 @@ ALIGN 기준선(`place`)은 안 들어간다 — 브라우저 앞단은 배치�
 그 예제는 **왼쪽 패널이 빈 채로** 돌고, 오른쪽에 우리 배치만 나온다.
 면적/HPWL 의 "ALIGN 대비" 칸도 비고, 나머지(겹침·대칭 잔차·격자)는 그대로 나온다.
 
+저장한 파일에는 리프 셀의 전체 도형(`leaves`)도 들어 있다 — 새 배선기(Rust, 만드는 중)는
+이것만 있으면 앞단을 다시 돌리지 않고 배선한다.
+
 ### 2. 네이티브 ALIGN 이 있으면 (기준선까지)
 
 ```bash
@@ -148,6 +151,11 @@ node symplace/web/placer/pack-example.mjs      "$ALIGN_WORK/my_ota" my_ota --lab
 폴더)를 읽어 `data/<이름>.json` 한 덩이로 묶고 `data/index.json` 까지 고친다.
 `3_pnr/Results` 의 `scaled_placement_verilog` 를 찾으면 **비교 기준선**으로
 같이 담는다. terminals 는 `netType == "pin"` 만 남긴다 (예제 하나가 84K -> 13K).
+
+리프 셀의 전체 도형은 따로 `data/<이름>.leaves.json` 에 쓴다 (`src/route/leaves.mjs`
+형식, 예제 하나 41~222K). 배선할 때만 받으므로 첫 화면은 그대로 가볍다.
+`--leaves-only` 를 주면 이것만 쓰고 `data/<이름>.json` 은 안 건드린다 — 지금 예제
+다섯 개의 리프 파일은 브라우저 앞단(node 하네스 `--dump`)의 출력으로 이렇게 만들었다.
 
 지금 저장소의 예제 다섯 개는 이 스크립트로 다시 만들면 **바이트까지 같다.**
 
@@ -431,4 +439,5 @@ node symplace/web/placer/test/parity.mjs     # 파이썬과 값 대조
 node symplace/web/placer/test/legalize.mjs   # 겹침 0 / 대칭 잔차 / 면적·배선
 node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 돌린 Adam
 node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 비교
+node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와 맞는가
 ```
