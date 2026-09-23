@@ -57,19 +57,21 @@ python3 -m http.server 8791
 ```
 index.html        페이지
 worker.mjs        배치를 워커에서 돌리는 얇은 껍데기
-routeworker.mjs   배선을 워커에서 — src/route/pipeline.mjs (파이썬 없음)
+routeworker.mjs   배선 · Rust 이식을 워커에서 — src/route/pipeline.mjs (파이썬 없음)
+alignworker.mjs   배선 · ALIGN 원본 — Pyodide + ALIGN 파이썬 + C++ 배선기 (대조용, 누를 때만 받는다)
 frontworker.mjs   앞단 — .sp 를 올릴 때만. Pyodide 안에서 ALIGN 앞단을 그대로 돌린다
 view.mjs          캔버스 — 확대/이동, 패널, 배선 레이어
 src/job.mjs       배치 한 판 (워커에서도, 메인 스레드에서도 같은 코드가 돈다)
 src/baseline.mjs  ALIGN 기준선 뽑기 — 첫 화면이 워커 없이 뜨는 이유
 src/*.mjs         배치기 본체 (의존성 없는 ES 모듈)
-src/route/        배선 — 문제 만들기, Rust 배선기(router.wasm), DRC/LVS, 도형 합성, GDS
+src/route/        배선 — ALIGN 배선 단계의 이식: 입력·PnRDB(align/), Rust 배선기(alignroute.wasm),
+                  도형 합성, DRC/LVS, GDS
 data/*.json       예제 5 개의 ALIGN 앞단 출력 (미리 만들어둬 첫 화면이 빠르다)
 data/*.leaves.json  예제의 리프 셀 전체 도형 — 배선할 때만 받는다
 netlists/*.sp     예제 5 개의 원본 회로 (앞단을 다시 돌려 예제를 만들 때)
 routed/*.align.json  네이티브 ALIGN 이 낸 배선 기하 (비교용 기준선)
 py/               앞단용 Pyodide 스택 (원본 약 39 MB, .sp 를 처음 올릴 때만 받는다)
-symplace/         소스 — 파이썬 배치기, Rust 배선기(router/), 검사, 빌드 스크립트, ALIGN 패치
+symplace/         소스 — 파이썬 배치기, Rust 배선기(alignroute/), 검사, 빌드 스크립트, ALIGN 패치
 ```
 
 ## 쓰는 법
@@ -77,11 +79,12 @@ symplace/         소스 — 파이썬 배치기, Rust 배선기(router/), 검�
 1. **예제를 고르거나** `.sp` 넷리스트를 올린다.
 2. **배치 실행** — 변이·반전·영역·격자를 JS 배치기가 직접 고른다.
    끝나면 배치 JSON 을 바로 받을 수 있다.
-3. **배선 실행** — 이 탭이 배선하고 (Rust 격자 배선기, wasm, 수십 ms), ALIGN 의 검사기를
-   옮긴 것으로 DRC/LVS 를 재고, GDS 를 쓴다. 결과는 `배선` 보기에 그려지고, 아래
-   내려받기 칸이 그 자리에서 채워진다.
-   지금 배선기는 ALIGN 과 결과가 다른 독립 배선기다. ALIGN 의 배선 알고리즘을 그대로 옮겨
-   같은 배치에서 같은 배선이 나오게 바꾸는 중이다 — [symplace/PLAN-route-align.md](symplace/PLAN-route-align.md).
+3. **배선 · Rust 이식** — 이 탭이 배선한다. ALIGN 의 배선 단계를 그대로 옮긴 것이다: 배선기에
+   넘기는 자료와 계층 부기는 JS, C++ 배선기(전역·상세·전원)는 Rust(wasm), 도형 합성·DRC/LVS·GDS 는
+   ALIGN 의 파이썬을 옮긴 JS. 결과는 `배선` 보기에 그려지고, 아래 내려받기 칸이 그 자리에서 채워진다.
+   (이식 중이다 — [symplace/PLAN-route-align.md](symplace/PLAN-route-align.md).)
+4. **배선 · ALIGN 원본** — 같은 배치를 ALIGN 그대로(파이썬 흐름 + C++ 배선기) 배선한다. 두 버튼을
+   번갈아 누르면 `배선 대조` 카드가 최종 도형·GDS 바이트·DRC/LVS 문구·배선기 단계 기록을 견준다.
 
 그림은 두 갈래로 고른다 — **무엇을**(배치 / 배선) 과 **누구를**(나란히 / 우리 /
 ALIGN). 기본은 `배치 · 나란히` 다. 왼쪽이 ALIGN, 오른쪽이 우리고, 두 패널은
@@ -108,7 +111,7 @@ ALIGN). 기본은 `배치 · 나란히` 다. 왼쪽이 ALIGN, 오른쪽이 우�
 .sp 넷리스트
   -> 앞단  1_topology + 2_primitives   Pyodide 에서 0.7 ~ 9 s
   -> 배치  변이·반전·영역·격자          JS 에서 9 ~ 180 s
-  -> 배선  신호·전원·대칭 넷            Rust wasm 에서 1 ~ 11 ms (검사·GDS 까지 수십 ms)
+  -> 배선  ALIGN 배선 단계의 이식      JS + Rust wasm (전역·상세·전원 배선, 검사, GDS)
   -> GDS + DRC/LVS
 ```
 
@@ -355,44 +358,34 @@ high_speed_comparator 를 같은 코드로 조건만 바꿔 재보면 이렇다.
 고칠 자리는 예산이 아니라 **연속단계 점수가 legalize 뒤 품질을 잘 예측하지
 못한다**는 쪽이다 — 상위 후보를 고르는 기준이 실제로 남는 것과 어긋난다.
 
-## 브라우저 배선 — 실측
+## 브라우저 배선 — ALIGN 배선 단계의 이식
 
-배선은 **파이썬 없이** 돈다. 새로 짠 Rust 격자 배선기(`symplace/router` -> `src/route/router.wasm`,
-gzip 42 KB)가 배선하고, ALIGN 의 DRC/LVS 검사기(`cell_fabric`)를 JS 로 옮긴 것으로 잰다.
-예제 다섯 개 모두, ALIGN 의 배치로도 우리 배치로도 **DRC/LVS 0** 이다 (`test/route.mjs`).
+배선은 **ALIGN 의 배선 단계를 그대로 옮긴 것**이다. 같은 배치를 넣으면 ALIGN 과 같은 배선이 나와야 한다 —
+배선기를 새로 짜지 않고 ALIGN 의 알고리즘을 버릇까지 옮긴다 ([symplace/PLAN-route-align.md](symplace/PLAN-route-align.md)).
+페이지의 **배선 · ALIGN 원본** 버튼이 같은 배치를 ALIGN 그대로 돌려, 두 결과를 그 자리에서 견준다.
 
-| 예제 | 배선기 | 배선이 더한 금속 (우리) | 비아 | ALIGN 배선기, 같은 배치 (M5/M6 전원 격자 포함) |
-|---|---|---|---|---|
-| telescopic_ota | 1 ms | 16.4 µm | 16 | 57.4 µm, 비아 38 |
-| current_mirror_ota | 2 ms | 14.2 µm | 17 | 56.3 µm, 비아 34 |
-| five_transistor_ota | 1 ms | 2.9 µm | 6 | 49.6 µm, 비아 24 |
-| cascode_current_mirror_ota | 3 ms | 53.3 µm | 40 | 184.1 µm, 비아 102 |
-| high_speed_comparator | 5 ms | 52.4 µm | 49 | 167.7 µm, 비아 108 |
+| 단계 | 어디 | ALIGN 과 대조 |
+|---|---|---|
+| 입력 만들기, PnRDB, 배치 심기, 계층 부기 | `src/route/align/` (JS) | 배선기 입력이 필드마다 같다 (`test/aligndb.mjs`, 10 판 20 모듈) |
+| 전역 배선 (RouteWork 4) | `symplace/alignroute/src/gr` (Rust + lp_solve C 소스) | 옮기는 중 |
+| 상세 배선 (RouteWork 5) | `symplace/alignroute/src/dr` (Rust) | 옮기는 중 |
+| 전원 격자·전원 배선 (RouteWork 2·3) | `symplace/alignroute/src/pr` (Rust) | 기록이 같다 — 10 판과 일부러 막은 16 판 (`test/alignroute.mjs`) |
+| 도형 합성·DRC/LVS·GDS | `src/route/pipeline.mjs`, `compose.mjs`, `check.mjs`, `gds.mjs` | ALIGN 배선기의 기록을 넣으면 모듈마다 도형(차례까지)·GDS·오류 문구가 같다 (`test/route.mjs`, 10 판 + 흔든 배치 20 판) |
 
-(우리 배치, node. 금속은 배선 뒤와 배선 전을 검사기로 합친 도형의 차 — 두 배선기를 같은 잣대로 쟀다.)
-브라우저에서 배선 버튼 한 번은 리프 도형과 배선기를 받는 시간을 빼면 수십 ms 다 — telescopic 은
-배선·검사·GDS 까지 37 ms.
+**심판을 먼저 맞췄다.** ALIGN 의 검사기·도형 합성·GDS 쓰기를 JS 로 옮기고 파이썬과 글자·바이트 단위로
+대조했다: 검사기는 5 예제 10 모듈과 일부러 망가뜨린 106 사례 (`test/check.mjs`), 도형 합성은 10 모듈 +
+격자 오류 문구 150 개 (`test/compose.mjs`), GDS 는 `.python.gds` 와 바이트까지 (`test/gds.mjs`).
 
-**심판을 먼저 맞췄다.** 배선기를 짜기 전에 ALIGN 의 검사기·도형 합성·GDS 쓰기를 JS 로 옮기고
-파이썬과 글자·바이트 단위로 대조했다: 검사기는 5 예제 10 모듈과 일부러 망가뜨린 106 사례
-(`test/check.mjs`), 도형 합성은 10 모듈 + 격자 오류 문구 150 개 (`test/compose.mjs`), GDS 는
-`.python.gds` 와 바이트까지 (`test/gds.mjs`). 새 배선 결과 10 개도 ALIGN 의 파이썬 검사기에
-그대로 넣어 같은 판정(0)을 받았다.
+**lp_solve 는 C 소스 그대로 링크한다.** 전역 배선의 ILP 는 최적해가 심하게 겹치고 lp_solve 는 대개 처음 찾은
+정수해를 낸다 — 다른 풀이기로는 같은 배선이 안 나온다. clang `wasm32-wasi` 로 빌드한 lp_solve 가 ALIGN 의
+것과 합성 ILP 410 개에서 비트까지 같다 (`symplace/scripts/route/align-ref/ilp/`).
 
-**배선기** (`symplace/router`, 의존 크레이트 없음). 검사기는 같은 트랙 위 도형끼리만 보므로
-규칙이 트랙마다 1 차원 구간 규칙이 된다 — 다른 넷은 한 트랙에서 노드 하나를 띄우고, 토막은 두
-노드 이상이어야 비아를 띄우고, 비아는 격자 노드 위에만. 넷마다 A*, 겹치면 PathFinder 식 협상,
-끝나면 트랙마다 펴서 끝단 간격 메우기와 최소 길이 늘리기. 끝내 못 푼 넷은 합선으로 남기지 않고
-걷어내 "못 이은 넷" 으로 알린다. 대칭 넷 쌍은 거울 경로가 되면 그대로, 안 되면 거울을 권하는
-A* 로 (배선 길이 차는 ALIGN 과 비슷하다). 빽빽한 합성 배치 1,200 개에서 "성공" 이라고 한 것은
-전부 검사기도 0 이었다 (`test/routefuzz.mjs`).
-
-**전에는** 배선 버튼 하나에 Pyodide · libz3 · ALIGN 파이썬 흐름 · C++ 배선기 wasm (원본 약 40 MB)
-을 받고, 예제라도 앞단을 다시 돌려 4~13 초가 걸렸다. 두 번째 배선이나 계층 설계의 두 번째
-모듈에서 `null function` 으로 죽던 것은 lp_solve 가 외부 BLAS 를 `dlopen` 하다가 Emscripten
-의 적재 기록에 걸린 것이었다 (JS 한 줄로 막았다 — `symplace/PLAN-route.md` 2 절). 그 경로는
-이제 페이지에 없고, 비교 기준으로 node 하네스에 남아 있다 (`symplace/scripts/route/node/`:
-`route.mjs` 가 ALIGN 배선, `newroute.mjs` 가 새 배선). 과정과 근거는 `symplace/PLAN-route.md`.
+**전에는** 새로 짠 격자 배선기(`symplace/router`)가 있었다. 빨랐지만 ALIGN 과 결과가 달라 걷어냈다
+(한계는 `symplace/PLAN-route.md` 5 절). 그보다 전에는 배선 버튼 하나에 Pyodide · ALIGN 파이썬 흐름 · C++
+배선기 wasm (원본 약 40 MB) 을 받았다 — 그 경로는 지금 **배선 · ALIGN 원본** 버튼(대조용)과 node 하네스
+(`symplace/scripts/route/node/route.mjs`)에 있다. 두 번째 배선이나 계층 설계의 두 번째 모듈에서
+`null function` 으로 죽던 것은 lp_solve 가 외부 BLAS 를 `dlopen` 하다가 Emscripten 의 적재 기록에 걸린
+것이었다 (JS 한 줄로 막았다 — `symplace/PLAN-route.md` 2 절).
 
 ## 소스
 
@@ -424,7 +417,7 @@ node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와
 node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == ALIGN 파이썬 검사기
 node symplace/web/placer/test/compose.mjs    # 도형 합성 == gen_viewer_json
 node symplace/web/placer/test/gds.mjs        # GDS == ALIGN 파이썬 GDS (바이트)
-node symplace/web/placer/test/problem.mjs    # 계층 펼치기 + 배선 문제
-node symplace/web/placer/test/route.mjs      # 새 배선 경로: 5 예제 DRC/LVS 0
-node symplace/web/placer/test/routefuzz.mjs  # 배선기가 성공이라 하면 검사기도 0 (합성 배치 수백 개)
+node symplace/web/placer/test/aligndb.mjs    # 배선기 입력(PnRDB)·계층 부기 == ALIGN (10 판)
+node symplace/web/placer/test/alignroute.mjs # Rust 배선기의 단계 기록 == ALIGN (--stage=4,45,2,23)
+node symplace/web/placer/test/route.mjs      # 배선 한 판 == ALIGN: 모듈 도형·GDS·오류 문구 (--router=wasm)
 ```
