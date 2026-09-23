@@ -693,6 +693,13 @@ function redrawSoon() {
   setTimeout(() => redraw(), 400);
   setTimeout(() => redraw(), 1500);
 }
+/** 배선이 끝나면 그림을 보이는 자리로 — 휴대폰에서는 상태 줄과 그림이 한 화면에 안 든다. */
+function showCanvas() {
+  redrawSoon();
+  const r = cv.getBoundingClientRect();
+  if (r.top < 0 || r.bottom > window.innerHeight)
+    cv.scrollIntoView({ behavior: "smooth", block: r.height > window.innerHeight ? "start" : "center" });
+}
 document.addEventListener("visibilitychange", () => { if (!document.hidden) redraw(); });
 window.addEventListener("pageshow", () => redraw());
 window.addEventListener("focus", () => redraw());
@@ -1352,7 +1359,7 @@ async function runRoute() {
     rustRun = null; cmp = null; showCompare();
     setView("route", "both");
     showDrc();
-    redrawSoon();
+    showCanvas();
   } finally {
     busy = false; $("run").disabled = false; routeButtons(true);
   }
@@ -1455,11 +1462,12 @@ async function runAlignRoute() {
     addDownload(new Blob([m.gds], { type: "application/octet-stream" }),
                 name + ".align.gds", "GDS — ALIGN 원본");
     compareRuns();
-    setView("route", "both");
+    // 같은 배치의 Rust 이식 결과가 있으면 나란히, 없으면 ALIGN 원본만 크게
+    setView("route", cmp ? "both" : "align");
     showDrc();
-    redrawSoon();
+    showCanvas();
     setStatus(`<span>ALIGN 원본 배선 완료 — DRC/LVS ${m.nerrors}건, 기록 ${m.records.length} 단계` +
-              `  (${m.secs.toFixed(1)} s)${cmp ? " · " + cmpLine() : ""}</span>`);
+              `  (${m.secs.toFixed(1)} s)${cmp ? " · " + cmpLine() : " · 그림: 배선 · ALIGN"}</span>`);
   } catch (err) {
     const msg = err.message || "";
     const net = /failed to fetch|networkerror|dynamically imported|→ \d+|-> \d+/i.test(msg);
@@ -1579,7 +1587,7 @@ function showRouted(m) {
   routeDownloads(m);
   setView("route", "both");      // 나란히. 비교가 이 페이지가 하는 일이다.
   showDrc();                     // setView 뒤에 (표와 그림이 서로를 따라간다)
-  redrawSoon();
+  showCanvas();
 }
 
 /** 방금 만든 배선 산출물을 Blob 링크로 건다 (서버에 없는 파일이다). */
