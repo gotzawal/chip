@@ -191,8 +191,7 @@ const GROUP_OF = new Map(LAYERS.map((l) => [l.key, l.group]));
 
 /** 배선된 기하를 그린다. on 은 켜진 묶음의 Set. */
 export function drawRouted(ctx, panel, geo, opt) {
-  // mark: 강조할 도형의 키 모음 (src/route/align/compare.mjs 의 shapeKey) — 다른 쪽과 다른 도형
-  const { pal, view, on, label, box = null, empty = null, mark = null, markKey = null, markColor = "#d33" } = opt;
+  const { pal, view, on, label, box = null, empty = null } = opt;
   ctx.save();
   ctx.beginPath();
   ctx.rect(panel.x, panel.y, panel.w, panel.h);
@@ -229,17 +228,6 @@ export function drawRouted(ctx, panel, geo, opt) {
     }
   }
   ctx.globalAlpha = 1;
-  // 다른 쪽과 다른 도형은 층을 가리지 않고 테두리로 짚는다 (작아도 보이게 최소 3px)
-  if (mark?.size && markKey) {
-    ctx.strokeStyle = markColor;
-    ctx.lineWidth = 1.5;
-    for (const t of geo.terminals) {
-      if (!mark.has(markKey(t))) continue;
-      const r = t.rect;
-      const w = Math.max(3, (r[2] - r[0]) * m.S), h = Math.max(3, (r[3] - r[1]) * m.S);
-      ctx.strokeRect(m.X(r[0]) - 1, m.Y(r[3]) - 1, w + 2, h + 2);
-    }
-  }
   // 외곽
   const [x0, y0, x1, y1] = geo.bbox;
   ctx.strokeStyle = pal.hair;

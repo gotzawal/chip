@@ -31,6 +31,7 @@ const ok = (cond, label, extra) => {
 
 for (const file of files) {
   const fx = JSON.parse(fs.readFileSync(path.join(FIX, file), "utf8"));
+  if (!fx.z0) continue;               // 배치 고정값만 — check-*, gds-*, grid.json 은 배선 쪽 고정값이다
   const w = Float64Array.from(fx.w), h = Float64Array.from(fx.h);
   const sx = Float64Array.from(fx.sx), sy = Float64Array.from(fx.sy);
   const N = Mat.from(fx.N), z0 = Float64Array.from(fx.z0);

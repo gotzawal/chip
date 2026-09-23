@@ -1,6 +1,6 @@
 /** 배선 한 판 — ALIGN 의 배선 단계(align/pnr: route_bottom_up 다음 _generate_json)를 그대로 따른다.
  *
- *  배선 워커(routeworker.mjs), 워커가 안 서는 브라우저의 메인 스레드, node 시험이 같은 것을 부른다.
+ *  배선 워커(routeworker.mjs), 워커가 안 서는 브라우저의 메인 스레드, node 하네스(newroute.mjs)가 같은 것을 부른다.
  *
  *    입력·PnRDB·배치·계층   align/bottomup.mjs      ALIGN 이 배선기에 넘기는 hierNode 를 비트까지 같게
  *    배선                   alignroute.wasm         ALIGN C++ 배선기(RouteWork 4·5, 최상위는 2·3 까지)를 Rust 로
@@ -38,7 +38,7 @@ const doNotRoute = (pc) => (pc?.constraints ?? []).filter((c) => c.const_name ==
  * @param {object} o.leaves      readLeaves() 결과
  * @param {object} o.pnrConst    모듈 -> pnr.const.json (DoNotRoute 넷은 열려도 된다)
  * @param {Map<string,Array>} o.outs   먼저 검사한 모듈의 도형 (<모듈>_<j> -> 도형) — 하위 모듈 블록이 읽는다
- * @returns {{terminals:Array, bbox:number[], errors:string[], result:object, wires:Array}}
+ * @returns {{terminals:Array, bbox:number[], errors:string[]}}
  */
 export function checkModule(node, { leaves, pnrConst, outs }) {
   const power = new Set(node.PowerNets.map((n) => n.name));
@@ -71,7 +71,7 @@ export function checkModule(node, { leaves, pnrConst, outs }) {
   const allowed = new Set(doNotRoute(pnrConst[node.name]));
   if (!node.isTop) for (const p of power) allowed.add(p);
   const result = check(comp.terminals, rules, { netsAllowedToBeOpen: [...allowed], postprocess: node.isTop, subinsts: comp.subinsts });
-  return { terminals: result.terminals, bbox: viewerBbox(node), errors: errorLines(result, viewerErrors), result, wires };
+  return { terminals: result.terminals, bbox: viewerBbox(node), errors: errorLines(result, viewerErrors) };
 }
 
 /**
@@ -80,7 +80,7 @@ export function checkModule(node, { leaves, pnrConst, outs }) {
  * @param {object} o.leaves                  리프 도형 ({format: "leaves/1", leaves} 또는 readLeaves 결과)
  * @param {object} o.placement               {bbox, instances, subModules} — 페이지의 배치
  * @param {{route(job:object): Promise<{records:Array, warnings?:string[]}>}} o.router
- *        loadAlignRouter() 결과 (시험에서는 기준 기록을 돌려주는 가짜)
+ *        loadAlignRouter() 결과
  * @param {number[]|Date} [o.time]           GDS 에 적을 시각
  * @param {(text:string) => void} [o.say]    진행 (모듈마다 한 줄)
  */
@@ -107,7 +107,7 @@ export async function routeDesign({ design, leaves, placement, router, time, say
   }
   if (!top) throw new Error("최상위 모듈을 배선하지 않았다");
 
-  // pyroute.py 처럼 3_pnr/*.errors 를 파일 이름 순으로
+  // ALIGN 이 쓰는 3_pnr/<모듈>_<j>.errors 를 파일 이름 순으로 이은 것
   const errors = [...outputs.keys()].sort((a, b) => ((a + ".errors") < (b + ".errors") ? -1 : 1))
     .flatMap((v) => outputs.get(v).errors);
   const { bbox, terminals } = top.c;
@@ -116,9 +116,9 @@ export async function routeDesign({ design, leaves, placement, router, time, say
   const geo = { bbox, terminals: [{ layer: "Outline", netName: null, netType: "drawing", rect: bbox.slice() }, ...terminals] };
   const records = res.modules.flatMap((m) => m.records);
   return {
-    name: top.m.name, geo, gds, errors, records, warnings, outputs, res,
+    name: top.m.name, geo, gds, errors, records, warnings,
     stats: {
-      modules: res.modules.length, nets: top.m.node.Nets.length, wires: top.c.wires.length,
+      modules: res.modules.length, nets: top.m.node.Nets.length,
       routerMs: records.reduce((s, r) => s + (r.ms ?? 0), 0),
     },
   };
@@ -128,5 +128,5 @@ export async function routeDesign({ design, leaves, placement, router, time, say
 export function routeMessage(out, secs) {
   return { type: "route", ok: true, name: out.name, secs, gds: out.gds.buffer, gdsName: out.name + ".gds",
            errors: out.errors, nerrors: out.errors.length, geo: out.geo, stats: out.stats,
-           records: out.records, warnings: out.warnings };
+           warnings: out.warnings };
 }

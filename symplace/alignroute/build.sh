@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# alignroute 를 wasm 으로 빌드해 src/route/alignroute.wasm 에 둔다 (페이지와 node 시험이 같은 파일을 쓴다).
+# alignroute 를 wasm 으로 빌드해 src/route/alignroute.wasm 에 둔다 (페이지와 node 하네스 newroute.mjs 가 같은 파일을 쓴다).
 #   symplace/alignroute/build.sh          릴리스 (LTO)
 #   symplace/alignroute/build.sh --dev    결과는 같고 빌드만 빠르다 (개발 중)
 # lp_solve 소스가 없으면 먼저 fetch-lpsolve.sh 를 돌린다.

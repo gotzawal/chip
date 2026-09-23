@@ -23,7 +23,6 @@ export function clone(x) {
 }
 
 // ---------------------------------------------------------------- 자료형 (datatype.h 의 기본값)
-export const OMARK = ["N", "S", "W", "E", "FN", "FS", "FW", "FE"];
 export const BLOCK = "NType.Block", TERMINAL = "NType.Terminal";
 /** CheckinHierNode 가 만드는 dummy_connected 의 type 은 C++ 에서 초기화하지 않는다 (pybind 덤프: "NType.???") */
 export const NTYPE_UNSET = "NType.???";

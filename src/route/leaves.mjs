@@ -15,8 +15,7 @@
  *    s         리프 JSON 의 subinsts 이름들 (그 순서 그대로). 도형 합성이 검사기의 subinsts 를
  *              ALIGN 과 같은 순서로 채우는 데 쓴다 — V0 가 나오는 순서와 다르다. 없으면 [].
  *
- *  리프 LEF 는 이것의 함수다 (SIZE = bbox, PIN = pin 도형, OBS = 나머지 중 M1~M6·V1~V5).
- *  5 예제 59 개 리프에서 ALIGN 이 쓴 .lef 와 전부 일치했다 (symplace/PLAN-route.md 3 절).
+ *  리프 LEF 는 이것의 함수다 — 배선 입력을 만들 때 align/prep.mjs 가 짓는다 (cell_fabric/gen_lef.py).
  */
 
 export const LEAVES_FORMAT = "leaves/1";
@@ -61,30 +60,4 @@ export function readLeaves(obj) {
   if (!obj || obj.format !== LEAVES_FORMAT || !obj.leaves)
     throw new Error(`리프 도형 형식이 아니다 (format ${obj?.format ?? "없음"}, ${LEAVES_FORMAT} 이어야 한다)`);
   return obj.leaves;
-}
-
-/** 리프 LEF 를 도형에서 만든다 — ALIGN 앞단이 쓰는 것과 같은 내용 (줄 순서만 다를 수 있다). */
-export function leafLef(concrete, e) {
-  const [x0, y0, x1, y1] = e.bbox;
-  const pins = new Map(), obs = [];
-  for (const [layer, net, pin, a, b, c, d] of e.t) {
-    if (pin) {
-      if (!pins.has(net)) pins.set(net, []);
-      pins.get(net).push([layer, a, b, c, d]);
-    } else if (/^(M[1-6]|V[1-5])$/.test(layer)) obs.push([layer, a, b, c, d]);
-  }
-  const out = [`MACRO ${concrete}`, "  UNITS ", "    DATABASE MICRONS UNITS 1000;", "  END UNITS ",
-               "  ORIGIN 0 0 ;", `  FOREIGN ${concrete} 0 0 ;`, `  SIZE ${x1 - x0} BY ${y1 - y0} ;`];
-  for (const [net, rects] of [...pins].sort((p, q) => (p[0] < q[0] ? -1 : 1))) {
-    out.push(`  PIN ${net}`, "    DIRECTION INOUT ;", "    USE SIGNAL ;", "    PORT");
-    for (const [layer, a, b, c, d] of rects) out.push(`      LAYER ${layer} ;`, `        RECT ${a} ${b} ${c} ${d} ;`);
-    out.push("    END", `  END ${net}`);
-  }
-  if (obs.length) {
-    out.push("  OBS");
-    for (const [layer, a, b, c, d] of obs) out.push(`    LAYER ${layer} ;`, `      RECT ${a} ${b} ${c} ${d} ;`);
-    out.push("  END");
-  }
-  out.push(`END ${concrete}`);
-  return out.join("\n") + "\n";
 }

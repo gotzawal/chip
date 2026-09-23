@@ -559,7 +559,7 @@ mod tests {
         }
     }
 
-    /// libc++ 18 std::sort 가 낸 순서 (scripts/route/align-ref/dr/sortcheck/ref.cpp 로 뽑았다): (종류, first, 키, 특수, 결과 번호 — 빈 것은 벡터 밖)
+    /// libc++ 18 std::sort 가 낸 순서 (커밋 6655430 의 scripts/route/align-ref/dr/sortcheck 로 뽑았다): (종류, first, 키, 특수, 결과 번호 — 빈 것은 벡터 밖)
     const CASES: &[(u8, usize, &str, &str, &str)] = &[
         (1, 0, "1 0 1 1 0 1 1 0 0 2 0 2 0 2 2 0 1 2 2 0",
          "00000000000000000000",

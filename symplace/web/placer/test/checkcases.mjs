@@ -14,14 +14,14 @@
  *    {op:"rect", i, rect}    사각형을 바꾼다
  *    {op:"add", row}         더한다
  *
- *  symplace/scripts/route/node/mutate.mjs 가 조작을 만들고, checkref.mjs check 가 파이썬 답을 채운다.
+ *  조작과 파이썬 답은 ALIGN 의 파이썬 검사기로 한 번 뽑아 박아 둔 것이다
+ *  (뽑은 도구 scripts/route/node/mutate.mjs·checkref.mjs 는 걷어냈다 — 커밋 6655430 에 있다).
  */
 import crypto from "node:crypto";
 
 export const FIXTURE_FORMAT = "check-fixture/1";
 
 const toTerm = ([layer, netName, netType, x0, y0, x1, y1]) => ({ layer, netName, netType, rect: [x0, y0, x1, y1] });
-export const toRow = (t) => [t.layer, t.netName ?? null, t.netType, ...t.rect];
 
 /** 사례 하나를 검사기 입력으로 편다. */
 export function expandCase(base, c) {
@@ -54,15 +54,12 @@ export const canon = (x) => JSON.stringify(x, (k, v) =>
 export const digest = (terminals) =>
   crypto.createHash("sha256").update(terminals.map(canon).join("\n")).digest("hex").slice(0, 20);
 
-/** 검사 결과(파이썬 capture 꼴이든 JS check() 꼴이든) -> 비교할 기록. */
+/** JS check() 결과 -> 비교할 기록 (고정 사례의 파이썬 답과 같은 꼴). */
 export function summarize(r) {
-  const head = r.crash ? { crash: r.crash } : {};     // 원본이 죽은 사례 — 나머지는 너그러운 검사기의 답
-  if (!r.shorts) return head;
   return {
-    ...head,
     shorts: r.shorts, opens: r.opens,
     differentWidths: r.differentWidths.map((w) => ({ msg: w.msg, indices: w.indices, v: w.v })),
     drc: r.drc, post: r.post,
-    nOut: (r.terminalsOut ?? r.terminals).length, out: digest(r.terminalsOut ?? r.terminals),
+    nOut: r.terminals.length, out: digest(r.terminals),
   };
 }

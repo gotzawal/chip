@@ -1,7 +1,8 @@
 # Phase 1 — 배치기를 웹으로
 
 gpuplace(파이썬/numpy)의 핵심을 의존성 없는 ES 모듈로 옮긴 것.
-node 와 브라우저에서 그대로 돈다. 빌드 단계 없음.
+node 와 브라우저에서 그대로 돈다. 빌드 단계 없음. 본체(`src/`)는 저장소 루트에 있고,
+이 폴더에는 검사와 고정값이 있다.
 
 ```
 src/linalg.mjs     행 우선 조밀행렬, Gram-Schmidt, 작은 선형계 풀이
@@ -12,11 +13,11 @@ src/lp.mjs         2단계 원시 심플렉스 (Bland 규칙)
 src/legalize.mjs   theta 공간 legalization — 겹침을 정확히 0 으로
 src/design.mjs     **1_topology + 2_primitives -> 배치 문제. 변이/영역/반전의 자유도**
 src/place.mjs      **입구 하나. 계층까지 엮어 앞단 출력 -> 배치 결과**
-site/index.html    **랜딩 페이지** — 앞단 출력만으로 브라우저에서 배치까지
-site/worker.mjs      배치는 워커에서 돈다 (예제 하나가 8~95 초라 메인 스레드면 언다)
-site/data/*.json     예제 5 개의 앞단 출력을 하나씩 묶은 것 (합계 84 KB)
-index.html         옛 데모 (고정값을 읽는 예전 경로)
+/index.html        **페이지** (저장소 루트) — 앞단 출력만으로 브라우저에서 배치·배선까지
+/worker.mjs          배치는 워커에서 돈다 (예제 하나가 8~95 초라 메인 스레드면 언다)
+/data/*.json         예제 5 개의 앞단 출력을 하나씩 묶은 것 (합계 84 KB)
 export-fixtures.py 파이썬 구현에서 정답 고정값을 뽑는다 (parity 검사용)
+pack-example.mjs   앞단 출력 폴더 -> /data/<이름>.json (예제 넣기)
 test/lp.mjs        심플렉스 검증 (답을 아는 문제 + 꼭짓점 전수 열거 대조)
 test/parity.mjs    파이썬 대조
 test/chunk.mjs     끊어 돌린 Adam == 한 번에 돌린 Adam
@@ -28,7 +29,7 @@ test/_load.mjs     앞단 출력 폴더 읽기 + ALIGN 기준선 재기 (node �
 ```
 
 ```bash
-cd site && python3 -m http.server 8791     # http 로 띄워야 한다 (ES 모듈·워커)
+python3 -m http.server 8791     # 저장소 루트에서. http 로 띄워야 한다 (ES 모듈·워커)
 # http://127.0.0.1:8791
 ```
 
@@ -462,13 +463,10 @@ cascode_current_mirror_ota  12 시작점 x 600   22.4s   면적 0.95x  HPWL 0.89
 
 ## 배선 · GDS · DRC — 네이티브 ALIGN 으로 닫았다 (5/5)
 
-배치가 실제로 **배선되고 GDS 가 나오는지**를 확인한 것이다.
-
-```bash
-node emit.mjs telescopic_ota              # 배치 -> out/<예제>.place.json
-bash ../spikes/route-js.sh telescopic_ota # 덤프에 심고 배선 -> GDS -> DRC
-bash ../spikes/drc-sum.sh                 # ALIGN 자신과 나란히
-```
+배치가 실제로 **배선되고 GDS 가 나오는지**를 확인한 것이다. JS 배치를 ALIGN 의 덤프
+(`__placer_dump__.json`)에 심어 네이티브 ALIGN 배선기로 돌렸다. 그때 쓴 스크립트(`emit.mjs`,
+`route-js.sh`, `route-align.sh`, `drc-sum.sh`)는 걷어냈다 — 지금 배선은 페이지가 ALIGN 배선 단계를
+옮긴 것(JS + Rust wasm)으로 한다 (git 기록 `6655430`).
 
 | 예제 | GDS | DRC 우리 | DRC ALIGN 자신 |
 |---|---|---|---|
@@ -481,7 +479,7 @@ bash ../spikes/drc-sum.sh                 # ALIGN 자신과 나란히
 `current_mirror_ota` 의 4 건은 `DIFFERENT WIDTH` 인데 **ALIGN 자신의 배치에서도
 똑같이 4 건** 나온다. SHORT·OPEN 은 양쪽 다 0. 기준선을 같이 재지 않으면
 "에러 4건"이 우리 탓인지 알 수 없다 — 한 번 오독해서 시간을 버린 적이 있어
-`route-align.sh` 로 같은 조건에서 ALIGN 자신도 돌린다.
+같은 조건에서 ALIGN 자신도 돌렸다.
 
 ### 격자 스냅 — LP 에 정수를 얹었다
 
@@ -522,14 +520,12 @@ cascode_current_mirror_ota 11 -> 0     1.111 그대로   1.304 -> 1.306
 
 **(2) `__placements_to_run__.json` 이 없다.** `--flow_stop 3_pnr:place` 로 끊으면
 `gui` 단계가 쓰는 그 파일이 없어 route 가 `FileNotFoundError` 로 죽는다.
-주입기가 같이 써준다.
+주입기(inject-js.py, 지금은 걷어냈다)가 같이 써줬다.
 
 ## 남은 것
 
-- **브라우저에서 배선하기**: PnR wasm 은 빌드되고 import 도 되지만
-  **브라우저에서 실행한 적이 없다.** 배치는 브라우저, 배선은 네이티브다.
-  메모리는 계측상 문제없어 보인다 — C++ 배선기 본체가 72 MB 고, 8.4 GB 는
-  배선 단계가 배치를 다시 돌리던 비용인데 우리 경로엔 그게 없다.
+- **브라우저에서 배선하기**: 됐다 — ALIGN 배선 단계를 JS + Rust wasm 으로 옮겨 페이지에서 돈다
+  (루트 README 의 "브라우저 배선" 절, `symplace/PLAN-route-align.md`).
 - **`Spread` / `Boundary` 제약, `Order` 의 `abut`**: 아직 없다.
   `SymmetricBlocks`, `Align`, `AspectRatio`(영역 종횡비로), `Order`(abut 제외)
   를 처리한다.

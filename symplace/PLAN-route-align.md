@@ -7,8 +7,15 @@ ALIGN 과 달라 쓸모가 없다고 봐서, ALIGN 의 C++ 배선 알고리즘�
 
 ## 결과 (2026-09-23) — 끝났다
 
-계획대로 옮겼고 **ALIGN 과 같다**. 페이지의 "배선 · Rust 이식" 이 이 길이다 (`src/route/pipeline.mjs` +
-`src/route/alignroute.wasm`, 소스 `symplace/alignroute/`). "배선 · ALIGN 원본" 과 번갈아 눌러 견준다.
+계획대로 옮겼고 **ALIGN 과 같다**. 페이지의 "배선 실행" 이 이 길이다 (`src/route/pipeline.mjs` +
+`src/route/alignroute.wasm`, 소스 `symplace/alignroute/`).
+
+> **나중에 걷어낸 것.** 이식이 끝나 ALIGN 원본은 더 쓰지 않는다. 대조에 쓰던 것 — 페이지의
+> "배선 · ALIGN 원본" 버튼과 "배선 대조" 카드, Pyodide 에 PnR 휠을 올리던 `alignworker.mjs`·`py/pyroute.py`·
+> `py/aligntap.py`·`py/pnr/`, node 하네스(`scripts/route/node/align.mjs`, `route.mjs`, `checkref.mjs`,
+> `mutate.mjs`), 부록 A 의 도구(`scripts/route/align-ref/`), 기준 덤프와 견주던 시험(`test/aligndb.mjs`,
+> `test/alignroute.mjs`, `test/route.mjs`), 휠 빌드(`scripts/wasm/`) — 는 저장소에서 뺐다. 아래 글과 표는
+> 그것들이 있던 때의 기록이다. 필요하면 git 기록에서 꺼낸다 (마지막으로 들어 있던 커밋 `6655430`).
 
 | 단계 | 어디 | 대조 |
 |---|---|---|
@@ -319,7 +326,7 @@ hanan 라우터, cap placer, guard ring, 중간 덤프·로그·그림 파일 �
 
 ## 부록 A — 조사 도구 (`scripts/route/align-ref/`)
 
-자세한 것은 그 폴더의 README. 요점:
+지금은 저장소에 없다 — 커밋 `6655430` 에서 꺼낸다. 자세한 것은 그 폴더의 README. 요점:
 
 - `tap/runall.mjs` — 5 예제 x 두 배치를 ALIGN 으로 배선하며 RouteWork 호출마다 앞뒤 hierNode·Drc_info 를
   `~/.cache/symplace/tap/` 에 (10 회 약 5 분).

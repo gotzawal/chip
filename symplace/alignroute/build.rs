@@ -2,10 +2,10 @@
 //!
 //! 전역 배선(모드 4)의 ILP 는 최적해가 수백~수천 개씩 겹쳐서, 다른 풀이기는 다른 배선을 고른다.
 //! 그래서 ALIGN 이 쓰는 lp_solve 를 그대로 쓴다. 파일 목록과 정의는 ALIGN
-//! `thirdparty/CMakeLists.lpsolve` 와 기준 휠 빌드(`symplace/scripts/wasm/build-pnr-wasm.sh`)를 따른다.
+//! `thirdparty/CMakeLists.lpsolve` (와 ALIGN 의 PnR 휠 빌드)를 따른다.
 //!
 //! - wasm32 (페이지): clang --target=wasm32-wasi + Debian wasi-libc. long double 이 binary128 이라
-//!   기준(emscripten)과 비트까지 같다 (합성 ILP 410/410, `scripts/route/align-ref/ilp/wasi`).
+//!   기준(emscripten)과 비트까지 같다 (합성 ILP 410/410 — symplace/PLAN-route-align.md).
 //! - 네이티브 (개발용 CLI): gcc + `-DREALXP=__float128` — 같은 까닭으로 기준과 같다 (450/450).
 //!
 //! LP 파일 읽기(lp_rlp.c, yacc_read.c)는 뺀다 — setjmp 가 wasm 에 없고 ALIGN 은 부르지 않는다.
