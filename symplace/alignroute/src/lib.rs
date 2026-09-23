@@ -11,6 +11,7 @@ pub mod dr;
 pub mod gr;
 pub mod lp;
 pub mod pr;
+pub mod rdb;
 pub mod route;
 
 use std::cell::RefCell;
