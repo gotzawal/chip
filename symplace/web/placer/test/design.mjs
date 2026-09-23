@@ -12,12 +12,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadDesign } from "./_load.mjs";
+import { loadDesign, exampleNames } from "./_load.mjs";
 import { variantGroups, buildProblem, countAssignments, enumerateAssignments,
          regionCandidates, structuralBound, topIndex, moduleOrder } from "../../../../src/design.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DES = path.join(HERE, "..", "fixtures", "design");
 const FIX = path.join(HERE, "..", "fixtures");
 const J = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 
@@ -25,11 +24,9 @@ let fails = 0;
 const ok = (c, msg) => { if (!c) { fails++; console.log("  실패 " + msg); } };
 
 
-for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES) : []) {
-  const dir = path.join(DES, ex);
-  if (!fs.statSync(dir).isDirectory()) continue;
+for (const ex of exampleNames()) {
   console.log("\n=== " + ex + " ===");
-  const { topology, design, place } = loadDesign(dir);
+  const { topology, design, place } = loadDesign(ex);
   const groups = variantGroups(design);
 
   console.log("  인스턴스 %d, 변이 그룹 %d, 조합 %d",

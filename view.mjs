@@ -75,7 +75,7 @@ export function drawPanel(ctx, panel, data, opt) {
     ctx.restore();
   }
 
-  ctx.font = '500 10px "IBM Plex Mono", ui-monospace, monospace';
+  ctx.font = '500 10px ui-monospace, Menlo, Consolas, monospace';
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (const r of data.rects) {
@@ -96,7 +96,7 @@ export function drawPanel(ctx, panel, data, opt) {
 
   // 패널 이름표
   if (label) {
-    ctx.font = '500 10px "IBM Plex Mono", ui-monospace, monospace';
+    ctx.font = '500 10px ui-monospace, Menlo, Consolas, monospace';
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillStyle = accent ? pal.ours : pal.faint;
@@ -113,8 +113,8 @@ function drawEmpty(ctx, panel, pal, lines) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const cx = panel.x + panel.w / 2, cy = panel.y + panel.h / 2;
-  const font = (i) => (i === 0 ? '500 12px "IBM Plex Mono", ui-monospace, monospace'
-                               : '400 11px "IBM Plex Mono", ui-monospace, monospace');
+  const font = (i) => (i === 0 ? '500 12px ui-monospace, Menlo, Consolas, monospace'
+                               : '400 11px ui-monospace, Menlo, Consolas, monospace');
   // 좁은 패널(휴대폰의 나란히)에서도 읽히게 줄을 나눈다 — 오류 문구가 길다
   const rows = [];
   ls.forEach((t, i) => {
@@ -234,7 +234,7 @@ export function drawRouted(ctx, panel, geo, opt) {
   ctx.lineWidth = 1;
   ctx.strokeRect(m.X(x0) + 0.5, m.Y(y1) + 0.5, (x1 - x0) * m.S, (y1 - y0) * m.S);
   if (label) {
-    ctx.font = '500 10px "IBM Plex Mono", ui-monospace, monospace';
+    ctx.font = '500 10px ui-monospace, Menlo, Consolas, monospace';
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillStyle = pal.faint;
     ctx.fillText(`${label} · ${drawn}/${geo.terminals.length}`, panel.x + 10, panel.y + 8);

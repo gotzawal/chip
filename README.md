@@ -4,8 +4,8 @@
 회로 읽기 · 배치 · 배선 · DRC/LVS 검사 · GDS 내보내기까지 이 탭 안에서 돌고, 산출물을 바로
 받는다. 서버도 빌드도 없다 — 이 폴더를 정적 호스팅에 그대로 올리면 된다.
 
-배치기의 소스 전체(파이썬 구현, 검사, 빌드 스크립트, ALIGN 메모리 패치)는
-`symplace/` 에 있다. 아래 "소스" 절을 보라.
+배치기·배선기의 소스와 검사, 예제·기준선을 만드는 도구는 `symplace/` 에 있다
+(아래 "소스" 절). 앞으로의 재구성과 예제 추가 계획은 [PLAN.md](PLAN.md).
 
 ## GitHub Pages 에 올리기
 
@@ -71,7 +71,8 @@ data/*.leaves.json  예제의 리프 셀 전체 도형 — 배선할 때만 받�
 netlists/*.sp     예제 5 개의 원본 회로 (회로 올리기에 그대로 넣어 볼 수 있다)
 routed/*.align.json  네이티브 ALIGN 이 낸 배선 기하 (비교용 기준선)
 py/               앞단용 Pyodide 스택 (원본 약 39 MB, .sp 를 처음 올릴 때만 받는다)
-symplace/         소스 — 파이썬 배치기, Rust 배선기(alignroute/), 검사, 빌드 스크립트, ALIGN 패치
+symplace/         소스·검사·도구 — Rust 배선기(alignroute/), node 검사, 예제 묶기(pack-example.mjs),
+                  네이티브 ALIGN 으로 기준선 만들기(scripts/align-baseline.sh), ALIGN 메모리 패치
 ```
 
 ## 쓰는 법
@@ -148,53 +149,42 @@ ALIGN 기준선(`place`)은 안 들어간다 — 브라우저 앞단은 배치�
 저장한 파일에는 리프 셀의 전체 도형(`leaves`)도 들어 있다 — 배선기는 이것만 있으면
 앞단을 다시 돌리지 않고 배선한다.
 
-### 2. 네이티브 ALIGN 이 있으면 (기준선까지)
+### 2. 네이티브 ALIGN 이 있으면 (ALIGN 의 배치·배선 기준선까지)
 
 ```bash
+./symplace/setup.sh                              # 처음 한 번 — ALIGN 설치 (symplace/README.md)
 source symplace/env.sh
-./symplace/scripts/verify.sh my_ota            # 앞단 -> 배치 -> 배선까지
-node symplace/web/placer/pack-example.mjs      "$ALIGN_WORK/my_ota" my_ota --label "My OTA"
+./symplace/scripts/align-baseline.sh my_ota --label "My OTA"
 ```
 
-`pack-example.mjs` 는 ALIGN 작업 디렉터리(또는 `stage-design.sh` 가 펼쳐 둔
-폴더)를 읽어 `data/<이름>.json` 한 덩이로 묶고 `data/index.json` 까지 고친다.
-`3_pnr/Results` 의 `scaled_placement_verilog` 를 찾으면 **비교 기준선**으로
-같이 담는다. terminals 는 `netType == "pin"` 만 남긴다 (예제 하나가 84K -> 13K).
-
-리프 셀의 전체 도형은 따로 `data/<이름>.leaves.json` 에 쓴다 (`src/route/leaves.mjs`
-형식, 예제 하나 41~219K). 배선할 때만 받으므로 첫 화면은 그대로 가볍다.
-`--leaves-only` 를 주면 이것만 쓰고 `data/<이름>.json` 은 안 건드린다 — 지금 예제
-다섯 개의 리프 파일은 브라우저 앞단의 출력으로 이렇게 만들었다.
-
-지금 저장소의 예제 다섯 개는 이 스크립트로 다시 만들면 **바이트까지 같다.**
-
-### 3. 배선 버튼까지 되게 하려면
-
-`data/<이름>.leaves.json` 이 있어야 한다 — `pack-example.mjs` 가 같이 쓴다 (브라우저에서
-"예제로 저장" 한 한 파일이면 그 안에 들어 있다). `netlists/<이름>.sp` 는 배선에 안 쓴다.
-
-ALIGN 자신의 배선을 비교로 깔고 싶으면 `routed/<이름>.align.json` 과
-`routed/index.json` 의 한 줄이 더 필요하다. 없으면 배선 보기의 왼쪽만 빈다.
-지금 다섯 개는 네이티브 ALIGN 이 ALIGN 배치로 배선한 결과에서 옮겨 둔 것이다:
+`align-baseline.sh` 는 ALIGN 을 앞단 → 배치 → 배선까지 돌린 뒤 `pack-example.mjs` 로 묶는다.
 
 ```
-routed/<이름>.align.json   {bbox, terminals}  — 3_pnr/<TOP>_0.json 의 그 두 필드
-routed/index.json 한 줄     {name, align: {geo: "<이름>.align.json", rects, gdsName, gdsBytes,
-                                           errors: [{file, text}]}}   — errors 는 3_pnr/*.errors 의 줄
+data/<이름>.json           앞단 출력 + ALIGN 배치 (왼쪽 패널의 기준선). terminals 는 netType == "pin" 만 (84K -> 13K)
+data/<이름>.leaves.json    리프 셀의 전체 도형 (src/route/leaves.mjs 형식, 41~219K) — 배선할 때만 받는다
+data/index.json            목록 한 줄
+routed/<이름>.align.json   ALIGN 배선 기하 {bbox, terminals} — 3_pnr/<TOP>_0.json 의 그 두 필드
+routed/index.json          {name, align: {geo, rects, gdsName, gdsBytes, errors: [{file, text}]}} — errors 는 3_pnr/*.errors 의 줄
+netlists/<이름>.sp         원본 회로 (+ .const.json) — 회로 올리기에 그대로 넣어 볼 수 있다
 ```
+
+`pack-example.mjs` 는 ALIGN 작업 디렉터리 없이 앞단 출력만 펼쳐 둔 폴더도 받는다
+(`--leaves-only` 면 리프 도형만 쓴다). 지금 저장소의 예제 다섯 개는 ALIGN 출력 모양으로 되돌린
+폴더 위에서 이 도구를 다시 돌리면 **내용이 같다.** `routed/*.align.json` 이 없으면 배선 보기의
+왼쪽만 빈다 — 배선 자체에는 안 쓰인다.
 
 ## 배치 품질 (ALIGN 대비, CPU, 시작점 96, 무게 1, node 단일 스레드)
 
 HPWL 은 양쪽 다 **핀 경계 사각형**으로 잰다 (ALIGN 배치기의 `HPWL_extend` 와 같은 자,
-아래 "변이 선택" 절). 시간은 밀도항을 랭크 N 항등식으로 바꾼 뒤의 값이다 (3~5 배 빨라졌다).
+아래 "변이 선택" 절). `node symplace/web/placer/test/place.mjs` 가 찍는 값이다 (2026-09-23).
 
 | 예제 | 면적 | HPWL | 시간 | 변이 |
 |---|---|---|---|---|
-| telescopic_ota | **1.000×** | **1.000×** | 5 s | ALIGN 과 같다 (5/5) — bbox 까지 같다 |
-| current_mirror_ota | **1.000×** | **1.000×** | 5 s | 같다 (5/5) — bbox 까지 같다 |
-| five_transistor_ota | **1.000×** | 1.021× | 7 s | 같다 (3/3) — bbox 까지 같다 |
-| cascode_current_mirror_ota | **1.000×** | 1.107× | 21 s | 10/11, bbox 같다 |
-| high_speed_comparator | 1.111× | 1.044× | 51 s | 4/10 — 계층, 아래 "남은 것" (배정 108 전수, 시작점 324) |
+| telescopic_ota | **1.000×** | **1.000×** | 4 s | ALIGN 과 같다 (5/5) — bbox 까지 같다 |
+| current_mirror_ota | **1.000×** | **1.000×** | 4 s | 같다 (5/5) — bbox 까지 같다 |
+| five_transistor_ota | **1.000×** | 1.021× | 5 s | 같다 (3/3) — bbox 까지 같다 |
+| cascode_current_mirror_ota | **1.000×** | 1.107× | 18 s | 10/11, bbox 같다 |
+| high_speed_comparator | 1.111× | 1.044× | 44 s | 4/10 — 계층, 아래 "남은 것" (배정 108 전수, 시작점 324) |
 
 겹침은 다섯 다 정확히 0, 대칭 잔차는 1e-12 이하, 격자 밖 블록 0 이다.
 
@@ -420,35 +410,38 @@ WebGPU 로 설정당 시작점 8 개(2,304 개)를 주면 1.111x / 1.109x. 실�
 
 **ALIGN 원본은 이제 안 쓴다.** 이식이 끝나 대조에 쓰던 것 — 페이지의 "배선 · ALIGN 원본" 버튼과 대조 카드,
 Pyodide 에 ALIGN C++ 배선기(PnR 휠)를 올리던 워커, 같은 일을 node 에서 하던 하네스, 기준 덤프를 뜨고 견주던
-도구(`symplace/scripts/route/align-ref/`)와 시험, PnR 휠 빌드, 네이티브 ALIGN 으로 배선하던 스크립트 — 를
-걷어냈다. 필요하면 git 기록에서 꺼낸다 (마지막으로 들어 있던 커밋 `6655430`). 그보다 전의 새로 짠 격자
-배선기(`symplace/router`)는 ALIGN 과 결과가 달라 먼저 걷어냈다 (`symplace/PLAN-route.md` 5 절).
+도구와 시험, PnR 휠 빌드, 네이티브 ALIGN 으로 배선하던 스크립트 — 를 걷어냈다 (마지막으로 들어 있던 커밋
+`6655430`). 그보다 전의 새로 짠 격자 배선기(`symplace/router`)는 ALIGN 과 결과가 달라 먼저 걷어냈고, 그 두
+경로를 기록한 문서(`PLAN-route.md`, `NOTES-phase0.md`)와 첫 구현인 파이썬 배치기(`gpuplace/`)도 걷어냈다
+(커밋 `0e04d6a` 까지 있다). 필요하면 git 기록에서 꺼낸다.
 
 ## 소스
 
-`symplace/` 가 이 배치기의 원본 저장소다.
+`symplace/` 에 소스와 검사, 도구가 있다 — 자세한 것은 [symplace/README.md](symplace/README.md).
 
 ```
-symplace/README.md          전체 설명 (파이썬 구현, 측정, ALIGN 메모리 패치)
-symplace/gpuplace/          파이썬 배치기 (numpy)
-symplace/alignroute/        Rust 배선기 — build.sh 가 src/route/alignroute.wasm 을 만든다
-symplace/scripts/           verify.sh (네이티브 ALIGN + 파이썬 배치기), z3 빌드, node 배선 하네스,
-                            place/ (변이 선택 분석 스크립트 — PLAN-place-variants-gpu.md)
-symplace/PLAN-place-variants-gpu.md  변이 선택이 ALIGN 과 갈리던 이유(실측)와 WebGPU 계획·결과
+symplace/alignroute/        Rust 배선기 — build.sh 가 src/route/alignroute.wasm 을 만든다 (lp_solve C 소스를 같이 빌드)
+symplace/web/placer/test/   node 검사 — 심플렉스, 에너지 대조, 배치(ALIGN 대조), legalize, 검사기·격자·GDS 고정 사례, 브라우저(WebGPU·페이지)
+symplace/web/placer/fixtures/  고정값 — 배치 문제의 정답 4 예제, 검사기 사례 106, 격자 문구 150, GDS 2
+symplace/web/placer/pack-example.mjs  ALIGN 작업 디렉터리(또는 앞단 출력 폴더) -> data/, routed/ 의 예제 파일
+symplace/web/placer/README.md  배치기 설계 노트 (변이·반전·영역·계층을 어떻게 고르는지, legalize)
+symplace/scripts/           align-baseline.sh (네이티브 ALIGN 으로 기준선), measure-memory.sh, z3 빌드,
+                            route/node/ (페이지와 같은 배치·배선을 node 에서), place/ (변이 선택 분석)
+symplace/setup.sh, env.sh   네이티브 ALIGN 설치·환경 — 기준선을 만들 때만
 symplace/patches/           ALIGN 배선 단계 메모리 8.4GB -> 1.45GB 패치
-symplace/web/placer/test/   검사 — 파이썬 대조, 심플렉스 검증, legalize 성질 검사, 검사기·GDS 고정 사례
-symplace/web/placer/fixtures/  파이썬이 뽑아둔 정답 고정값 + 예제 5 개 앞단 출력
-symplace/web/placer/pack-example.mjs  앞단 출력 폴더 -> data/<이름>.json (예제 넣기)
+symplace/PLAN-route-align.md          배선기를 ALIGN 알고리즘 그대로 옮긴 계획과 대조 결과
+symplace/PLAN-place-variants-gpu.md   변이 선택이 ALIGN 과 갈리던 이유(실측)와 WebGPU 계획·결과
 ```
 
 배치기 본체(`src/*.mjs`)는 **이 저장소 루트의 것 하나뿐이다.** 사이트가 그대로
 읽고, 검사도 그것을 읽는다 (`symplace/web/placer/test/*` 가 `../../../../src/`
-를 임포트한다). 사본을 두지 않는다 — 두면 갈라진다.
+를 임포트한다). 검사가 읽는 예제도 사이트가 읽는 `data/<예제>.json` 그대로다. 사본을 두지 않는다 — 두면 갈라진다.
 
 ```bash
-node symplace/web/placer/test/place.mjs      # 앞단 출력만으로 배치 (본 경로)
+node symplace/web/placer/test/place.mjs      # 앞단 출력만으로 배치 (본 경로) — ALIGN 과 변이·반전·면적·HPWL 대조
 node symplace/web/placer/test/lp.mjs         # 심플렉스 검증
-node symplace/web/placer/test/parity.mjs     # 파이썬과 값 대조
+node symplace/web/placer/test/parity.mjs     # 에너지·기울기·영공간을 고정값과 대조
+node symplace/web/placer/test/design.mjs     # 앞단 출력에서 만든 문제 == 고정값의 문제
 node symplace/web/placer/test/legalize.mjs   # 겹침 0 / 대칭 잔차 / 면적·배선
 node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 돌린 Adam
 node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 비교 (ALIGN 배정의 순위)
@@ -458,5 +451,20 @@ node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와
 node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == ALIGN 파이썬 검사기
 node symplace/web/placer/test/compose.mjs    # 배선 도형의 격자 검사 == gen_viewer_json
 node symplace/web/placer/test/gds.mjs        # GDS == ALIGN 파이썬 GDS (바이트)
-node symplace/scripts/route/node/newroute.mjs all   # 5 예제를 페이지와 같은 길로 배선 (결과를 찍는다)
+node symplace/scripts/route/node/newroute.mjs all   # 예제 전부를 페이지와 같은 길로 배선 (DRC/LVS 를 찍는다)
 ```
+
+## 의존성
+
+**페이지를 여는 데 드는 것: 없다.** ES 모듈과 wasm 하나(`src/route/alignroute.wasm`, 1.3 MB)뿐이고,
+글꼴도 시스템 것을 쓴다 — 외부 주소를 하나도 안 부른다. 예제를 고르고 배치·배선·GDS 까지 오프라인으로 된다.
+
+| 무엇을 할 때 | 드는 것 |
+|---|---|
+| `.sp` 를 올릴 때 (앞단) | Pyodide 0.27.8 을 jsDelivr CDN 에서, networkx·pydantic 1.10.13·python-gdsii 를 PyPI 에서 (합쳐 약 16 MB), 저장소의 libz3 (22 MB, `py/z3`) 와 ALIGN 앞단 소스 (0.2 MB, `py/front`). 첫 방문에만 받고 브라우저가 캐시한다 |
+| node 검사 | node 22. 브라우저 검사(`gpu.mjs`, `page.mjs`)만 Playwright 전역 설치 |
+| 배선기 빌드 | Rust (wasm32-wasip1), clang + wasi-libc, lp_solve 5.5.2.11 C 소스 (`fetch-lpsolve.sh` 가 받는다). crate 는 serde·serde_json 뿐 |
+| 새 예제의 ALIGN 기준선 | 네이티브 ALIGN 0.9.8 (`symplace/setup.sh` 가 venv 에 설치한다) |
+
+앞단의 Pyodide 스택이 남은 가장 큰 의존성이다 — ALIGN 앞단(회로 읽기·소자 묶기·템플릿 생성)을 JS 로
+옮기면 없어진다. 그 계획은 [PLAN.md](PLAN.md).

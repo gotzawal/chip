@@ -9,28 +9,21 @@
  *
  *  평면 설계 전용이다. 계층 설계는 배정이 모듈마다 따로 일어나 한 표에 못 담는다.
  */
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { loadDesign, alignBaseline } from "./_load.mjs";
+import { loadDesign, alignBaseline, exampleNames } from "./_load.mjs";
 import { variantGroups, countAssignments, flipPlan, topIndex,
          moduleOrder } from "../../../../src/design.mjs";
 import { multiStartVariants, refineFlips, exactArea, hpwl, scoreOf } from "../../../../src/solver.mjs";
 import { legalize, exactOverlap } from "../../../../src/legalize.mjs";
 import { symmetryResidual } from "../../../../src/place.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DES = path.join(HERE, "..", "fixtures", "design");
 const BATCH = Number(process.env.BATCH ?? 96);
 const ITERS = Number(process.env.ITERS ?? 600);
 
 let fails = 0;
 const ok = (c, m) => { if (!c) { fails++; console.log("  실패 " + m); } };
 
-for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
-  const dir = path.join(DES, ex);
-  if (!fs.statSync(dir).isDirectory()) continue;
-  const { topology, design, place } = loadDesign(dir);
+for (const ex of exampleNames()) {
+  const { topology, design, place } = loadDesign(ex);
   if (moduleOrder(topology).length > 1) continue;          // 계층은 place.mjs 가 본다
   console.log("\n=== " + ex + " ===");
 

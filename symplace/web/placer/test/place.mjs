@@ -9,15 +9,10 @@
  *    품질        면적비, HPWL비, 겹침, 대칭 잔차
  *    legalize    상위 후보 중 몇 개가 풀렸나 (영역 후보가 나쁘면 INFEASIBLE)
  */
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { loadDesign, alignBaseline } from "./_load.mjs";
+import { loadDesign, alignBaseline, exampleNames } from "./_load.mjs";
 import { placeHierarchy, symmetryResidual, orderViolations } from "../../../../src/place.mjs";
 import { topIndex } from "../../../../src/design.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DES = path.join(HERE, "..", "fixtures", "design");
 const BATCH = Number(process.env.BATCH ?? 96);
 const ITERS = Number(process.env.ITERS ?? 600);
 // GPU=<설정당 시작점> 이면 WebGPU runner (dawn — test/gpu.mjs 의 설명) 로 돈다.
@@ -35,19 +30,12 @@ let fails = 0;
 const ok = (c, m) => { if (!c) { fails++; console.log("  실패 " + m); } };
 
 const wanted = process.argv.slice(2);          // 예제 이름을 주면 그것만
-for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
-  const dir = path.join(DES, ex);
-  if (!fs.statSync(dir).isDirectory()) continue;
+for (const ex of exampleNames()) {
   if (wanted.length && !wanted.includes(ex)) continue;
   console.log("\n=== " + ex + " ===");
-  const { topology, primitives, templates, place } = loadDesign(dir);
+  const { topology, primitives, templates, place } = loadDesign(ex);
 
-  // ALIGN 기준선은 place JSON 에서 **직접** 잰다.
-  //
-  // fixtures/*.json 을 쓰지 않는다. export-fixtures.py 는 `<예제>_ours` 를 먼저
-  // 찾으므로 거기 든 cx_align/cy_align 이 ALIGN 이 아니라 **우리 파이썬 배치기**의
-  // 좌표일 수 있다. 실제로 high_speed_comparator 는 고정값 region 이 4320x18816,
-  // ALIGN 의 bbox 는 6080x10584 로 아예 다른 레이아웃이었다.
+  // ALIGN 기준선은 예제에 든 place JSON 에서 **직접** 잰다 (페이지와 같은 자).
   let refArea = 1, refHpwl = 1, alignTop = null;
   if (place) {
     const topName = topology.modules[topIndex(topology)].name;

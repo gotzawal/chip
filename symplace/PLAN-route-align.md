@@ -1,6 +1,6 @@
 # 배선기를 ALIGN 알고리즘 그대로 Rust 로 — 계획 (2026-09-23)
 
-[PLAN-route.md](PLAN-route.md) 3·4 단계의 배선기는 ALIGN 과 다른 독립 배선기다 (그 문서 5 절). 결과가
+먼저 새로 짰던 격자 배선기(`symplace/router`, 계획 문서 `PLAN-route.md` — 둘 다 걷어냈다, 커밋 `0e04d6a` 까지)는 ALIGN 과 다른 독립 배선기였다. 결과가
 ALIGN 과 달라 쓸모가 없다고 봐서, ALIGN 의 C++ 배선 알고리즘을 그대로 Rust 로 옮긴다. 이 문서는 ALIGN
 배선 코드를 네 갈래(입력 DB, 전역 배선, 상세 배선, 전원)로 읽고 돌려 본 결과와, 그에 따른 순서다.
 조사에 쓴 도구와 기준값 만드는 법은 `scripts/route/align-ref/` (부록 A).

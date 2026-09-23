@@ -4,7 +4,8 @@
 #   사용법:  ./scripts/measure-memory.sh [예제 ...]
 #
 # 패치본과 원본(.orig)을 번갈아 끼우며 배선 단계의 peak RSS 를 잰다.
-# setup.sh 가 원본을 *.orig 로 남겨두었어야 한다.
+# setup.sh 가 원본을 *.orig 로 남겨두었어야 하고, 잴 예제는 align-baseline.sh 가
+# $ALIGN_WORK/<예제> 에 앞단·배치까지 돌려 두었어야 한다 (배선 단계만 다시 돈다).
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC1091
@@ -22,8 +23,8 @@ EX=("$@")
 [ ${#EX[@]} -eq 0 ] && EX=(telescopic_ota high_speed_comparator cascode_current_mirror_ota)
 
 one() {  # $1 = 예제
-  local e="$1" OUT=$ALIGN_WORK/${e}_ours
-  [ -d "$OUT" ] || { printf "  %-28s 배치 출력 없음 (verify.sh 를 먼저)\n" "$e"; return; }
+  local e="$1" OUT=$ALIGN_WORK/$e
+  [ -d "$OUT/3_pnr" ] || { printf "  %-28s ALIGN 출력 없음 (align-baseline.sh 를 먼저)\n" "$e"; return; }
   cd "$OUT" || return
   rm -f "$OUT"/*.gds "$OUT"/3_pnr/*.errors 2>/dev/null
   local t0 hwm=0 wrap real
