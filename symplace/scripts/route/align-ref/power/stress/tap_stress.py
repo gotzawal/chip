@@ -42,6 +42,7 @@ def tapped(self, mode, node, drc, lm, hm, hs, vs, fn):
     r = _rw(self, mode, node, drc, lm, hm, hs, vs, fn)
     if mode in (2, 3):
         json.dump(walk(node), open("%s/%s_out.json" % (OUT, tag), "w"))
-    CALLS.append({"k": k, "mode": mode, "node": node.name})
+    CALLS.append({"k": k, "mode": mode, "node": node.name, "Lmetal": lm, "Hmetal": hm})
+    json.dump(CALLS, open("%s/calls.json" % OUT, "w"), indent=1)
     return r
 PnR.Router.RouteWork = tapped
