@@ -141,6 +141,7 @@ export async function runJob(data, post) {
       secs: (performance.now() - t0) / 1000,
     });
   } catch (err) {
-    post({ type: "error", msg: String(err && err.stack || err).slice(0, 1200) });
+    // 첫 줄이 메시지다 — Safari·Firefox 의 stack 에는 메시지 없이 자리만 있다
+    post({ type: "error", msg: `${err?.message ?? err}\n${err?.stack ?? ""}`.slice(0, 1200) });
   }
 }

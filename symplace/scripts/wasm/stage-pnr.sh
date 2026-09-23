@@ -4,7 +4,7 @@ set -eu
 : "${ALIGN_SRC:=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${ALIGN_ENV:-$ALIGN_SRC/env.sh}" >/dev/null 2>&1
 S=$ALIGN_SRC/scripts/wasm
-W=$S/pnr
+W=$ALIGN_SRC/../py/pnr   # 페이지가 받는 자리 (ALIGN 원본 배선)
 rm -rf "$W"; mkdir -p "$W"
 python3 "$S/retag-wheel.py" ~/pnrwasm/dist/*pyemscripten*.whl emscripten_3_1_58_wasm32
 cp ~/pnrwasm/dist/*emscripten_3_1_58*.whl "$W/"

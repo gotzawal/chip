@@ -113,12 +113,24 @@ function drawEmpty(ctx, panel, pal, lines) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const cx = panel.x + panel.w / 2, cy = panel.y + panel.h / 2;
+  const font = (i) => (i === 0 ? '500 12px "IBM Plex Mono", ui-monospace, monospace'
+                               : '400 11px "IBM Plex Mono", ui-monospace, monospace');
+  // 좁은 패널(휴대폰의 나란히)에서도 읽히게 줄을 나눈다 — 오류 문구가 길다
+  const rows = [];
   ls.forEach((t, i) => {
-    ctx.font = i === 0
-      ? '500 12px "IBM Plex Mono", ui-monospace, monospace'
-      : '400 11px "IBM Plex Mono", ui-monospace, monospace';
-    ctx.fillStyle = i === 0 ? pal.faint : pal.hair;
-    ctx.fillText(t, cx, cy + (i - (ls.length - 1) / 2) * 18);
+    ctx.font = font(i);
+    let cur = "";
+    for (const ch of String(t)) {
+      if (cur && ctx.measureText(cur + ch).width > panel.w - 20) { rows.push([cur, i]); cur = ""; }
+      cur += ch;
+    }
+    rows.push([cur, i]);
+  });
+  rows.forEach(([t, i], k) => {
+    ctx.font = font(i);
+    ctx.fillStyle = pal.faint;
+    ctx.globalAlpha = i === 0 ? 1 : 0.8;
+    ctx.fillText(t, cx, cy + (k - (rows.length - 1) / 2) * 16);
   });
   ctx.restore();
 }
@@ -179,7 +191,8 @@ const GROUP_OF = new Map(LAYERS.map((l) => [l.key, l.group]));
 
 /** 배선된 기하를 그린다. on 은 켜진 묶음의 Set. */
 export function drawRouted(ctx, panel, geo, opt) {
-  const { pal, view, on, label, box = null, empty = null } = opt;
+  // mark: 강조할 도형의 키 모음 (src/route/align/compare.mjs 의 shapeKey) — 다른 쪽과 다른 도형
+  const { pal, view, on, label, box = null, empty = null, mark = null, markKey = null, markColor = "#d33" } = opt;
   ctx.save();
   ctx.beginPath();
   ctx.rect(panel.x, panel.y, panel.w, panel.h);
@@ -216,6 +229,17 @@ export function drawRouted(ctx, panel, geo, opt) {
     }
   }
   ctx.globalAlpha = 1;
+  // 다른 쪽과 다른 도형은 층을 가리지 않고 테두리로 짚는다 (작아도 보이게 최소 3px)
+  if (mark?.size && markKey) {
+    ctx.strokeStyle = markColor;
+    ctx.lineWidth = 1.5;
+    for (const t of geo.terminals) {
+      if (!mark.has(markKey(t))) continue;
+      const r = t.rect;
+      const w = Math.max(3, (r[2] - r[0]) * m.S), h = Math.max(3, (r[3] - r[1]) * m.S);
+      ctx.strokeRect(m.X(r[0]) - 1, m.Y(r[3]) - 1, w + 2, h + 2);
+    }
+  }
   // 외곽
   const [x0, y0, x1, y1] = geo.bbox;
   ctx.strokeStyle = pal.hair;

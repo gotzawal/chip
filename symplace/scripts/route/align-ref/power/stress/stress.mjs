@@ -1,0 +1,18 @@
+import fs from "node:fs";
+import path from "node:path";
+import { bootAlign, runFront, workerPython, WORK_CACHE } from "../../../node/align.mjs";
+const [ex, out, shapes] = process.argv.slice(2);
+const HERE = path.dirname(new URL(import.meta.url).pathname);
+const { py } = await bootAlign({ blasfix: true });
+const { top } = runFront(py, ex);
+py.setStdout({ batched: () => {} }); py.setStderr({ batched: () => {} });
+py.runPython(workerPython("PYROUTE"));
+py.FS.writeFile("/work/tap_base.py", fs.readFileSync(path.join(HERE, "../../tap/tap.py")));
+py.runPython(`import os; os.environ['PR_STRESS'] = ${JSON.stringify(shapes ?? "[]")}`);
+py.runPython(fs.readFileSync(path.join(HERE, "tap_stress.py"), "utf8"));
+const placement = JSON.parse(fs.readFileSync(path.join(WORK_CACHE, `place-${ex}.json`), "utf8"));
+const r = JSON.parse(py.globals.get("route")("/work/" + ex, ex, top, JSON.stringify(placement)));
+console.log("ok", r.ok, "nerrors", r.nerrors, String(r.error ?? "").slice(-300));
+fs.rmSync(out, { recursive: true, force: true }); fs.mkdirSync(out, { recursive: true });
+for (const n of py.FS.readdir("/work/tap")) if (!n.startsWith(".")) fs.writeFileSync(path.join(out, n), py.FS.readFile("/work/tap/" + n));
+console.log(fs.readdirSync(out).join(" "));
