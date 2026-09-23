@@ -468,6 +468,7 @@ let who = "both";            // both | ours | align
 let frame = null;            // 최적화 중간 상태
 let routed = null;           // 배선 기하 {ours (Rust 이식), alignLive (ALIGN 원본), align (저장소의 ALIGN 기준선)}
 let rustRun = null;          // Rust 이식 한 판 {key, geo, gds, errors, records, secs}
+let rustFail = null;         // Rust 이식이 실패했으면 그 문구 (오른쪽 패널에 적는다)
 let alignRun = null;         // ALIGN 원본 한 판 {key, geo, gds, gdsCxx, errors, records, secs}
 let cmp = null;              // 둘의 대조 (같은 배치일 때) — src/route/align/compare.mjs
 let drcIndex = null;         // 배선/DRC 실제 결과
@@ -546,9 +547,10 @@ function shots() {
   const emptyRoute = ["아직 배선 결과가 없습니다", "배선 실행을 누르세요"];
   const items = what === "route"
     ? [{ key: "align", geo: routed?.alignLive ?? routed?.align,
-         label: routed?.alignLive ? "ALIGN 원본" : "ALIGN 기준선 (ALIGN 배치)", empty: emptyRoute,
+         label: routed?.alignLive ? "ALIGN 원본 · 이 배치" : "ALIGN 기준선 (ALIGN 배치)", empty: emptyRoute,
          mark: cmp && !cmp.layout.same ? new Set(cmp.layout.onlyA) : null },
-       { key: "ours", geo: routed?.ours, label: "Rust 이식", empty: emptyRoute,
+       { key: "ours", geo: routed?.ours, label: "Rust 이식 · 이 배치",
+         empty: rustFail ? ["Rust 이식 배선 실패", rustFail] : emptyRoute,
          mark: cmp && !cmp.layout.same ? new Set(cmp.layout.onlyB) : null }]
     : (() => {
         const live = oriented(oursNow());
@@ -683,6 +685,17 @@ cv.addEventListener("pointercancel", endDrag);
     bar.append(l);
   }
 }
+
+// 배선이 끝난 직후에 한 번 더 그린다. iOS Safari 는 무거운 워커(ALIGN 원본의 Pyodide)가 메모리를 쥐고
+// 있을 때 캔버스 내용을 말없이 버리기도 한다 — 다시 그리면 돌아온다. 탭으로 돌아오거나 창이 앞으로 올 때도.
+function redrawSoon() {
+  requestAnimationFrame(() => redraw());
+  setTimeout(() => redraw(), 400);
+  setTimeout(() => redraw(), 1500);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) redraw(); });
+window.addEventListener("pageshow", () => redraw());
+window.addEventListener("focus", () => redraw());
 
 // 확대/이동 초기화는 더블클릭 — 버튼 대신. 보기를 바꿀 때도 되돌린다.
 const resetView = () => { view.s = 1; view.tx = 0; view.ty = 0; redraw(); };
@@ -1327,11 +1340,17 @@ async function runRoute() {
               `, 배선기 ${st.routerMs.toFixed(0)} ms, GDS ${(m.gds.byteLength / 1024) | 0}K` +
               `  (${m.secs.toFixed(m.secs < 10 ? 2 : 1)} s)${cmp ? " · " + cmpLine() : ""}</span>`);
   } catch (err) {
-    const msg = err.message || "";
+    const msg = (err.message || "").replace(/^(Error: )+/, "");
     const net = /failed to fetch|networkerror|→ \d+/i.test(msg);
-    setStatus(`<span style="color:var(--copper)">배선 실패 — ` +
-      (net ? "배선기나 리프 도형을 못 받았습니다 (" + msg + ")" : msg) + "</span>");
+    setStatus(`<span style="color:var(--copper)">Rust 이식 배선 실패 — ` +
+      (net ? "배선기나 리프 도형을 못 받았습니다 (" + msg + ")" : msg).replace(/[<>]/g, "") + "</span>");
     console.error("[배선 실패]", err);
+    // 그림에도 적는다 — 나란히 보기의 오른쪽 패널
+    rustFail = msg.slice(0, 160);
+    if (routed) routed = { ...routed, ours: null };
+    rustRun = null; cmp = null; showCompare();
+    setView("route", "both");
+    redrawSoon();
   } finally {
     busy = false; $("run").disabled = false; routeButtons(true);
   }
@@ -1436,6 +1455,7 @@ async function runAlignRoute() {
     compareRuns();
     setView("route", "both");
     showDrc();
+    redrawSoon();
     setStatus(`<span>ALIGN 원본 배선 완료 — DRC/LVS ${m.nerrors}건, 기록 ${m.records.length} 단계` +
               `  (${m.secs.toFixed(1)} s)${cmp ? " · " + cmpLine() : ""}</span>`);
   } catch (err) {
@@ -1452,7 +1472,7 @@ async function runAlignRoute() {
 
 // --- 배선 대조: 같은 배치의 두 판을 견준다 ---
 function clearRuns() {
-  rustRun = null; alignRun = null; cmp = null;
+  rustRun = null; alignRun = null; cmp = null; rustFail = null;
   showCompare();
 }
 
@@ -1550,12 +1570,14 @@ function showRouted(m) {
   // 갈아끼워서, 배선이 끝나는 순간 옆에 있던 ALIGN 배선이 사라졌다 —
   // 정작 비교가 필요한 순간에 비교할 것이 없어졌다.
   if (m.geo) routed = { ...(routed ?? {}), ours: m.geo };
+  rustFail = null;
   rustRun = { key: m.key, geo: m.geo, gds: m.gds, errors: m.errors ?? [], nerrors: m.nerrors ?? 0,
               records: m.records ?? null, secs: m.secs };
   compareRuns();
   routeDownloads(m);
   setView("route", "both");      // 나란히. 비교가 이 페이지가 하는 일이다.
   showDrc();                     // setView 뒤에 (표와 그림이 서로를 따라간다)
+  redrawSoon();
 }
 
 /** 방금 만든 배선 산출물을 Blob 링크로 건다 (서버에 없는 파일이다). */

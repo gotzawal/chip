@@ -27,6 +27,7 @@ self.onmessage = async (e) => {
     const msg = routeMessage(out, (performance.now() - t0) / 1000);
     postMessage(msg, [msg.gds]);
   } catch (err) {
-    postMessage({ type: "error", msg: String(err?.stack ?? err?.message ?? err).slice(0, 1500) });
+    // 첫 줄이 메시지다 — Safari·Firefox 의 stack 에는 메시지 없이 자리만 있다
+    postMessage({ type: "error", msg: `${err?.message ?? err}\n${err?.stack ?? ""}`.slice(0, 1500) });
   }
 };

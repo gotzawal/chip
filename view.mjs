@@ -113,12 +113,24 @@ function drawEmpty(ctx, panel, pal, lines) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const cx = panel.x + panel.w / 2, cy = panel.y + panel.h / 2;
+  const font = (i) => (i === 0 ? '500 12px "IBM Plex Mono", ui-monospace, monospace'
+                               : '400 11px "IBM Plex Mono", ui-monospace, monospace');
+  // 좁은 패널(휴대폰의 나란히)에서도 읽히게 줄을 나눈다 — 오류 문구가 길다
+  const rows = [];
   ls.forEach((t, i) => {
-    ctx.font = i === 0
-      ? '500 12px "IBM Plex Mono", ui-monospace, monospace'
-      : '400 11px "IBM Plex Mono", ui-monospace, monospace';
-    ctx.fillStyle = i === 0 ? pal.faint : pal.hair;
-    ctx.fillText(t, cx, cy + (i - (ls.length - 1) / 2) * 18);
+    ctx.font = font(i);
+    let cur = "";
+    for (const ch of String(t)) {
+      if (cur && ctx.measureText(cur + ch).width > panel.w - 20) { rows.push([cur, i]); cur = ""; }
+      cur += ch;
+    }
+    rows.push([cur, i]);
+  });
+  rows.forEach(([t, i], k) => {
+    ctx.font = font(i);
+    ctx.fillStyle = pal.faint;
+    ctx.globalAlpha = i === 0 ? 1 : 0.8;
+    ctx.fillText(t, cx, cy + (k - (rows.length - 1) / 2) * 16);
   });
   ctx.restore();
 }
