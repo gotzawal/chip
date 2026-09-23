@@ -367,10 +367,15 @@ high_speed_comparator 를 같은 코드로 조건만 바꿔 재보면 이렇다.
 | 단계 | 어디 | ALIGN 과 대조 |
 |---|---|---|
 | 입력 만들기, PnRDB, 배치 심기, 계층 부기 | `src/route/align/` (JS) | 배선기 입력이 필드마다 같다 (`test/aligndb.mjs`, 10 판 20 모듈) |
-| 전역 배선 (RouteWork 4) | `symplace/alignroute/src/gr` (Rust + lp_solve C 소스) | 옮기는 중 |
-| 상세 배선 (RouteWork 5) | `symplace/alignroute/src/dr` (Rust) | 옮기는 중 |
+| 전역 배선 (RouteWork 4) | `symplace/alignroute/src/gr` (Rust + lp_solve C 소스) | 기록이 같다 — 20 모듈 + 제약 변형 30 회, ALIGN C++ 을 네이티브로 빌드한 것과 무작위 7,000 회 |
+| 상세 배선 (RouteWork 5) | `symplace/alignroute/src/dr` (Rust) | 기록이 같다 — 20 모듈 + 흔든 배치 56 회 + 제약 변형 14 회 |
 | 전원 격자·전원 배선 (RouteWork 2·3) | `symplace/alignroute/src/pr` (Rust) | 기록이 같다 — 10 판과 일부러 막은 16 판 (`test/alignroute.mjs`) |
 | 도형 합성·DRC/LVS·GDS | `src/route/pipeline.mjs`, `compose.mjs`, `check.mjs`, `gds.mjs` | ALIGN 배선기의 기록을 넣으면 모듈마다 도형(차례까지)·GDS·오류 문구가 같다 (`test/route.mjs`, 10 판 + 흔든 배치 20 판) |
+
+**한 판 전체도 같다.** 페이지와 같은 길(`src/route/pipeline.mjs` + `alignroute.wasm`)로 5 예제 x 두 배치, 흔든 배치
+36 판, 제약을 바꾼 14 판을 돌려 ALIGN 과 견주면 모듈마다 최종 도형(차례까지)·GDS·DRC/LVS 문구·배선기 단계 기록이
+모두 같다 (`test/route.mjs --router=wasm`). 브라우저에서 두 버튼을 번갈아 눌러도 같다: telescopic_ota 는
+Rust 이식 0.22 s / ALIGN 원본 4.1 s, high_speed_comparator 는 0.57 s / 14.0 s (배치는 같고 도형 2,257 개가 같다).
 
 **심판을 먼저 맞췄다.** ALIGN 의 검사기·도형 합성·GDS 쓰기를 JS 로 옮기고 파이썬과 글자·바이트 단위로
 대조했다: 검사기는 5 예제 10 모듈과 일부러 망가뜨린 106 사례 (`test/check.mjs`), 도형 합성은 10 모듈 +
