@@ -9,7 +9,7 @@
  *  배선기: --router=tap (기본) 은 ALIGN 이 낸 기록(탭 덤프)을 그대로 돌려주는 가짜다 — 배선기 밖의 모든 것
  *  (입력, 계층, 도형 모으기, 검사, GDS)을 본다. --router=wasm 은 src/route/alignroute.wasm (Rust 이식) 으로 끝까지.
  *
- *    node symplace/web/placer/test/route.mjs [--ex=예제] [--tag=ours|align|<설정>] [--router=tap|wasm]
+ *    node symplace/web/placer/test/route.mjs [--ex=예제] [--tag=ours|align|<설정>] [--router=tap|wasm] [--wasm=<파일>]
  *                                            [--tap=<뿌리> | --root=<뿌리>] [-v]
  *
  *  기준: ~/.cache/symplace/tap/<예제>/<ours|align>/ (align-ref/tap/runall.mjs — calls.json, m*_out, result.json),
@@ -43,7 +43,8 @@ const DB = RROOT ? path.join(RROOT, "aligndb") : TAP === path.join(CACHE, "tap")
 const DATA = RROOT ? path.join(RROOT, "data") : path.join(ROOT, "data");
 const PLACE = RROOT ?? CACHE;
 const useWasm = opt("router", "tap") === "wasm";
-const wasm = useWasm ? await loadAlignRouter(fs.readFileSync(path.join(ROOT, "src/route/alignroute.wasm"))) : null;
+const wasmPath = opt("wasm") ? path.resolve(home(opt("wasm"))) : path.join(ROOT, "src/route/alignroute.wasm");
+const wasm = useWasm || opt("wasm") ? await loadAlignRouter(fs.readFileSync(wasmPath)) : null;
 
 /** 탭 덤프의 호출을 모듈마다 묶는다 (같은 모듈의 같은 모드가 또 나오면 다음 모듈) */
 function tapModules(dir) {
