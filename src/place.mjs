@@ -228,7 +228,10 @@ export async function placeDesign(input, {
     if (grid) {
       if (gridTried >= maxGrid) break;
       gridTried++;
-      const anchors = [Array.from(k.c.problem.w, (v) => v / 2), Array.from(k.c.problem.h, (v) => v / 2)];
+      // 원점 oX = cx - sX*w/2 가 pitch 배수여야 한다. MOS 템플릿은 w/2 가 pitch 배수라 부호가 무관했지만
+      // 저항·커패시터 잎은 아니다 (variable_gain_amplifier 에서 반전된 잎이 격자 밖으로 나가 배선이 offgrid 였다).
+      const anchors = [Array.from(k.c.problem.w, (v, i) => (k.sx[i] > 0 ? 1 : -1) * v / 2),
+                       Array.from(k.c.problem.h, (v, i) => (k.sy[i] > 0 ? 1 : -1) * v / 2)];
       const r = legalize({ ...k.args, grid, anchors, dirs: k.r.dirs });
       if (r.status !== "OPTIMAL") {
         failBy.set(r.status, (failBy.get(r.status) ?? 0) + 1);

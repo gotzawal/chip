@@ -125,12 +125,13 @@ PLAN.md                     이 문서
 
 ## 2. 예제 확장
 
-### 2.1 지금까지 — 12 개
+### 2.1 지금까지 — 29 개
 
-ALIGN-public(`8d3cc2e`) 의 `examples/` 41 개 중 12 개가 들어 있다: telescopic_ota, current_mirror_ota,
-five_transistor_ota, cascode_current_mirror_ota, high_speed_comparator, buffer, inverter_v1/v2/v3,
-common_source, block_spacing_bug, five_transistor_ota_high_frequency. 전부 배치(겹침 0, 대칭 잔차 0)·배선·
-페이지 검사를 통과한다.
+ALIGN-public(`8d3cc2e`) 의 `examples/` 41 개 중 29 개가 들어 있다 (루트 README 의 표). 전부 배치(겹침 0,
+대칭 잔차 0)·배선·페이지 검사를 통과한다. 넣으면서 고친 것: 계층이 세 단 이상인 설계(comparator1,
+variable_gain_amplifier)의 하위 모듈을 재귀로 배선기에 넘기고, 같은 모듈을 다른 변이로 두 번 쓰는 설계
+(vco_type2_65)는 변이마다 다른 abstract 로 낸다. 저항·커패시터 잎처럼 폭이 pitch 의 배수가 아닌 블록은
+반전 부호에 맞는 격자 앵커를 쓴다.
 
 ### 2.2 예제 하나를 넣는 절차
 
@@ -146,39 +147,24 @@ common_source, block_spacing_bug, five_transistor_ota_high_frequency. 전부 배
 6  기록    README 의 예제 목록과 "배치 결과" 표에 한 줄
 ```
 
-### 2.3 남은 예제 — 무엇이 더 필요한가
+### 2.3 남은 예제 12 개 — 무엇이 더 필요한가
 
-ALIGN 예제 41 개의 제약·소자·입력 형식을 전부 대조한 결과다. 제약 스키마 43 종 중 예제가 실제로 쓰는
-것은 19 종이고, 배치기가 처리하는 것은 7 종(SymmetricBlocks, Align, Order, AspectRatio, H/V/BlockDistance)
-+ 앞단 몫(GroupBlocks, ConfigureCompiler, DoNotUseLib) + 배선기 몫(SymmetricNets 등) 이다.
-
-**지금 코드로 될 것 같은 것 (검증만 남았다, 15 개).** 브라우저 앞단에 `.sp` 를 올려 절차 2.2 를 밟으면 된다:
-inverter_current_starved, double_tail_sense_amplifier, telescopic_ota_with_bias,
-telescopic_ota_multi_connection, comparator1, unity_gain_buffers, VCO_type2_65, vco_dtype_12_hierarchical,
-vga_stage, variable_gain_amplifier(저항), linear_equalizer(저항·커패시터), single_to_differential_converter,
-adder, ring_oscillator, high_speed_comparator_charge_flow(`ChargeFlow` 는 ALIGN 도 배치·배선에 안 쓴다).
-`CompactPlacement` 는 기본 동작이라 무시해도 된다.
-
-**볼 것이 있는 것.**
-
-| 예제 | 볼 것 |
+| 예제 | 막힌 것 |
 |---|---|
-| variable_gain_amplifier, linear_equalizer, single_to_differential_converter, adder, vco_dtype_12_hierarchical_res(+constrained) | 저항·커패시터 잎 — 앞단의 Res/Cap 생성기가 브라우저에서 도는지, 격자 앵커 가정(w/2 가 pitch 배수)이 맞는지, 잎 핀이 M1~M3 에 있을 때 배선이 되는지 |
-| powertrain, powertrain_binary, powertrain_thermo, sc_dc_dc_converter | 큰 소자 배열 (`m=20`, `nf=832`, 같은 셀 63 개) — 앞단이 배열 계층으로 만드는지, 변이 조합 상한 128 과 `SUB_VARIANTS` 3 이 감당하는지 |
-| VCO_*, vco_dtype_12_*, test_vga | LVT 소자와 몸통이 없는 pcell 서브서킷 (`nlvt_s_pcell_0`) 을 앞단이 어떻게 받는지 |
-| five_transistor_ota_Bulk | ALIGN 앞단 자체가 "number of fins must be more than 1" 로 죽는다 — 넣을 수 없다 |
+| five_transistor_ota_Bulk, test_vga | ALIGN 앞단 자체가 죽는다 ("number of fins must be more than 1") |
+| vco_dtype_12_hierarchical, vco_dtype_12_hierarchical_res_constrained | ALIGN 앞단이 `LVTPFET` 소자의 생성기를 못 찾는다 (`ConfigureCompiler` 와 함께 쓰일 때) |
+| sc_dc_dc_converter | `nf=832` 소자라 리프 도형이 20 MB — 저장소와 페이지에 못 싣는다. 리프 형식을 반복 구조로 압축해야 한다 |
+| powertrain_binary | 블록 63 개(배열 16 + 32 + 17), 변이 조합 1.8e11 — 배치에 10 분. 배열 계층을 한 블록으로 접는 처리가 필요하다 |
+| switched_capacitor_filter | `GroupCaps` 커패시터 배열: ALIGN 배치 단계의 C++ 커패시터 배치기(`cap_placer/capplacer.cpp`, 80 KB)가 공통 중심 배열을 만들고 그 안을 배선한다. 배선기 이식에 없다 |
+| telescopic_ota_guard_ring | `GuardRing`: PnR 의 `GuardRing.cpp` 20 KB (블록을 링으로 감싸고 전원에 잇는 것)가 배치기·배선기 양쪽에 없다 |
+| fixed_height | 블랙박스 GDS 입력 (`-b gdsfiles/ --scale 1e9`): 브라우저 앞단이 gdspy 를 스텁으로 막아 두었다. JS GDS 읽기와 `gds2lefjson` 이식, 페이지에 블랙박스 폴더 올리기 |
+| bottom_plate_4path_beamforming (2 종) | `.sp` 없이 LEF 만 있는 잎으로 시작하는 입력. `pnrdb.mjs` 에 LEF 파서가 있지만 리프 형식이 전체 도형을 요구한다 |
+| mimo_bulk | 인스턴스 116, 서브서킷 21 — legalize LP 가 쌍 수에 제곱으로 커지고 Pyodide 앞단도 분 단위 |
 
-**큰 이식이 필요한 것 (뺐다).**
-
-- `GroupCaps` 커패시터 배열 (switched_capacitor_filter): ALIGN 은 배치 단계에서 C++ 커패시터 배치기
-  (`cap_placer/capplacer.cpp`, 80 KB)가 공통 중심 배열을 만들고 그 안을 배선한다. 배선기 이식에 없다.
-- `GuardRing` (telescopic_ota_guard_ring): PnR 의 `GuardRing.cpp` 20 KB (블록을 링으로 감싸고 전원에 잇는 것)
-  가 배치기·배선기 양쪽에 없다. 앞단의 링 생성기는 번들에 있다.
-- 블랙박스 GDS 입력 (fixed_height: `-b gdsfiles/ --scale 1e9`): 브라우저 앞단이 gdspy 를 스텁으로 막아 두었다.
-  JS GDS 읽기(쓰기는 `gds.mjs` 에 있다)와 `gds2lefjson` 이식, 페이지에 블랙박스 폴더 올리기가 필요하다.
-- 앞단 없이 시작하는 입력 (bottom_plate_4path_beamforming, LEF 만 있는 잎): `pnrdb.mjs` 에 LEF 파서가 있어
-  배선 입력은 만들 수 있지만, 리프 형식이 전체 도형을 요구한다. hierarchical 변형은 JSON 이 있어 쉽다.
-- 규모 (mimo_bulk: 인스턴스 116, 서브서킷 21): legalize LP 가 쌍 수에 제곱으로 커지고 Pyodide 앞단도 분 단위.
+**들어간 예제 중 남은 것.** 저항 잎(`RES_2T_*`)의 핀이 M1/M3 의 80 pitch 격자에 있지 않아(ALIGN 의 Res 생성기)
+배선이 "Wire to color is offgrid" 로 찍힌다 — variable_gain_amplifier 10 건, linear_equalizer·
+single_to_differential_converter 수백 건. 소자 자체의 문제라 우리 쪽에서 고칠 것이 없고, ALIGN 도 같은 문구를
+낼 것이다. comparator1 은 VSS 에 OPEN 1 건 — 세 단 계층의 전원 배선에서 나며 아직 원인을 짚지 못했다.
 
 ### 2.4 합격선
 
@@ -231,9 +217,9 @@ align/pdk          10 파일  36 KB   PDK 읽기
 
 ```
 A  재구성 1~4 (검사·예제·도구·배치기 경로)      코드 변경 거의 없음, 커밋 4 개
-B  2.3 의 "될 것 같은 것" 15 개를 절차 2.2 로 — 브라우저 앞단 한 번씩
+B  comparator1 의 VSS OPEN 원인 찾기; 저항 잎의 핀 격자는 앞단 JS 이식(3 절) 때 같이 본다
 C  재구성 5~7 (app/ 분리, docs, CI)
-D  2.3 의 "볼 것이 있는 것" — 저항·커패시터, 큰 배열, LVT·pcell
+D  2.3 의 남은 예제 — 배열 접기(powertrain_binary), 리프 압축(sc_dc_dc_converter) 부터
 E  앞단 JS 이식 1 (z3 대체) — 그다음 2·3 은 별도 계획으로
 ```
 

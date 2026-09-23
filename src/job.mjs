@@ -100,26 +100,31 @@ export async function runJob(data, post) {
     // __v{k} 는 alternatives[k] 가 아니라 spreadShapes(alternatives, SUB_VARIANTS)[k] 다
     // (place.mjs 와 같은 상수).
     const subModules = [];
-    for (const [nm, m] of r.modules) {
-      if (nm === topName) continue;
-      const used = [...new Set(top.concrete.filter(
-        (c) => c === nm || c.startsWith(nm + "__v")))];
-      for (const cn of used) {
-        const picks = spreadShapes(m.alternatives ?? [m], SUB_VARIANTS);
-        const vi = cn.includes("__v") ? Number(cn.split("__v")[1]) : 0;
-        const pl = picks[Math.min(vi, picks.length - 1)] ?? m;
-        const pp = pl.problem, [sx0, sy0] = [pl.box[0], pl.box[1]];
-        subModules.push({
-          abstract: nm, concrete: cn,
-          bbox: [0, 0, Math.round(pl.box[2] - sx0), Math.round(pl.box[3] - sy0)],
-          instances: pp.names.map((inm, k) => ({
-            name: inm, concrete: pp.concrete[k],
-            oX: Math.round(pl.cx[k] - pl.sx[k] * (pp.w[k] / 2) - sx0),
-            oY: Math.round(pl.cy[k] - pl.sy[k] * (pp.h[k] / 2) - sy0),
-            sX: pl.sx[k] > 0 ? 1 : -1, sY: pl.sy[k] > 0 ? 1 : -1,
-          })),
-        });
-      }
+    // 최상위가 쓰는 것부터 시작해 그 하위 모듈이 쓰는 것까지 **재귀로** 모은다 — comparator1 처럼
+    // 계층이 세 단 이상이면 최상위의 직접 하위만 넘겨서는 배선기가 "모르는 concrete 이름" 으로 멈춘다.
+    const queue = [...new Set(top.concrete)], seenSub = new Set();
+    while (queue.length) {
+      const cn = queue.shift();
+      if (seenSub.has(cn)) continue;
+      seenSub.add(cn);
+      const nm = cn.includes("__v") ? cn.split("__v")[0] : cn;
+      const m = r.modules.get(nm);
+      if (!m || nm === topName) continue;           // 리프거나 최상위
+      const picks = spreadShapes(m.alternatives ?? [m], SUB_VARIANTS);
+      const vi = cn.includes("__v") ? Number(cn.split("__v")[1]) : 0;
+      const pl = picks[Math.min(vi, picks.length - 1)] ?? m;
+      const pp = pl.problem, [sx0, sy0] = [pl.box[0], pl.box[1]];
+      subModules.push({
+        abstract: nm, concrete: cn,
+        bbox: [0, 0, Math.round(pl.box[2] - sx0), Math.round(pl.box[3] - sy0)],
+        instances: pp.names.map((inm, k) => ({
+          name: inm, concrete: pp.concrete[k],
+          oX: Math.round(pl.cx[k] - pl.sx[k] * (pp.w[k] / 2) - sx0),
+          oY: Math.round(pl.cy[k] - pl.sy[k] * (pp.h[k] / 2) - sy0),
+          sX: pl.sx[k] > 0 ? 1 : -1, sY: pl.sy[k] > 0 ? 1 : -1,
+        })),
+      });
+      for (const c of pp.concrete) queue.push(c);
     }
 
     // 하위 모듈이 어떤 모양들을 올렸는지 (표에 쓴다)

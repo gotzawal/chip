@@ -58,5 +58,95 @@
   "name": "five_transistor_ota_high_frequency",
   "label": "5-Transistor OTA (High Frequency)",
   "bytes": 9001
+ },
+ {
+  "name": "inverter_current_starved",
+  "label": "Current-Starved Inverter",
+  "bytes": 15132
+ },
+ {
+  "name": "double_tail_sense_amplifier",
+  "label": "Double-Tail Sense Amplifier",
+  "bytes": 20918
+ },
+ {
+  "name": "telescopic_ota_with_bias",
+  "label": "Telescopic OTA with Bias",
+  "bytes": 18493
+ },
+ {
+  "name": "telescopic_ota_multi_connection",
+  "label": "Telescopic OTA (Multi-Connection)",
+  "bytes": 9266
+ },
+ {
+  "name": "comparator1",
+  "label": "Comparator 1",
+  "bytes": 16903
+ },
+ {
+  "name": "unity_gain_buffers",
+  "label": "Unity-Gain Buffers",
+  "bytes": 26066
+ },
+ {
+  "name": "ring_oscillator",
+  "label": "Ring Oscillator",
+  "bytes": 4821
+ },
+ {
+  "name": "vga_stage",
+  "label": "VGA Stage",
+  "bytes": 5507
+ },
+ {
+  "name": "vco_type2_65",
+  "label": "VCO Type 2",
+  "bytes": 7278
+ },
+ {
+  "name": "high_speed_comparator_charge_flow",
+  "label": "High-Speed Comparator (Charge Flow)",
+  "bytes": 22601
+ },
+ {
+  "name": "variable_gain_amplifier",
+  "label": "Variable-Gain Amplifier",
+  "bytes": 13400
+ },
+ {
+  "name": "linear_equalizer",
+  "label": "Linear Equalizer",
+  "bytes": 9560
+ },
+ {
+  "name": "single_to_differential_converter",
+  "label": "Single-to-Differential Converter",
+  "bytes": 3716
+ },
+ {
+  "name": "adder",
+  "label": "Adder",
+  "bytes": 4973
+ },
+ {
+  "name": "powertrain",
+  "label": "Powertrain",
+  "bytes": 6264
+ },
+ {
+  "name": "powertrain_binary",
+  "label": "Powertrain (Binary)",
+  "bytes": 35181
+ },
+ {
+  "name": "powertrain_thermo",
+  "label": "Powertrain (Thermometer)",
+  "bytes": 8864
+ },
+ {
+  "name": "vco_dtype_12_hierarchical_res",
+  "label": "VCO D-Type 12 (Resistors)",
+  "bytes": 24586
  }
 ]
