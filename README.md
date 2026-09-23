@@ -41,9 +41,9 @@ python3 -m http.server 8791
 
 이 구분이 중요하다.
 
-- **저장소에 두는 것은 비교 기준뿐이다.** `data/*.json` (ALIGN 앞단 출력),
-  `netlists/*.sp` (원본 회로), `routed/*.align.json` (네이티브 ALIGN 이 낸
-  배선 기하와 DRC). 전부 **왼쪽 패널에 그릴 기준선**으로만 쓴다.
+- **저장소에 두는 것은 입력과 비교 기준뿐이다.** `data/*.json` (ALIGN 앞단 출력),
+  `netlists/*.sp` (예제의 원본 회로), `routed/*.align.json` (네이티브 ALIGN 이 낸
+  배선 기하와 DRC). ALIGN 의 배치·배선은 **왼쪽 패널에 그릴 기준선**으로만 쓴다.
 - **우리 쪽 결과는 전부 이 자리에서 만든다.** 배치도, 배선도, GDS 도,
   내려받기 칸의 파일도 그렇다. 미리 풀어둔 결과를 올려두고 그리거나
   내려받게 하지 않는다 — 그러면 화면에 있는 것이 방금 푼 것인지 박아둔
@@ -57,9 +57,8 @@ python3 -m http.server 8791
 ```
 index.html        페이지
 worker.mjs        배치를 워커에서 돌리는 얇은 껍데기
-routeworker.mjs   배선 · Rust 이식을 워커에서 — src/route/pipeline.mjs (파이썬 없음)
-alignworker.mjs   배선 · ALIGN 원본 — Pyodide + ALIGN 파이썬 + C++ 배선기 (대조용, 누를 때만 받는다)
-frontworker.mjs   앞단 — .sp 를 올릴 때만. Pyodide 안에서 ALIGN 앞단을 그대로 돌린다
+routeworker.mjs   배선을 워커에서 — src/route/pipeline.mjs + alignroute.wasm (파이썬 없음)
+frontworker.mjs   앞단 — .sp 를 올릴 때만. Pyodide 안에서 ALIGN 앞단(py/front.py)을 그대로 돌린다
 view.mjs          캔버스 — 확대/이동, 패널, 배선 레이어
 src/job.mjs       배치 한 판 (워커에서도, 메인 스레드에서도 같은 코드가 돈다)
 src/baseline.mjs  ALIGN 기준선 뽑기 — 첫 화면이 워커 없이 뜨는 이유
@@ -68,7 +67,7 @@ src/route/        배선 — ALIGN 배선 단계의 이식: 입력·PnRDB(align/
                   도형 합성, DRC/LVS, GDS
 data/*.json       예제 5 개의 ALIGN 앞단 출력 (미리 만들어둬 첫 화면이 빠르다)
 data/*.leaves.json  예제의 리프 셀 전체 도형 — 배선할 때만 받는다
-netlists/*.sp     예제 5 개의 원본 회로 (앞단을 다시 돌려 예제를 만들 때)
+netlists/*.sp     예제 5 개의 원본 회로 (회로 올리기에 그대로 넣어 볼 수 있다)
 routed/*.align.json  네이티브 ALIGN 이 낸 배선 기하 (비교용 기준선)
 py/               앞단용 Pyodide 스택 (원본 약 39 MB, .sp 를 처음 올릴 때만 받는다)
 symplace/         소스 — 파이썬 배치기, Rust 배선기(alignroute/), 검사, 빌드 스크립트, ALIGN 패치
@@ -79,12 +78,10 @@ symplace/         소스 — 파이썬 배치기, Rust 배선기(alignroute/), �
 1. **예제를 고르거나** `.sp` 넷리스트를 올린다.
 2. **배치 실행** — 변이·반전·영역·격자를 JS 배치기가 직접 고른다.
    끝나면 배치 JSON 을 바로 받을 수 있다.
-3. **배선 · Rust 이식** — 이 탭이 배선한다. ALIGN 의 배선 단계를 그대로 옮긴 것이다: 배선기에
+3. **배선 실행** — 이 탭이 배선한다. ALIGN 의 배선 단계를 그대로 옮긴 것이다: 배선기에
    넘기는 자료와 계층 부기는 JS, C++ 배선기(전역·상세·전원)는 Rust(wasm), 도형 합성·DRC/LVS·GDS 는
    ALIGN 의 파이썬을 옮긴 JS. 결과는 `배선` 보기에 그려지고, 아래 내려받기 칸이 그 자리에서 채워진다.
-   (이식 중이다 — [symplace/PLAN-route-align.md](symplace/PLAN-route-align.md).)
-4. **배선 · ALIGN 원본** — 같은 배치를 ALIGN 그대로(파이썬 흐름 + C++ 배선기) 배선한다. 두 버튼을
-   번갈아 누르면 `배선 대조` 카드가 최종 도형·GDS 바이트·DRC/LVS 문구·배선기 단계 기록을 견준다.
+   (옮긴 과정과 대조 결과 — [symplace/PLAN-route-align.md](symplace/PLAN-route-align.md).)
 
 그림은 두 갈래로 고른다 — **무엇을**(배치 / 배선) 과 **누구를**(나란히 / 우리 /
 ALIGN). 기본은 `배치 · 나란히` 다. 왼쪽이 ALIGN, 오른쪽이 우리고, 두 패널은
@@ -166,7 +163,7 @@ node symplace/web/placer/pack-example.mjs      "$ALIGN_WORK/my_ota" my_ota --lab
 리프 셀의 전체 도형은 따로 `data/<이름>.leaves.json` 에 쓴다 (`src/route/leaves.mjs`
 형식, 예제 하나 41~219K). 배선할 때만 받으므로 첫 화면은 그대로 가볍다.
 `--leaves-only` 를 주면 이것만 쓰고 `data/<이름>.json` 은 안 건드린다 — 지금 예제
-다섯 개의 리프 파일은 브라우저 앞단(node 하네스 `--dump`)의 출력으로 이렇게 만들었다.
+다섯 개의 리프 파일은 브라우저 앞단의 출력으로 이렇게 만들었다.
 
 지금 저장소의 예제 다섯 개는 이 스크립트로 다시 만들면 **바이트까지 같다.**
 
@@ -176,8 +173,14 @@ node symplace/web/placer/pack-example.mjs      "$ALIGN_WORK/my_ota" my_ota --lab
 "예제로 저장" 한 한 파일이면 그 안에 들어 있다). `netlists/<이름>.sp` 는 배선에 안 쓴다.
 
 ALIGN 자신의 배선을 비교로 깔고 싶으면 `routed/<이름>.align.json` 과
-`routed/index.json` 의 한 줄이 더 필요하다 (`symplace/scripts/route/stage-routed.sh`
-가 만드는 모양이다). 없으면 배선 보기의 왼쪽만 빈다.
+`routed/index.json` 의 한 줄이 더 필요하다. 없으면 배선 보기의 왼쪽만 빈다.
+지금 다섯 개는 네이티브 ALIGN 이 ALIGN 배치로 배선한 결과에서 옮겨 둔 것이다:
+
+```
+routed/<이름>.align.json   {bbox, terminals}  — 3_pnr/<TOP>_0.json 의 그 두 필드
+routed/index.json 한 줄     {name, align: {geo: "<이름>.align.json", rects, gdsName, gdsBytes,
+                                           errors: [{file, text}]}}   — errors 는 3_pnr/*.errors 의 줄
+```
 
 ## 배치 품질 (ALIGN 대비, 시작점 96, 무게 2, node 단일 스레드)
 
@@ -361,36 +364,34 @@ high_speed_comparator 를 같은 코드로 조건만 바꿔 재보면 이렇다.
 ## 브라우저 배선 — ALIGN 배선 단계의 이식
 
 배선은 **ALIGN 의 배선 단계를 그대로 옮긴 것**이다. 같은 배치를 넣으면 ALIGN 과 같은 배선이 나와야 한다 —
-배선기를 새로 짜지 않고 ALIGN 의 알고리즘을 버릇까지 옮긴다 ([symplace/PLAN-route-align.md](symplace/PLAN-route-align.md)).
-페이지의 **배선 · ALIGN 원본** 버튼이 같은 배치를 ALIGN 그대로 돌려, 두 결과를 그 자리에서 견준다.
+배선기를 새로 짜지 않고 ALIGN 의 알고리즘을 버릇까지 옮겼다 ([symplace/PLAN-route-align.md](symplace/PLAN-route-align.md)).
 
-| 단계 | 어디 | ALIGN 과 대조 |
+| 단계 | 어디 | 옮길 때 ALIGN 과 대조한 결과 |
 |---|---|---|
-| 입력 만들기, PnRDB, 배치 심기, 계층 부기 | `src/route/align/` (JS) | 배선기 입력이 필드마다 같다 (`test/aligndb.mjs`, 10 판 20 모듈) |
+| 입력 만들기, PnRDB, 배치 심기, 계층 부기 | `src/route/align/` (JS) | 배선기 입력이 필드마다 같다 (10 판 20 모듈) |
 | 전역 배선 (RouteWork 4) | `symplace/alignroute/src/gr` (Rust + lp_solve C 소스) | 기록이 같다 — 20 모듈 + 제약 변형 30 회, ALIGN C++ 을 네이티브로 빌드한 것과 무작위 7,000 회 |
 | 상세 배선 (RouteWork 5) | `symplace/alignroute/src/dr` (Rust) | 기록이 같다 — 20 모듈 + 흔든 배치 87 회 + 제약 변형 14 회, ALIGN C++ 네이티브 빌드와 무작위 6,600 회 |
-| 전원 격자·전원 배선 (RouteWork 2·3) | `symplace/alignroute/src/pr` (Rust) | 기록이 같다 — 10 판과 일부러 막은 16 판 (`test/alignroute.mjs`) |
-| 도형 합성·DRC/LVS·GDS | `src/route/pipeline.mjs`, `compose.mjs`, `check.mjs`, `gds.mjs` | ALIGN 배선기의 기록을 넣으면 모듈마다 도형(차례까지)·GDS·오류 문구가 같다 (`test/route.mjs`, 10 판 + 흔든 배치 20 판) |
+| 전원 격자·전원 배선 (RouteWork 2·3) | `symplace/alignroute/src/pr` (Rust) | 기록이 같다 — 10 판과 일부러 막은 16 판 |
+| 도형 합성·DRC/LVS·GDS | `src/route/pipeline.mjs`, `compose.mjs`, `check.mjs`, `gds.mjs` | ALIGN 배선기의 기록을 넣으면 모듈마다 도형(차례까지)·GDS·오류 문구가 같다 (10 판 + 흔든 배치 20 판) |
 
-**한 판 전체도 같다.** 페이지와 같은 길(`src/route/pipeline.mjs` + `alignroute.wasm`)로 5 예제 x 두 배치, 흔든 배치
+**한 판 전체도 같았다.** 페이지와 같은 길(`src/route/pipeline.mjs` + `alignroute.wasm`)로 5 예제 x 두 배치, 흔든 배치
 36 판, 제약을 바꾼 14 판을 돌려 ALIGN 과 견주면 모듈마다 최종 도형(차례까지)·GDS·DRC/LVS 문구·배선기 단계 기록이
-모두 같다 (`test/route.mjs --router=wasm`). 브라우저에서 두 버튼을 번갈아 눌러도 같다: telescopic_ota 는
-Rust 이식 0.22 s / ALIGN 원본 4.1 s, high_speed_comparator 는 0.57 s / 14.0 s (배치는 같고 도형 2,257 개가 같다).
+모두 같았다. 브라우저에서 telescopic_ota 0.22 s, high_speed_comparator 0.57 s 다 (ALIGN 원본을 Pyodide 로 돌리면
+4.1 s / 14.0 s 였다).
 
 **심판을 먼저 맞췄다.** ALIGN 의 검사기·도형 합성·GDS 쓰기를 JS 로 옮기고 파이썬과 글자·바이트 단위로
-대조했다: 검사기는 5 예제 10 모듈과 일부러 망가뜨린 106 사례 (`test/check.mjs`), 도형 합성은 10 모듈 +
-격자 오류 문구 150 개 (`test/compose.mjs`), GDS 는 `.python.gds` 와 바이트까지 (`test/gds.mjs`).
+대조했다. 저장소에는 그때 뽑은 고정 사례가 남아 있다: 검사기는 일부러 망가뜨린 106 사례 (`test/check.mjs`),
+격자 오류 문구 150 개 (`test/compose.mjs`), GDS 바이트 2 사례 (`test/gds.mjs`).
 
 **lp_solve 는 C 소스 그대로 링크한다.** 전역 배선의 ILP 는 최적해가 심하게 겹치고 lp_solve 는 대개 처음 찾은
 정수해를 낸다 — 다른 풀이기로는 같은 배선이 안 나온다. clang `wasm32-wasi` 로 빌드한 lp_solve 가 ALIGN 의
-것과 합성 ILP 410 개에서 비트까지 같다 (`symplace/scripts/route/align-ref/ilp/`).
+것과 합성 ILP 410 개에서 비트까지 같았다.
 
-**전에는** 새로 짠 격자 배선기(`symplace/router`)가 있었다. 빨랐지만 ALIGN 과 결과가 달라 걷어냈다
-(한계는 `symplace/PLAN-route.md` 5 절). 그보다 전에는 배선 버튼 하나에 Pyodide · ALIGN 파이썬 흐름 · C++
-배선기 wasm (원본 약 40 MB) 을 받았다 — 그 경로는 지금 **배선 · ALIGN 원본** 버튼(대조용)과 node 하네스
-(`symplace/scripts/route/node/route.mjs`)에 있다. 두 번째 배선이나 계층 설계의 두 번째 모듈에서
-`null function` 으로 죽던 것은 lp_solve 가 외부 BLAS 를 `dlopen` 하다가 Emscripten 의 적재 기록에 걸린
-것이었다 (JS 한 줄로 막았다 — `symplace/PLAN-route.md` 2 절).
+**ALIGN 원본은 이제 안 쓴다.** 이식이 끝나 대조에 쓰던 것 — 페이지의 "배선 · ALIGN 원본" 버튼과 대조 카드,
+Pyodide 에 ALIGN C++ 배선기(PnR 휠)를 올리던 워커, 같은 일을 node 에서 하던 하네스, 기준 덤프를 뜨고 견주던
+도구(`symplace/scripts/route/align-ref/`)와 시험, PnR 휠 빌드, 네이티브 ALIGN 으로 배선하던 스크립트 — 를
+걷어냈다. 필요하면 git 기록에서 꺼낸다 (마지막으로 들어 있던 커밋 `6655430`). 그보다 전의 새로 짠 격자
+배선기(`symplace/router`)는 ALIGN 과 결과가 달라 먼저 걷어냈다 (`symplace/PLAN-route.md` 5 절).
 
 ## 소스
 
@@ -399,11 +400,11 @@ Rust 이식 0.22 s / ALIGN 원본 4.1 s, high_speed_comparator 는 0.57 s / 14.0
 ```
 symplace/README.md          전체 설명 (파이썬 구현, 측정, ALIGN 메모리 패치)
 symplace/gpuplace/          파이썬 배치기 (numpy)
-symplace/scripts/           verify.sh, 배선/DRC 스크립트, wasm 빌드
+symplace/alignroute/        Rust 배선기 — build.sh 가 src/route/alignroute.wasm 을 만든다
+symplace/scripts/           verify.sh (네이티브 ALIGN + 파이썬 배치기), z3 빌드, node 배선 하네스
 symplace/patches/           ALIGN 배선 단계 메모리 8.4GB -> 1.45GB 패치
-symplace/web/placer/test/   검사 — 파이썬 대조, 심플렉스 검증, legalize 성질 검사
+symplace/web/placer/test/   검사 — 파이썬 대조, 심플렉스 검증, legalize 성질 검사, 검사기·GDS 고정 사례
 symplace/web/placer/fixtures/  파이썬이 뽑아둔 정답 고정값 + 예제 5 개 앞단 출력
-symplace/web/placer/emit.mjs   배치 -> place.json (네이티브 배선기로 넘길 때)
 symplace/web/placer/pack-example.mjs  앞단 출력 폴더 -> data/<이름>.json (예제 넣기)
 ```
 
@@ -420,9 +421,7 @@ node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 
 node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 비교
 node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와 맞는가
 node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == ALIGN 파이썬 검사기
-node symplace/web/placer/test/compose.mjs    # 도형 합성 == gen_viewer_json
+node symplace/web/placer/test/compose.mjs    # 배선 도형의 격자 검사 == gen_viewer_json
 node symplace/web/placer/test/gds.mjs        # GDS == ALIGN 파이썬 GDS (바이트)
-node symplace/web/placer/test/aligndb.mjs    # 배선기 입력(PnRDB)·계층 부기 == ALIGN (10 판)
-node symplace/web/placer/test/alignroute.mjs # Rust 배선기의 단계 기록 == ALIGN (--stage=4,45,2,23)
-node symplace/web/placer/test/route.mjs      # 배선 한 판 == ALIGN: 모듈 도형·GDS·오류 문구 (--router=wasm)
+node symplace/scripts/route/node/newroute.mjs all   # 5 예제를 페이지와 같은 길로 배선 (결과를 찍는다)
 ```

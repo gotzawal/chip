@@ -1,5 +1,10 @@
 # 배선 경로 — 지금 도는 모양과, 가볍게 다시 짜는 계획 (2026-09-22)
 
+> **기록이다.** 이 문서가 다루는 두 배선 경로 — Pyodide 위의 ALIGN 파이썬 흐름 + C++ 배선기(PnR 휠)와,
+> 그 뒤에 새로 짠 격자 배선기(`symplace/router`) — 는 둘 다 걷어냈다. 지금 배선은 ALIGN 배선 단계를 그대로
+> 옮긴 것이다 ([PLAN-route-align.md](PLAN-route-align.md)). 부록 A 의 node 하네스도 걷어냈다 — 커밋 `6655430`
+> 에서 꺼낸다.
+
 측정은 전부 node 에서 브라우저 워커와 **같은 코드**를 돌려 쟀다 — Pyodide 0.27.8,
 같은 휠, `frontworker.mjs` 의 파이썬 원문을 그 파일에서 그대로 읽는다
 (`scripts/route/node/`, 부록 A). 전에는 "Pyodide 를 못 받는 환경" 이라 배선기를

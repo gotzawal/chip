@@ -58,17 +58,6 @@ function pgCopy(modules, subckt, pp) {
   }
 }
 
-/** 모듈 안 인스턴스 핀 -> 모듈 넷. 열쇠는 "<인스턴스>/<핀>" (gen_viewer_json 의 fa_map). */
-export function faMapOf(module) {
-  const m = new Map();
-  for (const inst of module.instances)
-    for (const c of inst.fa_map) m.set(`${inst.instance_name}/${c.formal}`, c.actual);
-  return m;
-}
-
-/** 전역 전원 넷 이름들 (global_signals 의 actual). */
-export const powerNetsOf = (hier) => new Set((hier.global_signals ?? []).map((g) => g.actual));
-
 /** 아무 데도 인스턴스로 안 쓰이는 모듈이 최상위다. */
 export function topModule(topology) {
   const used = new Set(topology.modules.flatMap((m) => m.instances.map((i) => i.abstract_template_name)));

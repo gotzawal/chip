@@ -1,5 +1,5 @@
 //! 네이티브로 돌려 보는 창구 — `alignroute <일감.json> [결과.json]`.
-//! 페이지와 node 시험은 wasm(src/route/alignroute.wasm)을 쓴다. 이것은 개발할 때 빨리 돌려 보는 용도다.
+//! 페이지와 node 하네스(newroute.mjs)는 wasm(src/route/alignroute.wasm)을 쓴다. 이것은 개발할 때 빨리 돌려 보는 용도다.
 use std::io::Write;
 
 fn main() {

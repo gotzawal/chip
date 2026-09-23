@@ -7,11 +7,12 @@
  *    parent = [], UR = (width, height)
  *    자식 블록마다 CheckinChildnodetoBlock (배선이 끝난 자식의 도형) 뒤 blk.child = 새 번호
  *    ExtractPinsToPowerPins
- *    routeModule(job)                  RouteWork 4, 5 (최상위는 2, 3 까지) — Rust 배선기 또는 기준 기록
+ *    routeModule(job)                  RouteWork 4, 5 (최상위는 2, 3 까지) — Rust 배선기
  *    기록을 노드에 합치고 gdsFile = ./Results/<이름>_<j>.gds, AppendToHierTree, 자식의 parent 에 새 번호
  *
  *  일감(job)은 symplace/alignroute/src/db.rs Job 모양이다: {drc, node, modes, signal, powerGrid, powerRouting, skip}.
- *  기록은 src/route/align/records.mjs recordOf 모양 ({module, mode, out}).
+ *  기록은 배선기가 모드마다 노드에 쓴 필드다 ({module, mode, ms, out} — symplace/alignroute/src/route.rs,
+ *  필드는 applyRecord).
  */
 import { readPdkJson } from "./drc.mjs";
 import { buildPnRDB, clone } from "./pnrdb.mjs";
@@ -131,7 +132,7 @@ export function routeLayers(drc, pnrConst) {
   };
 }
 
-// ---------------------------------------------------------------- 기록 합치기 (records.mjs 의 필드)
+// ---------------------------------------------------------------- 기록 합치기 (배선기가 모드마다 쓴 필드)
 function sameNames(a, b, what) {
   if (a.length !== b.length || a.some((x, i) => x.name !== b[i].name))
     throw new Error(`기록의 ${what} 가 노드와 다르다: ${b.map((x) => x.name).join(",")} / ${a.map((x) => x.name).join(",")}`);

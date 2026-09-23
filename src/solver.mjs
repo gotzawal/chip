@@ -25,14 +25,6 @@ export function rng(seed = 0) {
   };
 }
 
-/** 표준정규 (Box-Muller) */
-export function randn(rand) {
-  let u = 0, v = 0;
-  while (u === 0) u = rand();
-  while (v === 0) v = rand();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
-
 /** Adam 의 상태. 끊어 돌릴 때 이어붙이려면 모멘트와 스텝 수가 살아 있어야 한다.
  *  (화면을 갱신하려고 40 스텝씩 끊어 부르면서 이걸 놓치면, 모멘트가 매번
  *   초기화되고 t % 50 어닐링이 아예 발동하지 않는다. 실제로 그렇게 틀렸었다.)

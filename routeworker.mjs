@@ -1,13 +1,12 @@
-/** 배선 · Rust 이식 — ALIGN 의 배선 단계를 옮긴 것으로 배선하는 워커 (src/route/pipeline.mjs). 파이썬은 안 뜬다.
+/** 배선 — ALIGN 의 배선 단계를 옮긴 것으로 배선하는 워커 (src/route/pipeline.mjs). 파이썬은 안 뜬다.
  *
  *    postMessage({ design: {topology, primitives}, leaves: {format: "leaves/1", leaves}, placement })
  *      -> { type: "log", text }                  모듈마다 한 줄
- *      -> { type: "route", ok, name, secs, gds (ArrayBuffer), gdsName, errors, nerrors, geo, stats, records, warnings }
+ *      -> { type: "route", ok, name, secs, gds (ArrayBuffer), gdsName, errors, nerrors, geo, stats, warnings }
  *      -> { type: "error", msg }
  *
  *  받는 것은 배선기 wasm 하나 (src/route/alignroute.wasm — ALIGN C++ 배선기를 Rust 로 옮긴 것)와 예제의
- *  리프 도형 (data/<예제>.leaves.json, 페이지가 넘긴다). records 는 RouteWork 마다 배선기가 쓴 필드라
- *  "배선 · ALIGN 원본"(alignworker.mjs) 의 기록과 모듈·단계·넷 단위로 견줄 수 있다.
+ *  리프 도형 (data/<예제>.leaves.json, 페이지가 넘긴다).
  */
 import { loadAlignRouter } from "./src/route/alignroute.mjs";
 import { routeDesign, routeMessage } from "./src/route/pipeline.mjs";

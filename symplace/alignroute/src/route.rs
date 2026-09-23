@@ -5,9 +5,8 @@
 //!   RouteWork 2  PowerRouter(node, drc, Lmetal, Hmetal, 1, h, v)        전원 격자      pr/  (최상위만)
 //!   RouteWork 3  PowerRouter(node, drc, Lmetal, Hmetal, 0, h, v)        전원 배선      pr/  (최상위만)
 //!
-//! 모드마다 배선기가 hierNode 에 쓴 필드를 "기록" 으로 돌려준다. 모양은 기준 덤프에서 같은 필드를
-//! 뽑은 것(src/route/align/records.mjs 의 recordOf)과 같다 — 둘을 그대로 견주면 어느 모듈의 어느
-//! 단계에서 갈라졌는지 보인다.
+//! 모드마다 배선기가 hierNode 에 쓴 필드를 "기록" 으로 돌려준다. JS 쪽이 그것을 노드에 합친다
+//! (src/route/align/bottomup.mjs 의 applyRecord).
 use crate::db::{DrcInfo, HierNode, Job};
 use serde::Serialize;
 use serde_json::{json, Value};

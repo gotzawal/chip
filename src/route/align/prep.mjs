@@ -6,7 +6,7 @@
  *                 PnRConstraintWriter           -> inputs/<모듈>.pnr.const.json     pnrConstraints
  *                 리프 .lef 이어 붙이기          -> inputs/<TOP>.lef                 topLef (gen_lef routing)
  *                 primitives 정렬               -> inputs/<TOP>.map                 mapText
- *    (배치)       pyroute.py write_dump         -> __placer_dump__.json 의 최상위 대안   placementVerilog
+ *    (배치)       우리 배치를 덤프에 심는다      -> __placer_dump__.json 의 최상위 대안   placementVerilog
  *    3_pnr:route  connectivity_change_for_partial_routing, change_concrete_names_for_routing
  *                                               -> inputs/<TOP>.scaled_placement_verilog.json
  *                 gen_abstract_verilog_d        -> inputs/<TOP>.abstract_verilog.json
@@ -285,7 +285,7 @@ export function mapText(primitives) {
   return Object.keys(primitives).sort().map((k) => `${primitives[k].abstract_template_name} ${primitives[k].concrete_template_name}.gds\n`).join("");
 }
 
-// ---------------------------------------------------------------- 배치 verilog (symplace/scripts/route/node/pyroute.py write_dump)
+// ---------------------------------------------------------------- 배치 verilog (우리 배치를 __placer_dump__.json 의 최상위 대안으로)
 const tr = (q) => ({ oX: Math.trunc(q.oX), oY: Math.trunc(q.oY), sX: Math.trunc(q.sX), sY: Math.trunc(q.sY) });
 const placedInst = (instName, fa, atn, ctn, q) => ({
   instance_name: instName, fa_map: clone(fa), abstract_template_name: atn, concrete_template_name: ctn, transformation: tr(q),

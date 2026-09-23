@@ -34,7 +34,7 @@ use grid::{Grid, Sink};
 use rect::{C5, P3, c5s};
 use std::collections::BTreeSet;
 
-/// 조사용 자취 (네이티브에서 DR_TRACE 가 있으면 stderr 로) — oracle 의 같은 자리와 견준다
+/// 조사용 자취 (네이티브에서 DR_TRACE 가 있으면 stderr 로)
 #[cfg(not(target_arch = "wasm32"))]
 fn tr() -> bool {
     use std::sync::OnceLock;

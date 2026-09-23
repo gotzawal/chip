@@ -529,20 +529,6 @@ export function flipPlan(design, groups) {
   });
 }
 
-/** 자유 비트 목록에서 인스턴스별 [sx, sy] 를 만든다.
- *  bits 는 그룹마다 [bx, by] (+-1). 없으면 전부 +1.
- */
-export function flipsFromBits(design, plan, bits) {
-  const flips = design.instances.map(() => [1, 1]);
-  plan.forEach((p, gi) => {
-    const [bx, by] = bits?.[gi] ?? [1, 1];
-    p.members.forEach((m, k) => {
-      flips[m] = [(p.xFree ? bx : 1) * p.xSign[k], (p.yFree ? by : 1) * p.ySign[k]];
-    });
-  });
-  return flips;
-}
-
 /** \`Order\` 제약을 legalize 가 쓸 "강제 방향" 표로 바꾼다.
  *
  *  Order 는 등식이 아니라 **부등식**이라 영공간 매개화에 못 넣는다. 대신

@@ -1,4 +1,4 @@
-/** 새 배선 경로(ALIGN 배선 단계의 이식)를 node 에서 끝까지 — 페이지의 "배선 · Rust 이식" 과 같은 길이다:
+/** 배선 경로(ALIGN 배선 단계의 이식)를 node 에서 끝까지 — 페이지의 "배선 실행" 과 같은 길이다:
  *  src/route/pipeline.mjs = 입력·PnRDB·배치·계층(JS) -> alignroute.wasm (RouteWork 4·5, 최상위 2·3) ->
  *  도형 모으기 -> DRC/LVS -> GDS.
  *
@@ -9,16 +9,17 @@
  *    --gds=<파일>    GDS 를 쓴다
  *    --json=<파일>   최종 도형 (ALIGN 의 <TOP>_0.json 과 같은 모양)
  *    --errors=N      오류 문구를 몇 줄 찍을지 (기본 8)
- *
- *  ALIGN 과 같은지는 test/route.mjs --router=wasm 이 본다 (기준 덤프와 모듈·단계·도형·GDS·오류 문구).
  */
 import fs from "node:fs";
 import path from "node:path";
-import { WORK_CACHE, ROOT } from "./align.mjs";
-import { MODES } from "../../../../src/route/align/records.mjs";
+import { fileURLToPath } from "node:url";
 import { loadAlignRouter } from "../../../../src/route/alignroute.mjs";
 import { placementFromAlign } from "../../../../src/route/hier.mjs";
 import { routeDesign } from "../../../../src/route/pipeline.mjs";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const WORK_CACHE = process.env.SYMPLACE_CACHE ?? path.join(process.env.HOME ?? "", ".cache/symplace");
+const MODES = { 4: "전역 배선", 5: "상세 배선", 2: "전원 격자", 3: "전원 배선" };
 
 const args = process.argv.slice(2);
 const opt = (k, d = null) => (args.find((a) => a.startsWith(`--${k}=`)) ?? "").slice(k.length + 3) || d;

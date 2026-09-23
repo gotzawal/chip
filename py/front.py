@@ -1,9 +1,8 @@
 """앞단: SPICE 넷리스트 -> ALIGN 1_topology + 2_primitives, 배치기가 먹는 한 덩이로.
 
-frontworker.mjs (.sp 올리기), alignworker.mjs (ALIGN 원본 배선 — 같은 작업 디렉터리를 쓴다),
-node 하네스(symplace/scripts/route/node/align.mjs)가 같은 원문을 읽는다.
+frontworker.mjs (.sp 올리기) 가 Pyodide 안에서 읽는다.
 """
-import json, os, pathlib, shutil, traceback
+import json, pathlib, shutil
 
 def run(sp_text, name, subckt, const_text):
     work = pathlib.Path("/work") / name

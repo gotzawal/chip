@@ -13,16 +13,13 @@
 
 - `web/placer/src/` **없다.** 배치기 본체는 저장소 루트의 `/src/*.mjs`
   하나뿐이다 (사이트가 읽는 바로 그 파일). 여기 사본을 두면 갈라지므로,
-  `web/placer/test/*` 와 `emit.mjs` 가 루트 쪽을 임포트한다.
+  `web/placer/test/*` 와 `pack-example.mjs` 가 루트 쪽을 임포트한다.
 - `web/placer/site/` **없다.** 그게 저장소 루트다. 올리는 법은 루트의
   `README.md` 에 있다.
 
 ```bash
 node symplace/web/placer/test/place.mjs      # 저장소 루트에서 돌린다
 ```
-
-`web/placer/index.html` (옛 데모)도 루트의 `src/` 를 읽으므로 저장소 루트에서
-HTTP 로 띄워야 한다: `http://127.0.0.1:8791/symplace/web/placer/index.html`.
 
 ## 핵심 한 문단
 
@@ -87,6 +84,11 @@ env.sh                   source 해서 쓰는 환경 설정 (경로는 위치에
 scripts/
   verify.sh              끝에서 끝까지: 배치 -> 배선 -> GDS/DRC
   measure-memory.sh      메모리 패치 효과를 직접 재본다
+  build-z3-pyodide.sh    앞단이 쓰는 libz3 (Pyodide side module)
+  route/stage-design.sh  ALIGN 앞단 출력 -> web/placer/fixtures/design
+  route/node/            페이지의 배치(place.mjs)·배선(newroute.mjs)을 node 에서
+alignroute/              Rust 배선기 — ALIGN 배선기(RouteWork 4·5·2·3)를 옮긴 것.
+                         build.sh 가 wasm 으로 빌드해 루트의 src/route/alignroute.wasm 에 둔다
 patches/
   align-memory.patch     ALIGN 배선 단계 메모리 8.4GB -> 1.45GB
   README.md              왜/무엇을/측정치/손으로 적용하는 법
@@ -99,16 +101,13 @@ gpuplace/                파이썬 배치기
   placement.py           ALIGN 배치 JSON 입출력
   handoff.py             PDK 격자에 맞춰 ALIGN 배선기로 넘기기
   m0/m1/m2.py            단계별 구동 스크립트 (m2 가 최종)
-web/placer/              JS 배치기 — **ALIGN place 단계 없이 도는 쪽**
-  src/*.mjs              의존성 없는 ES 모듈 (node 와 브라우저 공용)
-  src/design.mjs           앞단 출력 -> 배치 문제. 변이/영역/반전의 자유도
-  src/place.mjs            입구 하나. 계층까지 엮는다
-  test/*.mjs             파이썬 대조, 심플렉스 검증, legalize 성질 검사
+web/placer/              JS 배치기(본체는 저장소 루트의 src/*.mjs)의 검사와 고정값
+  test/*.mjs             파이썬 대조, 심플렉스 검증, legalize 성질 검사, 검사기·GDS 고정 사례
   test/place.mjs           앞단 출력만으로 배치 (본 경로)
-  fixtures/*.json        파이썬이 뽑아둔 정답 고정값 (parity 검사용)
+  fixtures/*.json        파이썬이 뽑아둔 정답 고정값 (parity 검사용), 검사기·GDS·격자 고정 사례
   fixtures/design/       예제 5 개의 앞단 출력 (1_topology + 2_primitives)
                          *.gds.json 은 뺐다 — 배치기가 안 읽고 15MB 였다
-  index.html             브라우저 데모 (아직 고정값을 읽는다)
+  pack-example.mjs       앞단 출력 폴더 -> data/<이름>.json (예제 넣기)
   README.md              JS 쪽 상세
 NOTES-phase0.md          "전부 웹으로" 타당성 조사 결과 (Pyodide/emscripten/메모리)
 ```
@@ -205,12 +204,7 @@ telescopic_ota 와 current_mirror_ota 에서는 ALIGN 이 고른 것이 **1 위*
 
 자세한 것은 `web/placer/README.md`.
 
-데모를 열려면 HTTP 로 띄워야 한다 (ES 모듈과 fetch 는 `file://` 에서 안 된다):
-
-```bash
-cd web/placer && python3 -m http.server 8766
-# http://127.0.0.1:8766/index.html
-```
+브라우저에서는 저장소 루트의 페이지(`/index.html`)가 이 배치기를 돌린다 — 루트의 `README.md`.
 
 ### 무엇을 어떻게 검증했나
 
@@ -325,47 +319,16 @@ GDS 를 바이트로 비교해 레이아웃이 같음을 확인했다 (다른 70
   `current_mirror_ota` 의 4 건은 `DIFFERENT WIDTH` 인데 ALIGN 자신의 배치에서도
   똑같이 4 건 나온다. SHORT·OPEN 은 양쪽 다 0.
 
-  ```bash
-  cd web/placer && node emit.mjs telescopic_ota          # 배치 -> place.json
-  bash web/spikes/route-js.sh telescopic_ota             # 심고 배선 -> GDS -> DRC
-  bash web/spikes/drc-sum.sh                             # 기준선과 나란히
-  ```
+  JS 배치를 네이티브 ALIGN 배선기로 넘기던 스크립트(`emit.mjs`, `route-js.sh`, `drc-sum.sh` 등)는
+  걷어냈다 — 브라우저 배선이 ALIGN 배선 단계를 그대로 옮긴 것이 되어 쓸 일이 없다 (git 기록 `6655430`).
 
-- **브라우저에서도 배선이 돈다 — 평면 설계 3/5.**
-  회로(`.sp`)를 올리면 앞단 · 배치 · 배선 · GDS · DRC 가 전부 탭 안에서 돈다.
-  네이티브 ALIGN 도, 서버도 필요 없다.
-
-  | 예제 | 앞단 | 배치 | 배선 | GDS | DRC 브라우저 | DRC 네이티브 |
-  |---|---|---|---|---|---|---|
-  | telescopic_ota | 0.7 s | 9.4 s | 1.7 s | 78K | **0** | 0 |
-  | current_mirror_ota | ~1 s | 8.4 s | 1.7 s | 79K | 4 | 4 |
-  | five_transistor_ota | ~1 s | 23.0 s | 1.9 s | 92K | **0** | 0 |
-  | high_speed_comparator | ~9 s | 107 s | 멈춤 | — | — | 0 |
-  | cascode_current_mirror_ota | ~3 s | 39.6 s | 멈춤 | — | — | 4 |
-
-  DRC 건수가 네이티브와 같다 — 같은 배선기, 같은 배치, 같은 결과다.
-
-  브라우저 배선을 여는 데 걸린 것 두 가지가 기록해둘 만하다.
-
-  1. `memory access out of bounds`. 덤프의 최상위 `parameters` 에 전원/접지
-     포트를 남겨뒀더니 C++ 배치기가 넷 없는 단자로 읽고
-     (`terminal 8 is dangling`) `SeqPair` 색인을 벗어났다. 네이티브에서는
-     조용히 넘어가지만 wasm 은 즉사한다. 덤프를 `1_topology` 가 아니라
-     **`3_pnr/inputs/<TOP>.verilog.json`** 에서 만들어 고쳤다 — prep 이
-     `manipulate_hierarchy` 로 전원핀을 걷어내 써둔, 배선 단계가 기대하는 그것.
-  2. 두 번째 배선에서 `null function`. 앞 회차가 남긴 `3_pnr` 위에 또
-     돌렸기 때문이다. 이제 매번 prep 부터 다시 돌린다 (1 초 미만).
-
-- **계층 설계 배선은 브라우저에서 아직 못 닫았다.**
-  인수인계는 계층까지 맞춰 만들어 두었고 **첫 하위 모듈은 성공한다**.
-  두 번째 하위 모듈의 상세 배선에서 빈 함수 포인터를 부른다
-  (`null function`). 축소 wasm 빌드(`scripts/wasm/build-pnr-wasm.sh`)가
-  빠뜨린 간접 호출 대상으로 보인다 — `-sASSERTIONS=2` 디버그 빌드로 어느
-  슬롯인지 짚는 것이 다음 순서다. 그때까지 이 두 예제는 네이티브 경로로 낸
-  GDS·DRC 를 내려받게 둔다.
-- **정적 사이트**: `web/placer/site/` 를 GitHub Pages 등에 그대로 올리면
-  브라우저에서 앞단·배치·배선이 돌고, 배선도·레이어 토글·산출물 다운로드·
-  회로 업로드가 된다. `site/README.md` 에 올리는 법이 있다.
+- **브라우저 배선은 ALIGN 배선 단계를 옮긴 것이다 — 5/5.**
+  회로(`.sp`)를 올리면 앞단 · 배치 · 배선 · GDS · DRC 가 전부 탭 안에서 돈다. 배선은 JS(입력·계층
+  부기·도형 합성·DRC/LVS·GDS) + Rust wasm(`alignroute/`, ALIGN C++ 배선기를 옮긴 것)이고, 같은 배치에서
+  ALIGN 과 같은 결과를 낸다 (`PLAN-route-align.md`). 예전의 Pyodide + ALIGN C++ 배선기(PnR 휠) 경로와
+  그 대조 도구는 걷어냈다.
+- **정적 사이트**: 저장소 루트를 GitHub Pages 등에 그대로 올리면 브라우저에서 앞단·배치·배선이 돌고,
+  배선도·레이어 토글·산출물 다운로드·회로 업로드가 된다. 올리는 법은 루트의 `README.md`.
 - **GPU 를 안 쓴다.** batch 축이 컴퓨트 셰이더에 그대로 맞는 자리지만 안 했다.
   torch 설치가 이 환경에서 두 번 잘려서 numpy 해석적 미분으로 갔다.
 

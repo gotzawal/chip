@@ -1,7 +1,7 @@
 //! PnRDB 의 자료 — ALIGN `PlaceRouteHierFlow/PnRDB/datatype.h` 에서 배선기가 읽고 쓰는 것만.
 //!
-//! 필드 이름과 JSON 모양은 pybind 바인딩을 그대로 걸어 뜬 덤프(`scripts/route/align-ref/tap`)와 같다.
-//! 그래서 기준 덤프를 그대로 읽어 배선하고, 결과를 그대로 견준다. C++ 의 이름을 그대로 두어
+//! 필드 이름과 JSON 모양은 ALIGN 의 pybind 바인딩이 내보내는 것과 같다 (이식할 때 그 덤프를 그대로
+//! 읽어 배선하고 결과를 견줬다 — symplace/PLAN-route-align.md). C++ 의 이름을 그대로 두어
 //! 옮긴 코드가 원문과 줄 단위로 맞아 보이게 한다 (`node.Blocks[i].instance[sel].blockPins`).
 //! 열거형은 덤프처럼 문자열로 둔다 ("NType.Block", "Smark.V", "Omark.N").
 #![allow(non_snake_case)]

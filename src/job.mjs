@@ -77,7 +77,7 @@ export async function runJob(data, post) {
     const top = r.top, P = top.problem;
     // 원점을 0 으로 당긴다. legalize 는 여유 영역에서 풀어서 bbox 가
     // (80, -168) 처럼 0 이 아닌 데서 시작할 수 있다. 그대로 그리면 ALIGN 패널과
-    // 기준이 달라져 나란히 비교가 어긋난다. (emit.mjs 도 같은 이유로 당긴다.)
+    // 기준이 달라져 나란히 비교가 어긋난다.
     const [ox0, oy0] = [top.box[0], top.box[1]];
     const rects = top.names.map((n, i) => ({
       name: n, concrete: top.concrete[i],
@@ -88,8 +88,8 @@ export async function runJob(data, post) {
     const box0 = [0, 0, top.box[2] - ox0, top.box[3] - oy0];
     // 하위 모듈의 **실제 배치**. 배선기는 최상위만으로는 못 돈다 — 덤프의
     // 최상위 대안이 하위 모듈의 module 항목(bbox + 인스턴스)까지 품어야 한다.
-    // emit.mjs 와 같은 규칙으로 고른다: __v{k} 는 alternatives[k] 가 아니라
-    // spreadShapes(alternatives, SUB_VARIANTS)[k] 다 (place.mjs 와 같은 상수).
+    // __v{k} 는 alternatives[k] 가 아니라 spreadShapes(alternatives, SUB_VARIANTS)[k] 다
+    // (place.mjs 와 같은 상수).
     const subModules = [];
     for (const [nm, m] of r.modules) {
       if (nm === topName) continue;

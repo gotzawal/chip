@@ -23,14 +23,6 @@ export function trRect(tr, r) {
   return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
 }
 
-/** outer(inner(x)) */
-export const trCompose = (outer, inner) => ({
-  oX: outer.oX + outer.sX * inner.oX, oY: outer.oY + outer.sY * inner.oY,
-  sX: outer.sX * inner.sX, sY: outer.sY * inner.sY,
-});
-
-export const IDENTITY = Object.freeze({ oX: 0, oY: 0, sX: 1, sY: 1 });
-
 function checkTr(tr, what) {
   if (![tr.oX, tr.oY].every(Number.isInteger) || ![tr.sX, tr.sY].every((s) => s === 1 || s === -1))
     throw new Error(`${what}: 변환이 정수 이동 + 거울이 아니다 ${JSON.stringify(tr)}`);
