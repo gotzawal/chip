@@ -237,7 +237,7 @@ export function placeFromJson(node, modules, drc) {
       const bid = nameMap[inst.instance_name];
       const insts = back.Blocks[bid].instance;
       const sel = insts.findIndex((b) => b.lefmaster === inst.concrete_template_name);
-      if (sel < 0) throw new Error(`instance_name: ${inst.instance_name} concrete_template_name: ${inst.concrete_template_name} not found.`);
+      if (sel < 0) throw new Error(`instance_name: ${inst.instance_name} concrete_template_name: ${inst.concrete_template_name} not found. (블록 ${bid} 의 후보: ${insts.map((b) => b.lefmaster).join(", ")})`);
       const t = inst.transformation;
       let x = Math.trunc(t.oX), y = Math.trunc(t.oY), hf = false, vf = false;
       if (t.sX === -1) { hf = true; x -= insts[sel].width; }

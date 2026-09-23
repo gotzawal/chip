@@ -20,7 +20,7 @@
  *  실패율 자체는 진단용으로 같이 돌려준다.
  */
 import { readDesign, variantGroups, flipPlan, moduleOrder,
-         orderDirections } from "./design.mjs";
+         orderDirections, blockSpacing } from "./design.mjs";
 import { multiStartVariants, refineFlips, exactArea, hpwl, scoreOf } from "./solver.mjs";
 import { legalize, exactOverlap, refineDirections } from "./legalize.mjs";
 
@@ -91,6 +91,8 @@ export async function placeDesign(input, {
   // Order 제약이 있으면 그 쌍의 분리 방향을 박는다 (부등식이라 영공간엔 못 넣는다).
   const forced = res.candidates.length
     ? orderDirections(design.constraints, res.candidates[0].problem.names) : null;
+  // 블록 간격 제약 (HorizontalDistance 등) — 분리 부등식에 더한다.
+  const gap = blockSpacing(design.constraints);
   const limit = maxTries > 0 ? maxTries
               : Math.min(res.candidates.length, Math.max(16, Math.ceil(res.configs / 2)));
 
@@ -167,7 +169,7 @@ export async function placeDesign(input, {
     // cascode 28/34 — 전부 INFEASIBLE). 실패한 후보는 그냥 버려지므로
     // "변이를 고른다"가 사실상 살아남은 스무 개 안에서만 일어났다.
     const args = { z0: c.z0, N: c.N, n: c.problem.n, w: c.problem.w,
-                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region, forced };
+                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region, forced, gap };
     let r = legalize(args);
     let usedSlack = null;
     for (const sl of retrySlack) {
@@ -226,7 +228,10 @@ export async function placeDesign(input, {
     if (grid) {
       if (gridTried >= maxGrid) break;
       gridTried++;
-      const anchors = [Array.from(k.c.problem.w, (v) => v / 2), Array.from(k.c.problem.h, (v) => v / 2)];
+      // 원점 oX = cx - sX*w/2 가 pitch 배수여야 한다. MOS 템플릿은 w/2 가 pitch 배수라 부호가 무관했지만
+      // 저항·커패시터 잎은 아니다 (variable_gain_amplifier 에서 반전된 잎이 격자 밖으로 나가 배선이 offgrid 였다).
+      const anchors = [Array.from(k.c.problem.w, (v, i) => (k.sx[i] > 0 ? 1 : -1) * v / 2),
+                       Array.from(k.c.problem.h, (v, i) => (k.sy[i] > 0 ? 1 : -1) * v / 2)];
       const r = legalize({ ...k.args, grid, anchors, dirs: k.r.dirs });
       if (r.status !== "OPTIMAL") {
         failBy.set(r.status, (failBy.get(r.status) ?? 0) + 1);
@@ -346,6 +351,24 @@ export function spreadShapes(alts, k) {
 /** 대칭 잔차 — 같은 대칭 그룹의 블록들이 정말 한 축 위에 있는가.
  *  legalize 가 theta 공간에서 풀므로 기계 정밀도로 0 이어야 한다.
  */
+/** 대칭축 위치 (세로축이면 x). 그림에 점선으로 그린다. */
+export function axes(problem, cx, cy) {
+  const idx = new Map(problem.names.map((n, i) => [n, i]));
+  const out = [];
+  for (const c of problem.constraints ?? []) {
+    if (c.constraint !== "SymmetricBlocks") continue;
+    const vert = (c.direction ?? "V") === "V";
+    const vals = [];
+    for (const pr of c.pairs ?? []) {
+      const ids = pr.map((p) => idx.get(p)).filter((v) => v !== undefined);
+      if (!ids.length) continue;
+      vals.push(ids.reduce((s, i) => s + (vert ? cx[i] : cy[i]), 0) / ids.length);
+    }
+    if (vals.length) out.push({ vert, at: vals[0] });
+  }
+  return out;
+}
+
 export function symmetryResidual(problem, cx, cy) {
   const idx = new Map(problem.names.map((n, i) => [n, i]));
   let worst = 0;

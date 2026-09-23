@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Mat } from "../../../../src/linalg.mjs";
 import { Objective } from "../../../../src/energy.mjs";
-import { multiStart, hpwl, exactArea } from "../../../../src/solver.mjs";
+import { multiStart } from "../../../../src/solver.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(here, "..", "fixtures");
@@ -34,11 +34,9 @@ const obj = new Objective({
   gamma: fx.gamma, beta: fx.beta, sx, sy,
 });
 
-// ALIGN 기준값: region 이 ALIGN 의 bbox 이고, cx_align/cy_align 이 그 배치다.
+// 정규화 기준: 영역 면적과 sqrt(면적) x 넷 수 (multiStart 의 옛 점수 꼴 — 처리량을 재는 데만 쓴다)
 const refArea = (fx.region[2] - fx.region[0]) * (fx.region[3] - fx.region[1]);
-const refHpwl = hpwl(Float64Array.from(fx.cx_align), Float64Array.from(fx.cy_align),
-                     Int32Array.from(fx.pin_inst), Float64Array.from(fx.pin_off.flat()),
-                     Int32Array.from(fx.pin_net), fx.n_net, sx, sy);
+const refHpwl = Math.sqrt(refArea) * fx.n_net;
 
 // 처리량 측정
 const t0 = performance.now();
@@ -53,12 +51,10 @@ console.log(`  ${batch} x ${iters} = ${evals} 평가  ${el.toFixed(1)}초  ` +
 
 const best = res[0];
 const med = res[Math.floor(res.length / 2)];
-const fmt = (r) => `면적 ${(r.area / refArea).toFixed(2)}x  겹침 ${r.overflow.toFixed(3)}  ` +
-                   `HPWL ${(r.hpwl / refHpwl).toFixed(2)}x`;
+const fmt = (r) => `면적 ${(r.area / refArea).toFixed(2)}x(영역 대비)  겹침 ${r.overflow.toFixed(3)}  ` +
+                   `HPWL ${r.hpwl.toFixed(0)}`;
 console.log(`  최선  ${fmt(best)}`);
 console.log(`  중앙  ${fmt(med)}`);
 console.log(`  면적 최소 ${(Math.min(...res.map((r) => r.area)) / refArea).toFixed(2)}x` +
             `  겹침 최소 ${Math.min(...res.map((r) => r.overflow)).toFixed(3)}`);
 
-// 파이썬 M2 가 같은 예제에서 낸 값 (README 기록용 참고치)
-console.log(`  (참고) 파이썬 M2 실측: 면적 1.00x 안팎, 겹침 0 — legalize 후 기준`);

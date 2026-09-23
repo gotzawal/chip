@@ -1,6 +1,5 @@
 <meta charset="utf-8">
 <title>Analog Layout Generator</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <style>
   /* 팔레트는 이 주제에서 나왔다. 구리(배선 금속)가 강조색, 마젠타는 대칭축 —
      이 배치기가 하는 일 자체가 대칭이라 축에만 진한 색을 쓴다.
@@ -21,8 +20,8 @@
     --block-line: #45596b;
     --ours: #a8551f;
     --good: #2f6f4e;
-    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono", monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -272,8 +271,8 @@
       금속층에 잇고, 설계 규칙(DRC)과 회로 연결(LVS)을 검사해 GDS 파일로 내보낸다 — KLayout 에서 열린다.
     </p>
     <p class="lede">
-      오픈소스 아날로그 레이아웃 도구 <b>ALIGN</b> 과 같은 공정 규칙(FinFET 14 nm 모의 PDK)을 쓰고, 배선
-      결과도 ALIGN 과 같다. 예제 회로 다섯 개가 들어 있고, ALIGN 이 낸 배치·배선과 나란히 견줘 볼 수 있다.
+      오픈소스 아날로그 레이아웃 도구 <b>ALIGN</b> 과 같은 공정 규칙(FinFET 14 nm 모의 PDK)을 쓰고, 배선기는
+      ALIGN 의 배선 알고리즘을 그대로 옮긴 것이다. ALIGN 의 예제 회로들이 들어 있다.
     </p>
   </header>
 
@@ -342,35 +341,23 @@ data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 �
               <button data-what="place" aria-pressed="true">배치</button>
               <button data-what="route" aria-pressed="false">배선</button>
             </span>
-            <span class="seg" id="whoSeg" title="누구 것을 볼지">
-              <button data-who="both" aria-pressed="true">나란히</button>
-              <button data-who="ours" aria-pressed="false">우리</button>
-              <button data-who="align" aria-pressed="false">ALIGN</button>
-            </span>
           </span>
         </h2>
         <canvas id="cv" width="800" height="560"></canvas>
         <div class="layers" id="layerBar" hidden></div>
         <div class="cap">
           <span class="key"><span class="sw"></span> 블록</span>
-          <span class="key"><span class="sw ours"></span> 우리 배치</span>
           <span class="key"><span class="sw ax"></span> 대칭축</span>
-          <span id="flipNote" hidden>↕ ALIGN 과 견주려고 상하로 뒤집어 그림 (좌표는 그대로)</span>
           <span id="bbox"></span>
           <span id="zoom" style="margin-left:auto"></span>
           <span style="color:var(--faint)">휠 확대 · 끌어 이동 · 더블클릭 초기화</span>
         </div>
       </div>
       <div class="card" style="margin-top:16px">
-        <h2>소자 변이 — 우리가 고른 것 vs ALIGN</h2>
-        <p class="body" style="margin:0;padding:0 0 10px;color:var(--muted);font-size:12px">
-          계층 설계의 하위 모듈은 이름 짓는 법이 서로 다르다 (ALIGN
-          <code>_PG0_k</code>, 우리 <code>__vk</code>). 배치에 영향을 주는 것은
-          이름이 아니라 <b>모양</b>이라, 크기가 같으면 같은 선택으로 센다.
-        </p>
+        <h2>소자 변이 — 고른 것</h2>
         <div class="tw"><table>
-          <thead><tr><th>인스턴스</th><th>우리 선택</th><th>크기</th><th>반전</th><th>ALIGN</th></tr></thead>
-          <tbody id="vt"><tr><td colspan="5" class="dim">배치를 실행하면 채워집니다</td></tr></tbody>
+          <thead><tr><th>인스턴스</th><th>변이</th><th>크기</th><th>반전</th></tr></thead>
+          <tbody id="vt"><tr><td colspan="4" class="dim">배치를 실행하면 채워집니다</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -385,15 +372,7 @@ data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 �
         <div class="body"><dl class="metrics" id="info" style="margin:-14px"></dl></div>
       </div>
       <div class="card" id="drcCard" style="margin-top:16px">
-        <h2 class="withbar">
-          <span>배선 · GDS · DRC</span>
-          <span class="viewbar">
-            <span class="seg" id="drcWho">
-              <button data-who="ours" aria-pressed="true">우리</button>
-              <button data-who="align" aria-pressed="false">ALIGN</button>
-            </span>
-          </span>
-        </h2>
+        <h2>배선 · GDS · DRC</h2>
         <dl class="metrics" id="drcMetrics"></dl>
         <div class="body" id="drcErrs" style="border-top:1px solid var(--hair)"></div>
         <div class="body" style="border-top:1px solid var(--hair)">
@@ -442,21 +421,14 @@ async function loadExampleList() {
   return EXAMPLES;
 }
 import { makeView, drawPanel, drawRouted, zoomAt, GROUPS } from "./view.mjs";
-// 기준선은 워커 없이 여기서 바로 뽑는다. 모듈 워커가 서지 않는 브라우저
-// (구형 사파리 — 맥·iOS 에서 이것 때문에 그림이 통째로 비었다) 에서도
-// 첫 화면은 나와야 한다.
-import { previewOf } from "./src/baseline.mjs";
 const $ = (id) => document.getElementById(id);
 const cv = $("cv"), ctx = cv.getContext("2d");
 const view = makeView();
-// 보기는 두 갈래다 — **무엇을**(배치/배선) 과 **누구를**(나란히/우리/ALIGN).
+// 보기는 배치 / 배선 둘이다.
 let what = "place";          // place | route
-let who = "both";            // both | ours | align
 let frame = null;            // 최적화 중간 상태
-let routed = null;           // 배선 기하 {ours (이 자리에서 낸 것), align (저장소의 ALIGN 기준선)}
-let routeFail = null;        // 배선이 실패했으면 그 문구 (오른쪽 패널에 적는다)
-let drcIndex = null;         // 배선/DRC 실제 결과
-let drcWho = "ours";
+let routed = null;           // 이 자리에서 낸 배선 기하
+let routeFail = null;        // 배선이 실패했으면 그 문구 (패널에 적는다)
 const layersOn = new Set(["metal", "via", "device"]);   // 웰은 기본 꺼짐
 
 // getComputedStyle 은 스타일 재계산을 강제한다. 블록마다 부르면 한 프레임이
@@ -477,41 +449,11 @@ new MutationObserver(() => { readPal(); redraw(); })
   .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
 let blobs = new Map();          // 예제 -> 앞단 출력
-let base = null;                // ALIGN 기준선
 let ours = null;                // 우리 배치 (이번 세션에서 푼 것)
 let worker = null, busy = false;
 
-/** 지금 "우리" 칸에 그릴 것 — **이번 세션에서 푼 것만** 그린다.
- *
- *  예전에는 미리 풀어 저장소에 넣어둔 배치(downloads/*.place.json)를 그렸다.
- *  그러면 화면에 있는 것이 방금 푼 것인지 박아둔 것인지 구분이 안 되고,
- *  내려받기 칸에도 그 파일이 그대로 걸려 "배선 실행"을 누르지 않아도
- *  결과가 나오는 것처럼 보였다. 저장소에 두는 것은 **비교 기준인 ALIGN
- *  결과뿐**이고, 우리 쪽은 전부 이 자리에서 만든다. */
+/** 지금 그릴 것 — **이번 세션에서 푼 것만** 그린다. 저장소에는 입력만 있고, 결과는 전부 이 자리에서 만든다. */
 const oursNow = () => frame ?? ours;
-
-// 우리 배치는 ALIGN 의 **상하 거울상**으로 나오기도 한다. 대칭 자유도라 틀린 게
-// 아니지만 (블록 크기·변이·bbox 가 같고 HPWL 도 거의 같다) 나란히 놓으면 딴
-// 것처럼 보인다. 그래서 같은 이름 블록의 y 가 더 잘 맞는 쪽으로 **보기만**
-// 뒤집는다 — 좌표도 산출물도 안 건드린다.
-function oriented(d) {
-  if (!d?.rects?.length || !base?.rects?.length) return d;
-  const by = new Map(base.rects.map((r) => [r.name, (r.y + r.h / 2 - base.bbox[1]) /
-                                                    Math.max(1, base.bbox[3] - base.bbox[1])]));
-  const span = Math.max(1, d.bbox[3] - d.bbox[1]);
-  let asis = 0, flip = 0, n = 0;
-  for (const r of d.rects) {
-    const a = by.get(r.name);
-    if (a == null) continue;
-    const c = (r.y + r.h / 2 - d.bbox[1]) / span;
-    asis += Math.abs(c - a); flip += Math.abs(1 - c - a); n++;
-  }
-  if (!n || flip >= asis - 1e-9) return d;
-  const y0 = d.bbox[1], y1 = d.bbox[3];
-  return { ...d, flipped: true,
-           rects: d.rects.map((r) => ({ ...r, y: y0 + y1 - r.y - r.h, sy: -r.sy })),
-           axes: (d.axes ?? []).map((a) => (a.vert ? a : { ...a, at: y0 + y1 - a.at })) };
-}
 
 // ---------------------------------------------------------------- 그리기
 //
@@ -520,31 +462,20 @@ function oriented(d) {
 //
 // 캔버스 크기가 중요하다. telescopic_ota 는 1440 x 11760 — 세로가 여덟 배다.
 // 높이를 660 으로 묶어두면 그림이 폭 80px 짜리 실오라기가 되어 아무것도 안 보인다.
-// 그래서 (1) 높이는 창 높이만큼 쓰고, (2) 나란히에서는 두 패널을 내용 폭에
-// 맞춰 좁혀 가운데로 붙인다 — 멀찍이 떨어뜨려 놓으면 비교가 안 된다.
+// 그래서 높이는 창 높이만큼 쓰고, 패널은 내용 폭에 맞춰 좁혀 가운데로 둔다.
 
-/** 지금 화면에 그릴 것들. 왼쪽이 ALIGN, 오른쪽이 우리 — 순서는 늘 같다. */
+/** 지금 화면에 그릴 것. */
 function shots() {
-  const emptyOurs = ["아직 우리 배치가 없습니다", "배치 실행을 누르세요"];
-  const emptyRoute = ["아직 배선 결과가 없습니다", "배선 실행을 누르세요"];
-  const items = what === "route"
-    ? [{ key: "align", geo: routed?.align, label: "ALIGN 기준선 (ALIGN 배치)", empty: emptyRoute },
-       { key: "ours", geo: routed?.ours, label: "우리 · 이 배치",
-         empty: routeFail ? ["배선 실패", routeFail] : emptyRoute }]
-    : (() => {
-        const live = oriented(oursNow());
-        const tag = frame ? `탐색 중 · ${frame.module}` : "우리";
-        return [
-          { key: "align", data: base, label: "ALIGN", empty: ["ALIGN 기준선이 없습니다"] },
-          { key: "ours", data: live, accent: true, empty: emptyOurs,
-            label: live?.flipped ? tag + " ↕" : tag, axes: live?.axes ?? [] }];
-      })();
-  const out = who === "both" ? items : items.filter((it) => it.key === who);
-  $("flipNote").hidden = !(what === "place" && out.some((it) => it.data?.flipped));
-  return out;
+  if (what === "route")
+    return [{ key: "ours", geo: routed, label: "배선",
+              empty: routeFail ? ["배선 실패", routeFail] : ["아직 배선 결과가 없습니다", "배선 실행을 누르세요"] }];
+  const live = oursNow();
+  return [{ key: "ours", data: live, accent: true, axes: live?.axes ?? [],
+            label: frame ? `탐색 중 · ${frame.module}` : "배치",
+            empty: ["아직 배치가 없습니다", "배치 실행을 누르세요"] }];
 }
 
-/** 두 패널이 같은 배율을 쓰도록 맞출 상자 — 둘 중 큰 쪽. */
+/** 패널에 맞출 상자. */
 function frameBox(items) {
   let w = 1, h = 1;
   for (const it of items) {
@@ -687,24 +618,16 @@ const resetView = () => { view.s = 1; view.tx = 0; view.ty = 0; redraw(); };
 cv.addEventListener("dblclick", resetView);
 
 const TITLE = { place: "배치", route: "배선" };
-const WHO = { both: "나란히", ours: "우리", align: "ALIGN" };
-function setView(nextWhat, nextWho) {
+function setView(nextWhat) {
   what = nextWhat ?? what;
-  who = nextWho ?? who;
   for (const b of $("whatSeg").querySelectorAll("button"))
     b.setAttribute("aria-pressed", String(b.dataset.what === what));
-  for (const b of $("whoSeg").querySelectorAll("button"))
-    b.setAttribute("aria-pressed", String(b.dataset.who === who));
-  $("cvTitle").textContent = `${TITLE[what]} — ${WHO[who]}`;
+  $("cvTitle").textContent = TITLE[what];
   $("layerBar").hidden = what !== "route";
-  // 한쪽만 볼 때는 아래 DRC 표도 같은 쪽을 본다.
-  if (who !== "both" && who !== drcWho) setDrcWho(who);
   resetView();
 }
 for (const btn of $("whatSeg").querySelectorAll("button"))
-  btn.addEventListener("click", () => setView(btn.dataset.what, null));
-for (const btn of $("whoSeg").querySelectorAll("button"))
-  btn.addEventListener("click", () => setView(null, btn.dataset.who));
+  btn.addEventListener("click", () => setView(btn.dataset.what));
 
 // ---------------------------------------------------------------- 저울
 //
@@ -743,56 +666,47 @@ const mkRow = (dl, k, v, cls) => {
 
 function showInfo(b) {
   const dl = $("info"); dl.textContent = "";
-  mkRow(dl, "블록", String(b.base?.rects.length ?? "—"));
+  mkRow(dl, "블록", String(b.blocks ?? "—"));
   mkRow(dl, "모듈", b.modules > 1 ? `${b.modules} <small>(계층)</small>` : "1");
-  mkRow(dl, "ALIGN bbox", b.base
-    ? `<small>${b.base.bbox[2] - b.base.bbox[0]} × ${b.base.bbox[3] - b.base.bbox[1]}</small>` : "—");
-  mkRow(dl, "ALIGN HPWL", b.base ? `<small>${Math.round(b.base.hpwl)}</small>` : "—");
+  mkRow(dl, "변이 조합", String(b.leafCombos ?? "—"));
+  if (b.ignored?.length)
+    mkRow(dl, "배치기가 무시한 제약", `<small>${b.ignored.join(" · ")}</small>`, "lose");
 }
 
-/** 변이 표 — 우리가 고른 소자 변이와 ALIGN 의 것. */
+/** 설계 요약 — 워커 없이 앞단 출력만 읽어서. */
+function summarize(blob) {
+  const mods = blob.topology.modules ?? [];
+  const used = new Set(mods.flatMap((m) => (m.instances ?? []).map((i) => i.abstract_template_name)));
+  const top = mods.find((m) => !used.has(m.name)) ?? mods[mods.length - 1];
+  return { blocks: (top?.instances ?? []).length, modules: mods.length };
+}
+
+/** 변이 표 — 고른 소자 변이와 반전. */
 function variantRows(rects) {
   const tb = $("vt"); tb.textContent = "";
   if (!rects?.length) {
-    tb.innerHTML = '<tr><td colspan="5" class="dim">배치를 실행하면 채워집니다</td></tr>';
+    tb.innerHTML = '<tr><td colspan="4" class="dim">배치를 실행하면 채워집니다</td></tr>';
     return;
   }
-  const alignBy = new Map((base?.rects ?? []).map((q) => [q.name, q]));
   const short = (v) => (v ?? "—").replace(/_(\d{6,})_/, "_");
   for (const q of rects) {
-    const a = alignBy.get(q.name);
-    // 이름만으로 견주면 안 된다. 하위 모듈은 양쪽이 이름 짓는 법이 다르다 —
-    // ALIGN 은 <모듈>_PG0_<k>, 우리는 <모듈>__v<k> 다. 같은 모양을 골라도
-    // 이름은 절대 안 맞으므로, 계층 설계에서는 전부 "다름"으로 보였다.
-    // 배치에 실제로 영향을 주는 것은 **블록의 모양**이다.
-    const sameName = !!a && a.concrete === q.concrete;
-    const sameBox = !!a && Math.round(a.w) === Math.round(q.w)
-                        && Math.round(a.h) === Math.round(q.h);
-    const ok = sameName || sameBox;
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td class="inst">${q.name}</td>` +
-      `<td class="${ok ? "same" : "diff"}">${short(q.concrete)}</td>` +
+      `<td>${short(q.concrete)}</td>` +
       `<td class="dim">${Math.round(q.w)}×${Math.round(q.h)}</td>` +
-      `<td class="dim flip">${q.sx > 0 ? "+" : "−"}${q.sy > 0 ? "+" : "−"}</td>` +
-      `<td class="dim">${
-        sameName ? "같음"
-        : sameBox ? `같은 모양 <small>${short(a.concrete)}</small>`
-        : a ? `${short(a.concrete)} <small>${Math.round(a.w)}×${Math.round(a.h)}</small>`
-        : "—"}</td>`;
+      `<td class="dim flip">${q.sx > 0 ? "+" : "−"}${q.sy > 0 ? "+" : "−"}</td>`;
     tb.append(tr);
   }
 }
 
 function showResult(r) {
   const dl = $("metrics"); dl.textContent = "";
-  const ar = base ? r.area / base.area : null;
-  const hr = base ? r.hpwl / base.hpwl : null;
-  const cls = (v) => (v == null ? "" : v <= 1.002 ? "win" : "lose");
-  mkRow(dl, "면적", ar ? `${ar.toFixed(3)}× <small>ALIGN 대비</small>` : "—", cls(ar));
-  mkRow(dl, "배선 HPWL", hr ? `${hr.toFixed(3)}× <small>ALIGN 대비</small>` : "—", cls(hr));
   let blockArea = 0;
   for (const q of r.rects) blockArea += q.w * q.h;
+  const bw = r.bbox[2] - r.bbox[0], bh = r.bbox[3] - r.bbox[1];
+  mkRow(dl, "면적", `${Math.round(bw)} × ${Math.round(bh)} <small>채움 ${(blockArea / Math.max(1, r.area)).toFixed(2)}</small>`);
+  mkRow(dl, "배선 HPWL", r.hpwl > 0 ? `${Math.round(r.hpwl)}` : "— <small>넷 없음</small>");
   mkRow(dl, "겹침", `${(r.overlap / blockArea).toExponential(1)} <small>블록면적 대비</small>`, "win");
   mkRow(dl, "대칭 잔차", `${r.resid.toExponential(1)}`, "win");
   mkRow(dl, "배선 격자", r.offgrid === 0
@@ -909,10 +823,11 @@ function frontSend(msg, want, fresh) {
     frontWorker.postMessage(msg);
   });
 }
-/** 넷리스트를 앞단에 돌린다. 첫 호출은 Pyodide 스택(약 40MB)을 받느라 오래 걸린다. */
-async function runFront(spText, name, subckt, constText) {
+/** 넷리스트를 앞단에 돌린다. 첫 호출은 Pyodide 스택(약 40MB)을 받느라 오래 걸린다.
+ *  constraints 는 {파일 이름: 내용} — 서브서킷마다 하나씩 있을 수 있다. */
+async function runFront(spText, name, subckt, constraints) {
   // 워커는 다시 쓴다 — Pyodide 부팅(5 초 안팎)을 설계마다 되풀이하지 않는다.
-  return frontSend({ sp: spText, name, subckt, constraints: constText }, "front", false);
+  return frontSend({ sp: spText, name, subckt, constraints }, "front", false);
 }
 
 /** 지금 화면에 있는 설계 이름 (올린 것이든 예제든). */
@@ -929,10 +844,12 @@ async function ingest(fileList) {
     const subckt = topSubckt(text);
     const name = sp.name.replace(/\.(sp|cir)$/i, "");
     uploadName = name;
-    const cf = all.find((f) => /\.const\.json$/i.test(f.name));
-    const constText = cf ? await cf.text() : "";
+    // 제약 파일은 서브서킷마다 하나씩 있을 수 있다 (<서브서킷>.const.json). 이름째 넘긴다.
+    const constraints = {};
+    for (const cf of all.filter((f) => /\.const\.json$/i.test(f.name)))
+      constraints[cf.name.replace(/^.*[\\/]/, "")] = await cf.text();
     setStatus('<span class="dot"></span><span>앞단 준비 — 처음이면 약 40MB 를 받습니다</span>');
-    const r = await runFront(text, name, subckt, constText);
+    const r = await runFront(text, name, subckt, constraints);
     setStatus(`<span>앞단 완료 — 모듈 ${r.modules}, 인스턴스 ${r.instances}, ` +
               `소자 ${r.concrete} 종  (${r.secs.toFixed(1)}s)</span>`);
     return r.blob;
@@ -1001,9 +918,10 @@ async function ingest(fileList) {
       $("ex").value = "__upload__";
       text.textContent = `올림 — 모듈 ${blob.topology.modules.length}, 인스턴스 ${nInst}` +
         (blob._missing?.length ? `  (템플릿 ${blob._missing.length}개 없음)` : "");
-      base = null; ours = null; frame = null; routed = null; liveRec = null; routeFail = null;
+      ours = null; frame = null; routed = null; liveRec = null; routeFail = null;
       $("metrics").textContent = "";
       variantRows(null);
+      showInfo(summarize(blob));
       showDrc(null); clearDownloads();
       offerExample(blob, uploadName || "my_design");
       redraw();
@@ -1029,21 +947,19 @@ async function ingest(fileList) {
  *
  *  예제와 올린 회로는 같은 것을 읽는다 — {topology, primitives, templates}.
  *  그래서 앞단을 한 번 돌린 뒤 그 덩어리를 파일로 받아 data/ 에 넣으면
- *  그대로 예제가 된다. 네이티브 ALIGN 도, 별도 도구도 필요 없다.
- *  (ALIGN 기준선 place 는 안 들어간다 — 브라우저 앞단은 배치를 안 한다.
- *   그 예제는 왼쪽 패널이 비고, 우리 배치만 나온다.)
+ *  그대로 예제가 된다. 별도 도구가 필요 없다.
  */
 let exUrl = null;
 function offerExample(blob, name) {
   const a = $("saveEx");
   if (exUrl) { URL.revokeObjectURL(exUrl); exUrl = null; }
   if (!blob?.topology) { a.hidden = true; return; }
-  const { topology, primitives, templates, place = null, leaves = null } = blob;
+  const { topology, primitives, templates, leaves = null } = blob;
   // 리프 전체 도형이 있으면 같이 담는다 — 이 파일 하나로 배선까지 된다.
   // (저장소의 예제는 첫 화면을 가볍게 하려고 data/<이름>.leaves.json 으로 뗐다.)
   exUrl = URL.createObjectURL(new Blob(
-    [JSON.stringify(leaves ? { topology, primitives, templates, place, leaves }
-                           : { topology, primitives, templates, place })],
+    [JSON.stringify(leaves ? { topology, primitives, templates, leaves }
+                           : { topology, primitives, templates })],
     { type: "application/json" }));
   a.href = exUrl;
   a.download = name.replace(/[^\w.-]+/g, "_") + ".json";
@@ -1055,8 +971,7 @@ function offerExample(blob, name) {
 //
 // **내려받는 것은 전부 이 자리에서 만든 것이다.** 저장소에 미리 넣어둔
 // 산출물을 걸어두면 배치·배선을 돌리지 않고도 결과를 받게 되고, 그건
-// 이 페이지가 하는 일이 아니다. 저장소에 두는 파일은 비교 기준인
-// ALIGN 배선 결과(routed/*.align.json)뿐이고 그건 그림으로만 쓴다.
+// 이 페이지가 하는 일이 아니다. 저장소에는 입력(앞단 출력·리프 도형·회로)만 있다.
 //
 // 정적 호스팅(GitHub Pages 등)에서는 <a download> 가 그대로 동작한다.
 // (아티팩트 뷰어 안에서는 샌드박스가 페이지발 다운로드를 막는다.)
@@ -1083,61 +998,25 @@ function addDownload(blob, file, label) {
 }
 
 // --- 배선 · DRC ---
-//
-// 저장소에 두는 것은 **ALIGN 기준선뿐이다** (routed/<예제>.align.json).
-// 우리 쪽은 배선 실행을 눌러 이 자리에서 만든다. 둘을 한 파일에 섞어두면
-// 화면의 "우리"가 방금 낸 것인지 박아둔 것인지 구분할 길이 없다.
 let liveRec = null;             // 이번 세션에서 낸 배선 결과 (DRC 표에 쓰는 모양)
 
-/** 지금 DRC 표가 볼 기록. ours 는 이 자리에서 낸 것만 들어간다. */
-function drcRec() {
-  const name = $("ex").value;
-  const ref = drcIndex?.find((r) => r.name === name);
-  return { name, align: ref?.align ?? null, ours: liveRec };
-}
-
-async function loadRouted(name) {
-  routed = null;
-  liveRec = null;
-  routeFail = null;
-  if (!drcIndex) {
-    try {
-      drcIndex = await (await fetch("./routed/index.json")).json();
-    } catch { drcIndex = []; }
-  }
-  showDrc();
-  const g = drcIndex.find((r) => r.name === name)?.align?.geo;
-  if (!g) return;
-  try { routed = { align: await (await fetch("./routed/" + g)).json() }; } catch {}
-  if (what === "route") redraw();
-}
-
-function showDrc(rec = drcRec()) {
+function showDrc(rec = liveRec) {
   const dl = $("drcMetrics"), box = $("drcErrs");
   dl.textContent = ""; box.textContent = "";
   if (!rec) {
-    box.innerHTML = '<p style="margin:0;color:var(--muted)">배선 실행을 누르면 ' +
-      '이 탭이 배선하고, ALIGN 과 같은 검사기로 잰 DRC/LVS 결과를 여기에 채웁니다.</p>';
-    return;
-  }
-  const d = rec[drcWho];
-  if (!d) {
-    const why = drcWho !== "ours" ? "이 설계의 ALIGN 기준선이 저장소에 없습니다."
-      : routeFail ? "배선이 실패했습니다 — " + routeFail.replace(/[<>&]/g, "")
-      : "아직 배선을 안 돌렸습니다 — 배치 실행 뒤 배선 실행을 누르세요.";
+    const why = routeFail ? "배선이 실패했습니다 — " + routeFail.replace(/[<>&]/g, "")
+      : ours ? "아직 배선을 안 돌렸습니다 — 배선 실행을 누르세요."
+      : "배선 실행을 누르면 이 탭이 배선하고, DRC/LVS 결과를 여기에 채웁니다.";
     box.innerHTML = '<p style="margin:0;color:var(--muted)">' + why + "</p>";
     return;
   }
+  const d = rec;
   const n = d.errors.length;
-  const other = rec[drcWho === "ours" ? "align" : "ours"];
   mkRow(dl, "GDS", d.gdsBytes
     ? `${(d.gdsBytes / 1024).toFixed(0)}K <small>${d.gdsName}</small>` : "-",
     d.gdsBytes ? "win" : "lose");
   mkRow(dl, "배선 사각형", d.rects ? String(d.rects) : "-");
   mkRow(dl, "DRC / LVS", `${n} <small>건</small>`, n === 0 ? "win" : "");
-  mkRow(dl, drcWho === "ours" ? "ALIGN 은" : "우리는",
-    other ? `${other.errors.length} <small>건</small>` : "-",
-    other && other.errors.length === n ? "win" : "");
   if (!n) {
     box.innerHTML = '<p style="margin:0;color:var(--good)">DRC/LVS 에러 없음.</p>';
     return;
@@ -1153,8 +1032,7 @@ function showDrc(rec = drcRec()) {
   for (const e of d.errors.slice(0, 8)) {
     const li = document.createElement("li");
     const k = e.text.split(" (")[0];
-    li.innerHTML = `<b>${k}</b> <span style="color:var(--faint)">${e.file}</span><br>` +
-      e.text.slice(k.length, k.length + 200).replace(/[<>]/g, "");
+    li.innerHTML = `<b>${k}</b><br>` + e.text.slice(k.length, k.length + 200).replace(/[<>]/g, "");
     ul.append(li);
   }
   const head = document.createElement("p");
@@ -1163,18 +1041,6 @@ function showDrc(rec = drcRec()) {
     (d.errors.length > 8 ? `  (앞 8건만)` : "");
   box.append(head, ul);
 }
-
-/** DRC 표가 누구 것을 보는지. 그림과 표는 서로를 따라간다 —
- *  한쪽은 우리, 다른 쪽은 ALIGN 을 보고 있으면 읽는 사람이 헷갈린다. */
-function setDrcWho(w) {
-  drcWho = w;
-  for (const b of $("drcWho").querySelectorAll("button"))
-    b.setAttribute("aria-pressed", String(b.dataset.who === w));
-  showDrc();
-  if (who !== "both" && who !== w) setView(null, w);     // 여기서 되돌아오지 않는다
-}
-for (const btn of $("drcWho").querySelectorAll("button"))
-  btn.addEventListener("click", () => setDrcWho(btn.dataset.who));
 
 async function loadExample(name) {
   if (name === "__upload__") return blobs.get(name);
@@ -1195,8 +1061,8 @@ async function loadExample(name) {
 // 같은 코드(src/job.mjs)를 메인 스레드에서 돌린다. 그동안 페이지가 멎지만
 // 아무것도 안 나오는 것보다 낫다.
 function handle(m) {
-  if (m.type === "baseline") {
-    base = m.base; showInfo(m);
+  if (m.type === "start") {
+    showInfo(m);
     redraw();
     if (m.runner) {
       runnerKind = m.runner;
@@ -1254,7 +1120,7 @@ function startJob(msg) {
   worker.onmessage = (e) => { spoke = true; handle(e.data); };
   worker.onerror = (e) => { e.preventDefault?.(); fallback(e.message || "worker error"); };
   worker.postMessage(msg);
-  // 아무 말 없이 죽는 워커도 있다. 첫 소식(baseline)은 원래 바로 온다.
+  // 아무 말 없이 죽는 워커도 있다. 첫 소식(start)은 원래 바로 온다.
   setTimeout(() => fallback("첫 소식이 없습니다"), 6000);
 }
 
@@ -1338,8 +1204,8 @@ async function runRoute() {
     console.error("[배선 실패]", err);
     // 그림에도 적는다 — 나란히 보기의 오른쪽 패널
     routeFail = msg.slice(0, 160);
-    if (routed) routed = { ...routed, ours: null };
-    setView("route", "both");
+    routed = null;
+    setView("route");
     showDrc();
     showCanvas();
   } finally {
@@ -1371,14 +1237,11 @@ function showRouted(m) {
     gdsBytes: m.gds?.byteLength ?? 0, gdsName: m.gdsName ?? "",
     rects: m.geo?.terminals?.length ?? 0,
   };
-  // **ALIGN 기준선을 지우지 않는다.** 예전에는 routed 를 우리 것으로 통째
-  // 갈아끼워서, 배선이 끝나는 순간 옆에 있던 ALIGN 배선이 사라졌다 —
-  // 정작 비교가 필요한 순간에 비교할 것이 없어졌다.
-  if (m.geo) routed = { ...(routed ?? {}), ours: m.geo };
+  routed = m.geo ?? null;
   routeFail = null;
   routeDownloads(m);
-  setView("route", "both");      // 나란히. 비교가 이 페이지가 하는 일이다.
-  showDrc();                     // setView 뒤에 (표와 그림이 서로를 따라간다)
+  setView("route");
+  showDrc();
   showCanvas();
 }
 
@@ -1433,10 +1296,8 @@ $("routeRun").addEventListener("click", runRoute);
 async function run() {
   if (busy) return;
   busy = true; $("run").disabled = true; ours = null; frame = null;
-  // 새 배치를 풀기 시작하면 **이전 배치의 배선 결과는 더 이상 이 배치의 것이
-  // 아니다.** 우리 쪽만 지운다 — ALIGN 기준선은 배치와 무관하므로 남긴다.
-  if (routed) routed = { ...routed, ours: null };
-  liveRec = null; routeFail = null;
+  // 새 배치를 풀기 시작하면 **이전 배치의 배선 결과는 더 이상 이 배치의 것이 아니다.**
+  routed = null; liveRec = null; routeFail = null;
   showDrc();
   $("subCard").hidden = true;
   clearDownloads("계산 중…");
@@ -1456,25 +1317,19 @@ async function run() {
 
 // --- 쉴 때 보여줄 것 ---
 //
-// 페이지가 뜨면 왼쪽에 ALIGN 기준선이 바로 뜬다 (앞단 출력을 파싱만 하므로
-// 워커를 거치지 않는다). 오른쪽 "우리" 칸은 **비어 있다** — 배치 실행을
-// 누르면 그 자리에서 풀어 채운다.
-//
-// 예전에는 미리 풀어둔 결과를 읽어 그렸다. 그림은 빨리 찼지만, 화면의 것이
-// 방금 푼 것인지 저장소에 박아둔 것인지 알 수 없었다. 비교 기준은 ALIGN
-// 하나로 충분하다.
+// 예제를 고르면 설계 요약만 뜬다 (앞단 출력을 파싱만 하므로 워커를 거치지 않는다).
+// 그림은 **비어 있다** — 배치 실행을 누르면 그 자리에서 풀어 채운다. 저장소에는 결과를 두지 않는다.
 async function preview(name) {
   try {
     const blob = await loadExample(name);
-    const p = previewOf(blob);            // 워커 없이 — 파싱만 한다
-    base = p.base; ours = null; frame = null;
+    ours = null; frame = null; routed = null; liveRec = null; routeFail = null;
     $("subCard").hidden = true;
-    showInfo(p);
+    showInfo(summarize(blob));
     $("metrics").textContent = "";
     variantRows(null);
+    showDrc(null);
     redraw();
-    setStatus("<span>왼쪽이 ALIGN 기준선입니다 — 배치 실행을 누르면 " +
-              "오른쪽을 이 자리에서 풉니다</span>");
+    setStatus("<span>배치 실행을 누르면 이 자리에서 풉니다</span>");
   } catch (err) {
     setStatus(`<span style="color:var(--copper)">${err.message}</span>`);
   }
@@ -1484,18 +1339,19 @@ const sel = $("ex");
 sel.addEventListener("change", () => {
   const v = sel.value;
   if (v === "__upload__") {
-    base = null; ours = null; frame = null; routed = null; liveRec = null; routeFail = null;
+    ours = null; frame = null; routed = null; liveRec = null; routeFail = null;
     $("metrics").textContent = ""; variantRows(null);
+    showInfo(summarize(blobs.get(v)));
     showDrc(null); clearDownloads(); redraw();
     setStatus("<span>올린 설계 — 배치 실행을 누르세요</span>");
     return;
   }
-  preview(v); loadRouted(v); clearDownloads();
+  preview(v); clearDownloads();
 });
 $("run").addEventListener("click", run);
 addEventListener("resize", () => redraw());
 
-setView("place", "both");        // 첫 화면은 배치를 나란히
+setView("place");
 clearDownloads();
 loadExampleList().then((rows) => {
   for (const { name, label } of rows) {
@@ -1504,6 +1360,5 @@ loadExampleList().then((rows) => {
   }
   if (!rows.length) return;
   preview(rows[0].name);
-  loadRouted(rows[0].name);
 });
 </script>

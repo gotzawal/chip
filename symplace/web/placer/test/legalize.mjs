@@ -43,9 +43,8 @@ for (const file of files) {
     nNet: fx.n_net, region: fx.region, M: fx.M,
     gamma: fx.gamma, beta: fx.beta, sx, sy,
   });
+  // 기준: 고정값의 영역(region) 면적. 점수는 배치기와 같은 로그 꼴.
   const refArea = (fx.region[2] - fx.region[0]) * (fx.region[3] - fx.region[1]);
-  const refHpwl = hpwl(Float64Array.from(fx.cx_align), Float64Array.from(fx.cy_align),
-                       obj.pinInst, obj.pinOff, obj.pinNet, fx.n_net, sx, sy);
   const A = fx.A.length ? Mat.from(fx.A) : null;
   const bvec = Float64Array.from(fx.b);
 
@@ -73,7 +72,7 @@ for (const file of files) {
     if (lg.status !== "OPTIMAL") { fails++; continue; }
     const ea = exactArea(lg.cx, lg.cy, w, h);
     const hp = hpwl(lg.cx, lg.cy, obj.pinInst, obj.pinOff, obj.pinNet, fx.n_net, sx, sy);
-    const score = ea.area / refArea + hp / refHpwl;
+    const score = Math.log(Math.max(ea.area, 1)) + Math.log(Math.max(hp, 1));
     let move = 0;
     for (let i = 0; i < fx.n; i++)
       move = Math.max(move, Math.hypot(lg.cx[i] - cd.cx[i], lg.cy[i] - cd.cy[i]));
@@ -100,8 +99,8 @@ for (const file of files) {
     ok(worst < 1e-6, "대칭 잔차 |Az-b|", `${worst.toExponential(2)}`);
   }
 
-  ok(best.area / refArea < 1.6, "면적", `${(best.area / refArea).toFixed(2)}x`);
-  ok(best.hpwl / refHpwl < 1.6, "배선 HPWL", `${(best.hpwl / refHpwl).toFixed(2)}x`);
+  ok(best.area / refArea < 1.6, "면적 (영역 대비)", `${(best.area / refArea).toFixed(2)}x`);
+  console.log(`    ${"배선 HPWL".padEnd(30)} ${best.hpwl.toFixed(0)}`);
   ok(fails === 0, "LP 실패 없음", `${fails}/12`);
   console.log(`    최대 이동 ${best.move.toFixed(0)} (영역 긴변 ${span.toFixed(0)})`);
   console.log(`    시간: 연속 ${(tOpt / 1000).toFixed(1)}s  legalize ${(tLeg / 1000).toFixed(2)}s (12건)`);

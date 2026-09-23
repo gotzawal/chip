@@ -6,41 +6,41 @@
  *  메인 스레드에서 직접 부른다. 그래서 워커 전용 API(self, postMessage)를
  *  쓰지 않고, 내보낼 것은 인자로 받은 post 로 넘긴다.
  *
- *  받는 것: { name, blob, batch, previewOnly }  blob = {topology, primitives, templates, place}
+ *  받는 것: { name, blob, batch }  blob = {topology, primitives, templates}
  *  post 로 보내는 것:
- *    {type:"baseline", ...}  ALIGN 이 낸 배치 — 즉시
+ *    {type:"start", ...}     설계 요약(블록·모듈·변이 조합·어디서 도는지) — 즉시
  *    {type:"progress", ...}  후보 진행
  *    {type:"frame", ...}     설정 하나가 끝날 때의 최선 — 재배치 과정이 보인다
  *    {type:"done", ...}      우리 배치
  *    {type:"error", ...}
  */
 import { readDesign, topIndex, moduleOrder, variantGroups,
-         countAssignments } from "./design.mjs";
-import { baseline, axes } from "./baseline.mjs";
+         countAssignments, ignoredConstraints } from "./design.mjs";
 import { placeHierarchy, symmetryResidual, orderViolations,
-         spreadShapes, SUB_VARIANTS } from "./place.mjs";
+         spreadShapes, SUB_VARIANTS, axes } from "./place.mjs";
 import { createGpuRunner } from "./gpu/runner.mjs";
 
 export async function runJob(data, post) {
-  const { name, blob, batch, previewOnly, grid = [80, 84],
+  const { name, blob, batch, grid = [80, 84],
           hpwlWeight, lamRatio, gpu = true, perConfig = 32 } = data;
   try {
     // WebGPU 가 있으면 연속 단계(Adam)를 거기서 돈다 — 시작점을 설정마다 perConfig 개.
     // 없으면 CPU 로, 총 시작점 batch 개 (예전과 같다). 어느 쪽인지 화면에 알린다.
     let runner = null;
-    if (gpu && !previewOnly && globalThis.navigator?.gpu)
+    if (gpu && globalThis.navigator?.gpu)
       runner = await createGpuRunner(globalThis.navigator.gpu).catch(() => null);
     const topName = blob.topology.modules[topIndex(blob.topology)].name;
     const order = moduleOrder(blob.topology);
-    const base = blob.place ? baseline(blob.place, topName) : null;
 
     // 변이 조합이 몇 개인지 미리 알려준다 (최상위 기준, 하위 모듈 변이 전)
     const d0 = readDesign({ ...blob, top: order[0] });
-    post({ type: "baseline", base, topName, order,
+    // 배치기가 모르는 제약은 조용히 넘기지 않고 이름을 알린다 (모듈 전부).
+    const ignored = [...new Set(blob.topology.modules.flatMap((m) => ignoredConstraints(m.constraints)))];
+    post({ type: "start", topName, order, ignored,
+                  blocks: d0.instances.length + d0.missing.length,
                   modules: order.length,
                   leafCombos: countAssignments(variantGroups(d0)),
-                  runner: previewOnly ? null : (runner ? "gpu" : "cpu") });
-    if (previewOnly) return;          // 기준선만 뽑고 끝 — 배치는 안 돌린다
+                  runner: runner ? "gpu" : "cpu" });
 
     const t0 = performance.now();
     let seen = 0, frames = 0, lastFrame = 0;
@@ -100,26 +100,31 @@ export async function runJob(data, post) {
     // __v{k} 는 alternatives[k] 가 아니라 spreadShapes(alternatives, SUB_VARIANTS)[k] 다
     // (place.mjs 와 같은 상수).
     const subModules = [];
-    for (const [nm, m] of r.modules) {
-      if (nm === topName) continue;
-      const used = [...new Set(top.concrete.filter(
-        (c) => c === nm || c.startsWith(nm + "__v")))];
-      for (const cn of used) {
-        const picks = spreadShapes(m.alternatives ?? [m], SUB_VARIANTS);
-        const vi = cn.includes("__v") ? Number(cn.split("__v")[1]) : 0;
-        const pl = picks[Math.min(vi, picks.length - 1)] ?? m;
-        const pp = pl.problem, [sx0, sy0] = [pl.box[0], pl.box[1]];
-        subModules.push({
-          abstract: nm, concrete: cn,
-          bbox: [0, 0, Math.round(pl.box[2] - sx0), Math.round(pl.box[3] - sy0)],
-          instances: pp.names.map((inm, k) => ({
-            name: inm, concrete: pp.concrete[k],
-            oX: Math.round(pl.cx[k] - pl.sx[k] * (pp.w[k] / 2) - sx0),
-            oY: Math.round(pl.cy[k] - pl.sy[k] * (pp.h[k] / 2) - sy0),
-            sX: pl.sx[k] > 0 ? 1 : -1, sY: pl.sy[k] > 0 ? 1 : -1,
-          })),
-        });
-      }
+    // 최상위가 쓰는 것부터 시작해 그 하위 모듈이 쓰는 것까지 **재귀로** 모은다 — comparator1 처럼
+    // 계층이 세 단 이상이면 최상위의 직접 하위만 넘겨서는 배선기가 "모르는 concrete 이름" 으로 멈춘다.
+    const queue = [...new Set(top.concrete)], seenSub = new Set();
+    while (queue.length) {
+      const cn = queue.shift();
+      if (seenSub.has(cn)) continue;
+      seenSub.add(cn);
+      const nm = cn.includes("__v") ? cn.split("__v")[0] : cn;
+      const m = r.modules.get(nm);
+      if (!m || nm === topName) continue;           // 리프거나 최상위
+      const picks = spreadShapes(m.alternatives ?? [m], SUB_VARIANTS);
+      const vi = cn.includes("__v") ? Number(cn.split("__v")[1]) : 0;
+      const pl = picks[Math.min(vi, picks.length - 1)] ?? m;
+      const pp = pl.problem, [sx0, sy0] = [pl.box[0], pl.box[1]];
+      subModules.push({
+        abstract: nm, concrete: cn,
+        bbox: [0, 0, Math.round(pl.box[2] - sx0), Math.round(pl.box[3] - sy0)],
+        instances: pp.names.map((inm, k) => ({
+          name: inm, concrete: pp.concrete[k],
+          oX: Math.round(pl.cx[k] - pl.sx[k] * (pp.w[k] / 2) - sx0),
+          oY: Math.round(pl.cy[k] - pl.sy[k] * (pp.h[k] / 2) - sy0),
+          sX: pl.sx[k] > 0 ? 1 : -1, sY: pl.sy[k] > 0 ? 1 : -1,
+        })),
+      });
+      for (const c of pp.concrete) queue.push(c);
     }
 
     // 하위 모듈이 어떤 모양들을 올렸는지 (표에 쓴다)

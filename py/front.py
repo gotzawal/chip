@@ -4,15 +4,27 @@ frontworker.mjs (.sp 올리기) 가 Pyodide 안에서 읽는다.
 """
 import json, pathlib, shutil
 
-def run(sp_text, name, subckt, const_text):
+def run(sp_text, name, subckt, const_json):
+    """const_json: JSON 문자열 — {"<이름>.const.json": 내용, ...} 이거나 예전 모양(제약 배열 문자열).
+    ALIGN 은 서브서킷마다 <서브서킷>.const.json 을 찾는다 (user_const.py, 대소문자 무관)."""
     work = pathlib.Path("/work") / name
     if work.exists():
         shutil.rmtree(work)
     nl = work / "netlist"
     nl.mkdir(parents=True)
     (nl / (name + ".sp")).write_text(sp_text)
-    if const_text:
-        (nl / (subckt.lower() + ".const.json")).write_text(const_text)
+    consts = {}
+    if const_json:
+        try:
+            parsed = json.loads(const_json)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            consts = {k: v for k, v in parsed.items() if isinstance(v, str) and v.strip()}
+        elif const_json.strip():
+            consts = {subckt.lower() + ".const.json": const_json}
+    for fname, text in consts.items():
+        (nl / fname.lower()).write_text(text)
 
     topo = work / "1_topology"; prim = work / "2_primitives"
     topo.mkdir(); prim.mkdir()

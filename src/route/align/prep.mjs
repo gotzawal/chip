@@ -229,13 +229,13 @@ export function mapValidConst(allConst) {
   return { constraints: pnr };
 }
 
-/** gen_constraint_files — 제약이 하나라도 있는 모듈만 {모듈: {constraints}} */
+/** gen_constraint_files — 모듈마다 {모듈: {constraints}}.
+ *  ALIGN 은 `len(constraints) > 0` 으로 거르지만 그 constraints 가 {"constraints": [...]} 딕셔너리라 늘 1 이다 —
+ *  제약이 없는 모듈에도 빈 파일을 쓴다. route_single_variant 가 그 파일을 assert 로 요구하므로 같이 맞춘다
+ *  (제약 파일이 아예 없는 inverter_v1 에서 걸렸다). */
 export function pnrConstraints(verilogD) {
   const out = {};
-  for (const m of verilogD.modules) {
-    const c = mapValidConst(m.constraints ?? []);
-    if (c.constraints.length > 0) out[m.name] = c;
-  }
+  for (const m of verilogD.modules) out[m.name] = mapValidConst(m.constraints ?? []);
   return out;
 }
 
@@ -300,45 +300,71 @@ export function placementVerilog(verilogD, placement, leaves, top) {
   const tmod = mods.get(top);
   const tinst = new Map(tmod.instances.map((i) => [i.instance_name, i]));
 
-  const subName = new Map(), subAbstract = new Map();
-  for (const q of placement.instances) {
-    const ab = tinst.get(q.name).abstract_template_name;
-    if (!mods.has(ab)) continue;
-    if (subName.has(q.concrete)) continue;
+  // 하위 모듈 이름 <abstract>_<번호>. 최상위 인스턴스에서 시작해 그 모듈 항목의 인스턴스가 가리키는
+  // 모듈까지 **따라 내려가며** 등록한다 (계층이 세 단 이상인 comparator1 의 INVERTER_1, NAND_1 ...).
+  // abstract 는 전원 포트를 걷어낸 사본 이름(<이름>_PG<i>)이라 모듈 항목의 인스턴스에서 읽어야 하고,
+  // 같은 우리 concrete 가 다른 사본에서 쓰일 수 있어 열쇠는 (abstract, concrete) 다.
+  // 같은 모듈을 **다른 모양(변이)** 으로 두 번 쓰면 (vco_type2_65 의 THREE_TERMINAL_INV__v0 / __v2) 각각을
+  // 다른 abstract (<이름>, <이름>_V1, ...) 로 낸다. PnRDB 는 abstract 마다 노드 하나를 두고 리프 인스턴스의
+  // abstract 를 고른 concrete 로 바꾸므로, 한 abstract 의 두 배치가 리프 변이를 다르게 고르면 뒤엣것이 앞엣것을 덮는다.
+  const key = (ab, concrete) => `${ab}|${concrete}`;
+  const subName = new Map(), subAbstract = new Map(), subConcrete = new Map(), aliases = {};
+  const smByConcrete = new Map((placement.subModules ?? []).map((sm) => [sm.concrete, sm]));
+  const queue = [];
+  const register = (concrete, ab) => {
+    const k = key(ab, concrete);
+    if (!mods.has(ab) || subName.has(k)) return;
     const n = [...subAbstract.values()].filter((v) => v === ab).length;
-    subAbstract.set(q.concrete, ab);
-    subName.set(q.concrete, `${ab}_${n}`);
+    const abV = n === 0 ? ab : `${ab}_V${n}`;
+    if (n > 0) aliases[abV] = ab;
+    subAbstract.set(k, ab);
+    subConcrete.set(k, concrete);
+    subName.set(k, `${abV}_0`);
+    queue.push(k);
+  };
+  for (const q of placement.instances) register(q.concrete, tinst.get(q.name).abstract_template_name);
+  while (queue.length) {
+    const k = queue.shift();
+    const m = mods.get(subAbstract.get(k)), sm = smByConcrete.get(subConcrete.get(k));
+    if (!m || !sm) continue;
+    const byName = new Map(m.instances.map((i) => [i.instance_name, i]));
+    for (const q of sm.instances) {
+      const src = byName.get(q.name);
+      if (src) register(q.concrete, src.abstract_template_name);
+    }
   }
 
+  const abstractOf = (cn) => cn.replace(/_0$/, "");        // "<abV>_0" -> abV
   const leafUsed = new Map();
   const insts = [];
   for (const q of placement.instances) {
     const src = tinst.get(q.name);
     const ab = src.abstract_template_name;
-    const cn = subName.get(q.concrete) ?? q.concrete;
+    const cn = subName.get(key(ab, q.concrete)) ?? q.concrete;
     if (!mods.has(ab)) leafUsed.set(q.concrete, ab);
-    insts.push(placedInst(q.name, src.fa_map ?? [], ab, cn, q));
+    insts.push(placedInst(q.name, src.fa_map ?? [], mods.has(ab) ? abstractOf(cn) : ab, cn, q));
   }
 
-  const moduleEntry = (ab, cn, bbox, placed) => {
+  const moduleEntry = (ab, abV, cn, bbox, placed) => {
     const m = mods.get(ab);
     const out = [];
     for (const i of m.instances) {
       const q = placed.get(i.instance_name);
       if (!q) throw new Error(`${ab}: 인스턴스 ${i.instance_name} 의 배치가 없다`);
-      const subCn = subName.get(q.concrete) ?? q.concrete;
-      if (!mods.has(i.abstract_template_name)) leafUsed.set(q.concrete, i.abstract_template_name);
-      out.push(placedInst(i.instance_name, i.fa_map ?? [], i.abstract_template_name, subCn, q));
+      const iab = i.abstract_template_name;
+      const subCn = subName.get(key(iab, q.concrete)) ?? q.concrete;
+      if (!mods.has(iab)) leafUsed.set(q.concrete, iab);
+      out.push(placedInst(i.instance_name, i.fa_map ?? [], mods.has(iab) ? abstractOf(subCn) : iab, subCn, q));
     }
     return { parameters: clone(m.parameters ?? []), constraints: clone(m.constraints ?? []), instances: out,
-             concrete_name: cn, bbox: bbox.slice(), abstract_name: ab };
+             concrete_name: cn, bbox: bbox.slice(), abstract_name: abV };
   };
 
   const subEntries = [];
-  for (const sm of placement.subModules ?? []) {
-    const cn = subName.get(sm.concrete), ab = subAbstract.get(sm.concrete);
-    if (cn == null || ab == null) continue;       // 최상위가 안 쓰는 모양
-    subEntries.push(moduleEntry(ab, cn, sm.bbox, new Map(sm.instances.map((i) => [i.name, i]))));
+  for (const [k, cn] of subName) {
+    const sm = smByConcrete.get(subConcrete.get(k));
+    if (!sm) throw new Error(`하위 모듈 ${subConcrete.get(k)} 의 배치가 없다`);
+    subEntries.push(moduleEntry(subAbstract.get(k), abstractOf(cn), cn, sm.bbox, new Map(sm.instances.map((i) => [i.name, i]))));
   }
 
   const leafEntry = (cn, ab) => {
@@ -354,6 +380,7 @@ export function placementVerilog(verilogD, placement, leaves, top) {
     modules: [topEntry, ...subEntries],
     leaves: [...leafUsed].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([c, a]) => leafEntry(c, a)),
     global_signals: gs,
+    aliases,           // {"<abstract>_V1": "<abstract>"} — 제약 표를 복사할 때 쓴다
   };
 }
 
@@ -451,6 +478,9 @@ export function prepRoute({ design, leaves, placement, pdk, inputDir = null }) {
   const lef = topLef(collateral, leaves, pdk);
   const map = mapText(design.primitives ?? {});
   const spv = placementVerilog(verilog, placement, leaves, top);
+  // 변이별로 갈라 낸 모듈(<이름>_V1 ...)은 원래 모듈의 제약을 그대로 쓴다.
+  for (const [abV, ab] of Object.entries(spv.aliases ?? {})) pnrConst[abV] = clone(pnrConst[ab]);
+  delete spv.aliases;
   connectivityChangeForPartialRouting(spv, design.primitives);
   const trTbl = changeConcreteNamesForRouting(spv);
   const abstractVerilog = genAbstractVerilog(spv);

@@ -7,22 +7,18 @@
  *
  *  실행:  node test/gpu.mjs [예제 이름...]
  */
-import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { loadDesign } from "./_load.mjs";
+import { loadDesign, exampleNames } from "./_load.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..", "..", "..");
-const DES = path.join(HERE, "..", "fixtures", "design");
 const wanted = process.argv.slice(2);
 const blobs = [];
-for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
-  const dir = path.join(DES, ex);
-  if (!fs.statSync(dir).isDirectory()) continue;
+for (const ex of exampleNames()) {
   if (wanted.length && !wanted.includes(ex)) continue;
-  const { topology, primitives, templates } = loadDesign(dir);
+  const { topology, primitives, templates } = loadDesign(ex);
   blobs.push({ name: ex, topology, primitives, templates });
 }
 
