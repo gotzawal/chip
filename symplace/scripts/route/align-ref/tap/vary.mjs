@@ -4,7 +4,9 @@
  *    node vary.mjs [예제...] [--n=개수]     -> ~/.cache/symplace/tap-vary/<예제>/<설정>/
  *
  *  설정은 시작점(batch), 면적:배선 저울(hpwlWeight), 배선:퍼뜨리기 저울(lamRatio) 조합이다. 같은 배치가
- *  다시 나오면 건너뛴다. Rust 이식은 test/alignroute.mjs --tap=~/.cache/symplace/tap-vary 로 견준다.
+ *  다시 나오면 건너뛴다. 이미 뜬 설정(result.json 이 있는 폴더)은 다시 돌리지 않고 개수에 넣는다 — 이어서
+ *  돌릴 수 있다. 앞의 16 개가 처음 모은 설정이고, 뒤는 넓힌 것이다.
+ *  Rust 이식은 test/alignroute.mjs --tap=~/.cache/symplace/tap-vary, test/route.mjs --tap=... 로 견준다.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -23,6 +25,8 @@ const rows = J(path.join(ROOT, "data/index.json")).map((x) => (typeof x === "str
 // 작은 설계부터 넓게, 큰 설계(배치가 몇 분)는 좁게
 const SETS = [];
 for (const batch of [48, 96]) for (const hw of [0.5, 1, 2, 4]) for (const lam of [0.5, 2]) SETS.push({ batch, hw, lam });
+for (const batch of [24, 64]) for (const hw of [0.125, 1, 8]) for (const lam of [0.25, 1, 4]) SETS.push({ batch, hw, lam });
+for (const batch of [32, 128]) for (const hw of [0.25, 2, 16]) for (const lam of [0.5, 2]) SETS.push({ batch, hw, lam });
 
 for (const ex of rows) {
   if (want.length && !want.includes(ex)) continue;
@@ -34,6 +38,11 @@ for (const ex of rows) {
     if (done >= nMax) break;
     const tag = `b${s.batch}-w${s.hw}-l${s.lam}`;
     const dir = path.join(OUT, ex, tag);
+    if (fs.existsSync(path.join(dir, "result.json")) && fs.existsSync(path.join(dir, "placement.json"))) {
+      seen.add(fs.readFileSync(path.join(dir, "placement.json"), "utf8"));
+      done++;
+      continue;
+    }
     const t0 = performance.now();
     let ours = null;
     await runJob({ name: ex, blob, batch: s.batch, hpwlWeight: s.hw, lamRatio: s.lam }, (m) => {
