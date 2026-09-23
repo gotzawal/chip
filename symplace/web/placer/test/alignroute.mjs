@@ -11,6 +11,7 @@
  *    23     모드 2 + 3 (전원 배선)        m2 입력 -> m2, m3 출력          (최상위만)
  *
  *    node symplace/web/placer/test/alignroute.mjs [--stage=echo,4,45,2,23] [--ex=예제] [--tag=align|ours] [-v]
+ *                                                  [--tap=<덤프 뿌리, 기본 ~/.cache/symplace/tap>] [--wasm=<파일>]
  *
  *  합격: 고른 단계가 전부 "같다". 아직 안 옮긴 모드는 "없음" 으로 적고 실패로 센다
  *  (--allow-missing 이면 넘긴다).
@@ -31,7 +32,7 @@ const stages = opt("stage", "echo,4,45,2,23").split(",");
 const J = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 
 const router = await loadAlignRouter(fs.readFileSync(opt("wasm", path.join(ROOT, "src/route/alignroute.wasm"))));
-const TAP = path.join(CACHE, "tap");
+const TAP = opt("tap", path.join(CACHE, "tap"));
 if (!fs.existsSync(TAP)) {
   console.error(`기준 덤프가 없다: ${TAP}\n  node symplace/scripts/route/align-ref/tap/runall.mjs 를 먼저 돌린다`);
   process.exit(2);
