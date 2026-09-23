@@ -1137,9 +1137,10 @@ function showDrc(rec = drcRec()) {
   }
   const d = rec[drcWho];
   if (!d) {
-    box.innerHTML = '<p style="margin:0;color:var(--muted)">' + (drcWho === "ours"
-      ? "아직 배선을 안 돌렸습니다 — 배치 실행 뒤 배선 실행을 누르세요."
-      : "이 설계의 ALIGN 기준선이 저장소에 없습니다.") + "</p>";
+    const why = drcWho !== "ours" ? "이 설계의 ALIGN 기준선이 저장소에 없습니다."
+      : rustFail ? "Rust 이식 배선이 실패했습니다 — " + rustFail.replace(/[<>&]/g, "")
+      : "아직 배선을 안 돌렸습니다 — 배치 실행 뒤 배선 실행을 누르세요.";
+    box.innerHTML = '<p style="margin:0;color:var(--muted)">' + why + "</p>";
     return;
   }
   const n = d.errors.length;
@@ -1350,6 +1351,7 @@ async function runRoute() {
     if (routed) routed = { ...routed, ours: null };
     rustRun = null; cmp = null; showCompare();
     setView("route", "both");
+    showDrc();
     redrawSoon();
   } finally {
     busy = false; $("run").disabled = false; routeButtons(true);
