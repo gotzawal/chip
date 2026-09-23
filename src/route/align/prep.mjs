@@ -229,13 +229,13 @@ export function mapValidConst(allConst) {
   return { constraints: pnr };
 }
 
-/** gen_constraint_files — 제약이 하나라도 있는 모듈만 {모듈: {constraints}} */
+/** gen_constraint_files — 모듈마다 {모듈: {constraints}}.
+ *  ALIGN 은 `len(constraints) > 0` 으로 거르지만 그 constraints 가 {"constraints": [...]} 딕셔너리라 늘 1 이다 —
+ *  제약이 없는 모듈에도 빈 파일을 쓴다. route_single_variant 가 그 파일을 assert 로 요구하므로 같이 맞춘다
+ *  (제약 파일이 아예 없는 inverter_v1 에서 걸렸다). */
 export function pnrConstraints(verilogD) {
   const out = {};
-  for (const m of verilogD.modules) {
-    const c = mapValidConst(m.constraints ?? []);
-    if (c.constraints.length > 0) out[m.name] = c;
-  }
+  for (const m of verilogD.modules) out[m.name] = mapValidConst(m.constraints ?? []);
   return out;
 }
 

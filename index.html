@@ -272,7 +272,7 @@
     </p>
     <p class="lede">
       오픈소스 아날로그 레이아웃 도구 <b>ALIGN</b> 과 같은 공정 규칙(FinFET 14 nm 모의 PDK)을 쓰고, 배선
-      결과도 ALIGN 과 같다. 예제 회로 다섯 개가 들어 있고, ALIGN 이 낸 배치·배선과 나란히 견줘 볼 수 있다.
+      결과도 ALIGN 과 같다. ALIGN 의 예제 회로들이 들어 있고, ALIGN 이 낸 배치·배선과 나란히 견줘 볼 수 있다.
     </p>
   </header>
 
@@ -788,7 +788,7 @@ function variantRows(rects) {
 function showResult(r) {
   const dl = $("metrics"); dl.textContent = "";
   const ar = base ? r.area / base.area : null;
-  const hr = base ? r.hpwl / base.hpwl : null;
+  const hr = base && base.hpwl > 0 ? r.hpwl / base.hpwl : null;   // 넷이 없는 설계(inverter)는 0/0
   const cls = (v) => (v == null ? "" : v <= 1.002 ? "win" : "lose");
   mkRow(dl, "면적", ar ? `${ar.toFixed(3)}× <small>ALIGN 대비</small>` : "—", cls(ar));
   mkRow(dl, "배선 HPWL", hr ? `${hr.toFixed(3)}× <small>ALIGN 대비</small>` : "—", cls(hr));

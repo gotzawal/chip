@@ -63,12 +63,14 @@ for (const ex of exampleNames()) {
   const resid = symmetryResidual(r.problem, r.cx, r.cy);
   console.log(`  블록 ${r.names.length}  변이조합 ${r.totalAssignments}  설정 ${r.configs}  방향뒤집기 ${r.dirFlips ?? 0}  ` +
               `시작점 ${r.starts} (${r.runner})  legalize ${r.tried - r.legalizeFail}/${r.tried} 격자 ${r.gridTried}  ${dt.toFixed(1)}s (탐색 ${r.secs.search.toFixed(1)} legalize ${r.secs.legalize.toFixed(1)})`);
-  console.log(`  면적 ${(r.area / refArea).toFixed(3)}x  HPWL ${(r.hpwl / refHpwl).toFixed(3)}x  ` +
+  const hpwlRatio = refHpwl > 0 ? (r.hpwl / refHpwl).toFixed(3) + "x" : "—";   // 넷이 없는 설계(inverter)는 0/0
+  console.log(`  면적 ${(r.area / refArea).toFixed(3)}x  HPWL ${hpwlRatio}  ` +
               `겹침 ${(r.overlap / blockArea).toExponential(1)}  대칭잔차 ${resid.toExponential(1)}  ` +
               `bbox ${Math.round(bw)}x${Math.round(bh)}` + (r.grid ? `  격자밖 ${r.gridOff}` : ""));
   if (r.grid) ok(r.gridOff === 0, `격자 밖 블록 ${r.gridOff}`);
   if (r.hpwlBeforeFlip != null)
-    console.log(`  반전 고르기 전 HPWL ${r.hpwlBeforeFlip.toFixed(0)} -> 후 ${r.hpwl.toFixed(0)}  (${(r.hpwl / r.hpwlBeforeFlip).toFixed(3)}x)`);
+    console.log(`  반전 고르기 전 HPWL ${r.hpwlBeforeFlip.toFixed(0)} -> 후 ${r.hpwl.toFixed(0)}` +
+                (r.hpwlBeforeFlip > 0 ? `  (${(r.hpwl / r.hpwlBeforeFlip).toFixed(3)}x)` : ""));
   ok(r.overlap / blockArea < 1e-9, `겹침 비율 ${r.overlap / blockArea}`);
   ok(resid < 1e-6, `대칭 잔차 ${resid}`);
   const ordBad = orderViolations(r.problem, r.cx, r.cy);

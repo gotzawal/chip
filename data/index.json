@@ -23,5 +23,40 @@
   "name": "high_speed_comparator",
   "label": "High-Speed Comparator",
   "bytes": 25493
+ },
+ {
+  "name": "inverter_v1",
+  "label": "Inverter v1",
+  "bytes": 3647
+ },
+ {
+  "name": "buffer",
+  "label": "Buffer",
+  "bytes": 6824
+ },
+ {
+  "name": "inverter_v2",
+  "label": "Inverter v2",
+  "bytes": 3647
+ },
+ {
+  "name": "inverter_v3",
+  "label": "Inverter v3",
+  "bytes": 4751
+ },
+ {
+  "name": "common_source",
+  "label": "Common Source",
+  "bytes": 5040
+ },
+ {
+  "name": "block_spacing_bug",
+  "label": "Block Spacing",
+  "bytes": 9402
+ },
+ {
+  "name": "five_transistor_ota_high_frequency",
+  "label": "5-Transistor OTA (High Frequency)",
+  "bytes": 10558
  }
 ]
