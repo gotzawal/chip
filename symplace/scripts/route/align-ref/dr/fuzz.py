@@ -3,7 +3,7 @@
 
   fuzz.py freeze [뿌리...]                    tap·tap-vary 의 m4_in 을 말뭉치로 얼린다 (DR_CORPUS)
   fuzz.py run <5|6|7> <seed-from> <seed-to> [-v]   무작위 사례 — 같지 않은 것만 한 줄씩, 끝에 표
-  fuzz.py one <5|6|7> <seed>                  한 사례 (일감은 DR_ORACLE_DIR/run/one.json)
+  fuzz.py one <5|6|7> <seed>                  한 사례 (다시 돌릴 입력을 DR_ORACLE_DIR/run/one.{tok,json} 에)
   fuzz.py errors <5|6|7> <seed-from> <seed-to>     Rust 만 돌려 오류를 글 앞부분으로 묶는다
 
 흔들기 (씨앗마다 몇 가지만):
@@ -21,7 +21,7 @@ C++ 이 정의되지 않은 동작으로 죽거나 끝나지 않는 곳에서 Ru
 """
 import copy, glob, json, os, random, re, shutil, sys
 from pathlib import Path
-from common import ORACLE_DIR, first_diff, run_oracle, run_rust
+from common import ORACLE, ORACLE_DIR, RUST, first_diff, run_oracle, run_rust, tokens
 
 CORPUS = Path(os.environ.get('DR_CORPUS', Path.home() / '.cache/symplace/dr-corpus'))
 BASES = sorted(glob.glob(str(CORPUS / '*/*_m4_in.json')))
@@ -411,7 +411,6 @@ def gen7(seed):
     return job, desc + ' || ' + ' '.join(sorted(set(tags)))
 
 
-
 def freeze(roots):
     """뿌리/예제/배치 마다 drc.json, calls.json, *_m4_in.json 을 CORPUS/<뿌리>__<예제>__<배치>/ 로"""
     n = 0
@@ -452,9 +451,12 @@ if __name__ == '__main__':
     if cmd == 'one':
         seed = int(sys.argv[3])
         job, desc, o, to, r, tr = one_case(gen, seed, 'one')
-        (ORACLE_DIR / 'run').mkdir(parents=True, exist_ok=True)
-        (ORACLE_DIR / 'run/one.json').write_text(json.dumps(job))
         print(desc, f'oracle {to:.2f}s rust {tr:.2f}s', classify(o, r))
+        # 다시 돌리기 (DR_TRACE=1 을 붙이면 두 쪽이 같은 자취 줄을 낸다)
+        run = ORACLE_DIR / 'run'
+        (run / 'one.tok').write_text(tokens(job))
+        (run / 'one.json').write_text(json.dumps(dict(job, modes=[4, 5], powerGrid=[4, 5], powerRouting=[0, 5], skip=[7, 8])))
+        print(f'  {ORACLE} {run}/one.tok\n  {RUST} {run}/one.json')
     elif cmd == 'run':
         a, b = int(sys.argv[3]), int(sys.argv[4])
         tally = {}

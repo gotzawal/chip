@@ -46,6 +46,37 @@ fn tr() -> bool {
     false
 }
 
+/// 자취: SortPinsOrder 뒤 넷마다 중심과 연결 순서 (종류/iter/iter2)
+fn trace_sort(nets: &[Net]) {
+    for (i, n) in nets.iter().enumerate() {
+        let c: Vec<String> = n.connected.iter().map(|c| format!("{}/{}/{}", if c.type_ == NType::BLOCK { 0 } else { 1 }, c.iter, c.iter2)).collect();
+        eprintln!("SORT {i} c={},{} : {}", n.center_x, n.center_y, c.join(" "));
+    }
+}
+
+/// 자취: 꺼진 꼭짓점 번호들
+fn trace_inactive(what: &str, i: usize, j: usize, grid: &Grid) {
+    let l: String = grid.vertices_total.iter().enumerate().filter(|(_, v)| !v.active).map(|(q, _)| format!(" {q}")).collect();
+    eprintln!("{what} {i} {j}:{l}");
+}
+
+/// 자취: 출발·도착 사각형과 Set_x 크기
+fn trace_src_dest(i: usize, j: usize, src: &[Sink], dst: &[Sink], set_x: usize) {
+    let f = |v: &[Sink]| v.iter().map(|s| format!(" [{} {} {} {} m{}]", s.LL.x, s.LL.y, s.UR.x, s.UR.y, s.metalIdx)).collect::<String>();
+    eprintln!("SRC {i} {j}:{}\nDST {i} {j}:{}\nSETX {i} {j}: {set_x}", f(src), f(dst));
+}
+
+/// 자취: A* 뒤 켜진 꼭짓점·비아 수, 출발·도착 꼭짓점, 경로
+fn trace_conn(i: usize, j: usize, grid: &Grid, ll: (i32, i32), ur: (i32, i32), path: &[Vec<i32>]) {
+    let vt = &grid.vertices_total;
+    let act = vt.iter().filter(|v| v.active).count();
+    let vu = vt.iter().filter(|v| v.via_active_up).count();
+    let vd = vt.iter().filter(|v| v.via_active_down).count();
+    let j_ = |v: &[i32]| v.iter().map(|x| format!(" {x}")).collect::<String>();
+    eprintln!("CONN {i} {j} n={} act={act} vu={vu} vd={vd} ll={},{} ur={},{}", vt.len(), ll.0, ll.1, ur.0, ur.1);
+    eprintln!("  S{}\n  D{}\n  P{}", j_(&grid.Source), j_(&grid.Dest), j_(&path.concat()));
+}
+
 /// RouteWork 5: GcellDetailRouter(HierNode, GR, path_number = 1, grid_scale = 1)
 pub fn route(node: &mut HierNode, gr: &GcellGlobalRouter) -> Result<(), String> {
     let mut dr = GcellDetailRouter::new(gr, 1, 1);
@@ -449,10 +480,7 @@ impl<'a> GcellDetailRouter<'a> {
     fn create_detailrouter_new(&mut self) -> Result<(), String> {
         self.SortPinsOrder()?;
         if tr() {
-            for (i, n) in self.Nets.iter().enumerate() {
-                let c: Vec<String> = n.connected.iter().map(|c| format!("{}/{}/{}", if c.type_ == NType::BLOCK { 0 } else { 1 }, c.iter, c.iter2)).collect();
-                eprintln!("SORT {i} c={},{} : {}", n.center_x, n.center_y, c.join(" "));
-            }
+            trace_sort(&self.Nets);
         }
         let mut Set_x: BTreeSet<C5> = BTreeSet::new();
         let mut Set_x_contact: BTreeSet<C5> = BTreeSet::new();
@@ -500,6 +528,7 @@ impl<'a> GcellDetailRouter<'a> {
                     Self::Grid_Inactive_One_Layer(&mut grid, h)?;
                 }
                 let mut temp_source: Vec<Sink> = temp_pins[0].clone();
+                #[allow(clippy::needless_range_loop)] // j 는 C++ 처럼 연결 번호 (자취에 찍는다)
                 for j in 1..temp_pins.len() {
                     let temp_dest: Vec<Sink> = temp_pins[j].clone();
                     // 출발·도착 사각형을 장애물에서 뺀다
@@ -508,8 +537,7 @@ impl<'a> GcellDetailRouter<'a> {
                     }
                     self.Grid_Inactive_new(&mut grid, &Set_x)?;
                     if tr() {
-                        let l: String = grid.vertices_total.iter().enumerate().filter(|(_, v)| !v.active).map(|(q, _)| format!(" {q}")).collect();
-                        eprintln!("ST inact {i} {j}:{l}");
+                        trace_inactive("ST inact", i, j, &grid);
                     }
                     let (gridll, gridur) = ((grid.GridLL.x, grid.GridLL.y), (grid.GridUR.x, grid.GridUR.y));
                     // Detailed_router_set_src_dest_new
@@ -520,25 +548,15 @@ impl<'a> GcellDetailRouter<'a> {
                     grid.setSrcDest(&temp_source, &temp_dest, true)?;
                     grid.PrepareGraphVertices(gridll, gridur)?;
                     if tr() {
-                        let l: String = grid.vertices_total.iter().enumerate().filter(|(_, v)| !v.active).map(|(q, _)| format!(" {q}")).collect();
-                        eprintln!("ST srcdest {i} {j}:{l}");
-                    }
-                    if tr() {
-                        let f = |v: &[Sink]| v.iter().map(|s| format!(" [{} {} {} {} m{}]", s.LL.x, s.LL.y, s.UR.x, s.UR.y, s.metalIdx)).collect::<String>();
-                        eprintln!("SRC {i} {j}:{}\nDST {i} {j}:{}\nSETX {i} {j}: {}", f(&temp_source), f(&temp_dest), Set_x.len());
+                        trace_inactive("ST srcdest", i, j, &grid);
+                        trace_src_dest(i, j, &temp_source, &temp_dest, Set_x.len());
                     }
                     self.AddViaEnclosure(&mut grid, &Set_x_contact, &Set_net_contact, gridll, gridur, &temp_source, &temp_dest)?;
                     self.AddViaSpacing(&Pset_via, &mut grid, gridll, gridur)?;
                     let mut a_star = A_star::new(&grid, self.Nets[i].shielding);
                     let pathMark = a_star.FindFeasiblePath_sym(&mut grid, self.path_number, 0, 0, &symmetry_path)?;
                     if tr() {
-                        let vt = &grid.vertices_total;
-                        let act = vt.iter().filter(|v| v.active).count();
-                        let vu = vt.iter().filter(|v| v.via_active_up).count();
-                        let vd = vt.iter().filter(|v| v.via_active_down).count();
-                        let j_ = |v: &[i32]| v.iter().map(|x| format!(" {x}")).collect::<String>();
-                        eprintln!("CONN {i} {j} n={} act={act} vu={vu} vd={vd} ll={},{} ur={},{}", vt.len(), gridll.0, gridll.1, gridur.0, gridur.1);
-                        eprintln!("  S{}\n  D{}\n  P{}", j_(&grid.Source), j_(&grid.Dest), j_(&a_star.Path.concat()));
+                        trace_conn(i, j, &grid, gridll, gridur, &a_star.Path);
                     }
 
                     let mut physical_path: Vec<Vec<Metal>> = Vec::new();

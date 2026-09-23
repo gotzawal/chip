@@ -141,12 +141,12 @@ impl<'a> Grid<'a> {
         };
         let MI = &drc_info.Metal_info;
         // 3. 층마다 격자 간격
-        for i in 0..n {
-            if MI[i].direct == 0 {
-                g.x_unit[i] = MI[i].grid_unit_x.wrapping_mul(grid_scale);
+        for (i, m) in MI.iter().enumerate().take(n) {
+            if m.direct == 0 {
+                g.x_unit[i] = m.grid_unit_x.wrapping_mul(grid_scale);
                 g.y_min[i] = 1;
-            } else if MI[i].direct == 1 {
-                g.y_unit[i] = MI[i].grid_unit_y.wrapping_mul(grid_scale);
+            } else if m.direct == 1 {
+                g.y_unit[i] = m.grid_unit_y.wrapping_mul(grid_scale);
                 g.x_min[i] = 1;
             }
         }
