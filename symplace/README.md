@@ -12,6 +12,8 @@
   두지 않는다 — 두면 갈라진다. `web/placer/test/*` 와 `web/placer/pack-example.mjs` 가 루트 쪽을 임포트한다.
 - 검사가 읽는 예제도 사이트가 읽는 `/data/<예제>.json` 그대로다. 예제를 더 넣으면 검사가 그것을 그대로 본다.
 - 배선기의 Rust 소스는 `alignroute/`, 빌드 결과는 루트의 `/src/route/alignroute.wasm` 이다.
+- 회로도·묶음 보기는 루트의 `/src/schematic/` 이다 — SPICE 읽기, .sp 와 앞단 출력에서 회로 만들기, 자동 배열,
+  캔버스 그리기. 워커도 배치도 거치지 않고 앞단 출력(과 `/netlists/<예제>.sp`)만 읽는다.
 
 ```bash
 node symplace/web/placer/test/place.mjs      # 저장소 루트에서 돌린다
@@ -90,9 +92,14 @@ node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == 고정 �
 node symplace/web/placer/test/compose.mjs    # 격자 검사 문구 == 고정 사례 (150)
 node symplace/web/placer/test/gds.mjs        # GDS 바이트 == 고정 사례 (2)
 node symplace/scripts/route/node/newroute.mjs all   # 예제 전부를 배치하고 페이지와 같은 길로 배선해 DRC/LVS 를 찍는다
+# 회로도 · 묶음 보기 (src/schematic/)
+node symplace/web/placer/test/schematic.mjs [예제]   # 예제 전부의 .sp 와 앞단 출력을 배열 — 소자 수, 앞단 잎 <-> .sp 소자 맞춤,
+                                                   # 기호 겹침 0, 핀마다 선이 닿는가, 거울 쌍 대칭, 묶음 테두리가 소자를 담는가
 # 브라우저 — Playwright 전역 설치가 필요하다 (npm i -g playwright && npx playwright install chromium)
 node symplace/web/placer/test/gpu.mjs        # GPU runner == CPU (headless Chromium, WebGPU)
 node symplace/web/placer/test/page.mjs high_speed_comparator gpu 96 32   # 페이지 통째로 (워커 + WebGPU)
+node symplace/web/placer/test/views.mjs [예제]   # 페이지의 회로도·묶음 보기 — 예제 전부에서 두 보기와 표, hover, 앞단 출력 올리기
+                                                # (SHOT=폴더 를 주면 보기마다 PNG 를 남긴다)
 ```
 
 `fixtures/<예제>.json` 은 배치 문제의 **정답 고정값**이다 — 이 배치기의 첫 구현(파이썬/numpy)이 뽑아 둔

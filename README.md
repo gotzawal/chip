@@ -56,9 +56,11 @@ src/*.mjs         배치기 본체 (의존성 없는 ES 모듈)
 src/gpu/runner.mjs  연속 단계(Adam)를 WebGPU 컴퓨트 셰이더로 — 있으면 쓰고, 없으면 CPU
 src/route/        배선 — ALIGN 배선 알고리즘의 이식: 입력·PnRDB(align/), Rust 배선기(alignroute.wasm),
                   도형 합성, DRC/LVS, GDS
+src/schematic/    회로도·묶음 보기 — SPICE 읽기(spice.mjs), .sp 와 앞단 출력에서 회로 만들기(circuit.mjs),
+                  자동 배열(layout.mjs), 캔버스 그리기(draw.mjs)
 data/*.json       예제의 앞단 출력 (미리 만들어둬 첫 화면이 빠르다), data/index.json 이 목록
 data/*.leaves.json  예제의 리프 셀 전체 도형 — 배선할 때만 받는다
-netlists/*.sp     예제의 원본 회로 (회로 올리기에 그대로 넣어 볼 수 있다)
+netlists/*.sp     예제의 원본 회로 (회로도 보기가 읽고, 회로 올리기에 그대로 넣어 볼 수도 있다)
 py/               앞단용 Pyodide 스택 (원본 약 39 MB, .sp 를 처음 올릴 때만 받는다)
 symplace/         소스·검사·도구 — Rust 배선기(alignroute/), node 검사, 예제 묶기(pack-example.mjs)
 ```
@@ -71,8 +73,21 @@ symplace/         소스·검사·도구 — Rust 배선기(alignroute/), node �
    넘기는 자료와 계층 부기는 JS, 전역·상세·전원 배선은 Rust(wasm), 도형 합성·DRC/LVS·GDS 는
    JS. 결과는 `배선` 보기에 그려지고, 아래 내려받기 칸이 그 자리에서 채워진다.
 
-그림은 `배치` / `배선` 둘이다. 휠로 확대, 끌어서 이동, 더블클릭으로 초기화. 배선 보기에서는
-금속·비아·소자층·웰을 묶음으로 껐다 켤 수 있다.
+그림은 흐름 순서대로 넷이다 — `회로도` / `묶음` / `배치` / `배선`. 휠로 확대, 끌어서 이동, 더블클릭으로
+초기화. 배선 보기에서는 금속·비아·소자층·웰을 묶음으로 껐다 켤 수 있다.
+
+- **회로도** — 넷리스트(.sp)를 그대로 그린 것. 트랜지스터 하나하나가 기호로 놓이고, 서브서킷 계층은
+  펼치되 점선 상자로 남는다. 넷이나 소자에 마우스를 올리면 이름과 연결이 아래 줄에 뜬다.
+- **묶음** — 앞단(1_topology + 2_primitives)이 소자를 묶은 결과, 곧 **배치기가 놓는 블록**이다. 차동쌍·전류
+  거울 같은 잎 묶음은 색 상자로, GroupBlocks 나 서브서킷으로 만든 모듈은 점선 상자로 감싸고,
+  SymmetricBlocks 제약의 거울 쌍은 대칭축 양쪽에 거울로 놓는다. 스택·병렬로 합쳐진 소자는 하나로
+  보인다 (`stack 2`, `m=4`). 그림 아래 표가 블록마다 종류·소자·변이 후보(2_primitives 의 크기)·제약을 적는다.
+
+두 그림은 같은 배열기가 놓는다 (`src/schematic/layout.mjs`). 넷의 높이를 스프링으로 풀어(전원 위, 접지
+아래, 트랜지스터마다 한 단) 세로를 정하고, 직렬로 이어진 소자를 한 열에 세운 뒤 열끼리의 친화도로
+피들러 벡터를 구해 가로 순서를 정한다. 거울 쌍이 있으면 축 양쪽에 거울로 두고, 양쪽에 채널로 닿는
+열(꼬리 전류원)은 축 위에 둔다. 회로도는 앞단의 묶음을 .sp 소자에 되맞춰 같은 대칭 배열을 쓴다.
+앞단 출력만 올린 설계는 원문이 없어 회로도가 없고 묶음만 된다.
 
 배선에는 리프 셀의 전체 도형이 든다. 예제는 `data/<예제>.leaves.json` 을 그때 받고
 (6~219 KB), 올린 `.sp` 는 앞단이 같이 낸다. 파이썬은 안 뜬다 — 예제를 고르고 배치·배선하는
@@ -299,6 +314,8 @@ node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와
 node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == 고정 사례
 node symplace/web/placer/test/compose.mjs    # 배선 도형의 격자 검사 == 고정 사례
 node symplace/web/placer/test/gds.mjs        # GDS == 고정 사례 (바이트)
+node symplace/web/placer/test/schematic.mjs  # 회로도·묶음 배열 — 예제 전부에서 겹침 0, 선이 핀에 닿는가, 거울 쌍 대칭
+node symplace/web/placer/test/views.mjs      # 페이지의 회로도·묶음 보기 (headless Chromium) — 예제 전부 + 올리기
 node symplace/scripts/route/node/newroute.mjs all   # 예제 전부를 배치하고 페이지와 같은 길로 배선 (DRC/LVS 를 찍는다)
 ```
 

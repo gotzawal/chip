@@ -35,6 +35,7 @@ Pyodide 스택(CDN 16 MB + 저장소의 libz3 22 MB)이 든다. 검사는 node 2
 index.html  view.mjs  worker.mjs  routeworker.mjs  frontworker.mjs     페이지 (스크립트 1,100 줄이 index.html 안에)
 src/*.mjs  src/gpu/                                                  배치기
 src/route/  src/route/align/  src/route/alignroute.wasm              배선 (JS + wasm)
+src/schematic/                                                       회로도·묶음 보기 (SPICE 읽기, 회로, 자동 배열, 그리기)
 data/  netlists/                                                    예제 12 개 (앞단 출력·리프·회로)
 py/                                                                  앞단 Pyodide 스택 (23 MB, 거의 libz3)
 symplace/alignroute/                                                 Rust 배선기
@@ -65,6 +66,7 @@ app/
 src/
   place/                    배치기 — linalg, subspace, energy, solver, lp, legalize, design, place, job, gpu/
   route/                    배선 — 그대로 (align/, pipeline, check, compose, gds, leaves, pdk, hier, alignroute.mjs + .wasm)
+  schematic/                회로도·묶음 보기 — 그대로 (spice, circuit, layout, draw)
   front/                    (3 절) 앞단의 JS 이식이 들어올 자리
 examples/
   index.json                예제 목록: {name, label, bytes}

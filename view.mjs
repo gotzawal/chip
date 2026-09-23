@@ -107,7 +107,7 @@ export function drawPanel(ctx, panel, data, opt) {
 }
 
 /** 아직 그릴 것이 없는 패널 — 빈 상자 대신 무엇을 눌러야 하는지 적는다. */
-function drawEmpty(ctx, panel, pal, lines) {
+export function drawEmpty(ctx, panel, pal, lines) {
   const ls = Array.isArray(lines) ? lines : [lines];
   ctx.save();
   ctx.textAlign = "center";
