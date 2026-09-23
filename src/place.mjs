@@ -21,8 +21,8 @@
  */
 import { readDesign, variantGroups, flipPlan, moduleOrder,
          orderDirections } from "./design.mjs";
-import { multiStartVariants, refineFlips, exactArea, hpwl } from "./solver.mjs";
-import { legalize, exactOverlap } from "./legalize.mjs";
+import { multiStartVariants, refineFlips, exactArea, hpwl, scoreOf } from "./solver.mjs";
+import { legalize, exactOverlap, refineDirections } from "./legalize.mjs";
 
 /** 앞단 JSON 셋에서 배치까지 한 번에.
  *
@@ -30,29 +30,15 @@ import { legalize, exactOverlap } from "./legalize.mjs";
  *  반환 : { ok, names, concrete, cx, cy, w, h, sx, sy, box, area, hpwl,
  *           overlap, assignment, region, tried, legalizeFail, design, groups }
  */
-export function placeDesign(input, {
+export async function placeDesign(input, {
   batch = 96, iters = 600, seed = 0, M = 48,
   slack = 1.25, aspects = null, maxConfigs = null,
-  // null 이면 설계 자신에서 뽑는다 (multiStartVariants 의 설명 참고).
-  // ALIGN 과 견주려고 그쪽 값을 넣어도 되지만, 그건 벤치마크용이지
-  // 배치에 필요한 정보가 아니다.
-  refArea = null, refHpwl = null,
-  // 면적 대 배선의 무게. 점수는 `면적/refArea + hpwlWeight x HPWL/refHpwl`.
-  //
-  // **1 이 아니라 2 가 기본이다.** refHpwl = sqrt(refArea) x 넷수 로 두면 배선
-  // 항이 0.5 언저리에서 놀아, 무게 1 에서는 면적이 배선을 2:1 로 눌렀다.
-  // 그래서 면적을 조금 얻고 배선을 크게 내주는 변이를 계속 골랐다. 실측:
-  //
-  //     예제                        무게 1          무게 2
-  //     five_transistor_ota         0.862 / 1.404   1.077 / 0.803
-  //     cascode_current_mirror_ota  0.988 / 1.348   0.988 / 1.156
-  //     current_mirror_ota          1.000 / 1.000   1.000 / 1.000
-  //     telescopic_ota              씨앗 4 개에서 둘 다 3/4 는 1.000 / 0.987
-  //
-  // telescopic 은 무게가 아니라 **씨앗 운**이다 (양쪽 다 네 번 중 한 번은
-  // 나쁜 해에 빠진다). 나머지 둘에서는 무게 2 가 분명히 낫다.
-  // 면적만 보고 싶으면 1 로 내리면 된다.
-  hpwlWeight = 2,
+  // 면적 대 배선의 무게. 점수는 `log(면적) + hpwlWeight x log(HPWL)` (solver.mjs
+  // scoreOf) — ALIGN 배치기의 비용과 같은 꼴이고, 1 이 ALIGN 의 LAMBDA 다.
+  // HPWL 은 핀 경계 사각형으로 잰다 (ALIGN 의 HPWL_extend). 예전의
+  // `면적/refArea + w x HPWL/refHpwl` 에서는 refHpwl 이 저울을 흔들어 2 로
+  // 보정해 두었는데, 그 보정이 필요 없어졌다.
+  hpwlWeight = 1,
   // 연속 단계의 저울. calibrate 가 lam 을 "밀도 기울기 = lamRatio x 배선
   // 기울기" 로 잡는다. hpwlWeight 가 **다 나온 해 중에서 고르는** 저울이라면
   // 이건 **어떤 해가 나오는지**를 바꾸는 저울이다.
@@ -64,19 +50,24 @@ export function placeDesign(input, {
   flips = true, maxTries = 0, onProgress = null,
   // legalize 가 실패하면 이 여유들로 다시 풀어본다 (아래 설명).
   retrySlack = [3, 6],
+  // legalize 뒤 점수 상위 이만큼에 대해 분리 방향을 뒤집어 본다 (refineDirections).
+  refineTop = 4, refineFlips: refineFlipsMax = 6,
   // 설정(변이 배정 x 영역) 하나가 끝날 때마다 불린다. 화면에 중간 과정을
   // 보여주려고 뚫어뒀다 — 좌표가 들어 있어 그대로 그릴 수 있다.
   onConfig = null,
+  // WebGPU runner (src/gpu/runner.mjs) 와 설정당 시작점 수. 없으면 CPU, 총 batch 개.
+  runner = null, perConfig = null,
 } = {}) {
+  const t0 = performance.now();
   const design = input.design ?? readDesign(input);
   if (design.missing?.length)
     return { ok: false, reason: `템플릿을 못 찾은 인스턴스: ${design.missing.join(", ")}`,
              design };
   const groups = variantGroups(design);
-  const res = multiStartVariants(design, groups, {
-    batch, iters, seed, M, slack, aspects, maxConfigs, refArea, refHpwl,
+  const res = await multiStartVariants(design, groups, {
+    batch, iters, seed, M, slack, aspects, maxConfigs,
     // 후보를 고르는 저울과 legalize 뒤 저울을 같게 둔다.
-    hpwlWeight, lamRatio,
+    hpwlWeight, lamRatio, runner, perConfig,
     onProgress, onConfig,
   });
 
@@ -88,20 +79,8 @@ export function placeDesign(input, {
   // --- 상위 후보를 legalize 하고, **그중에서** 고른다 ---
   //
   // 연속단계 점수는 겹침을 3 배 벌점으로 근사할 뿐이고, 실제 면적은 겹침을
-  // 털어내고 나서야 정해진다. 그래서 여기서 다시 잰다.
-  //
-  // 정규화는 multiStartVariants 가 배정 전체에 걸쳐 하나로 정한 값을 그대로
-  // 쓴다. **후보 집합의 최소값으로 정규화하면 안 된다** — 그러면 "이 변이는
-  // 실리콘을 두 배 쓴다"가 다시 흐려진다. 실제로 해봤다:
-  //
-  //     예제                   상수 기준        최소값 정규화
-  //     five_transistor_ota    0.862 / 1.404    1.077 / 0.803
-  //     high_speed_comparator  1.140 / 1.459    1.520 / 2.119   <- 크게 진다
-  //
-  // hsc 가 아픈 이유는 계층이다. 하위 모듈의 변이는 면적이 2 배까지 차이나는데
-  // (NMOS_4T_85599263 의 X1_Y16 12.79M vs X8_Y2 6.21M), 최소값 정규화는 그
-  // 차이를 후보 집합 안에서만 재서 놓치고, 나쁜 하위 모듈이 위층 입력이 된다.
-  const rA = res.refArea, rW = res.refHpwl;
+  // 털어내고 나서야 정해진다. 그래서 여기서 다시 잰다 — 같은 scoreOf 로.
+  // 점수가 절대량(로그)이라 후보 집합에 따라 저울이 흔들릴 자리가 없다.
   // 연속 단계가 얼마나 "무르게" 풀었는지. lamRatio 를 낮추면 넷이 더 세게
   // 당겨 겹침이 많이 남고, 높이면 퍼뜨려 겹침이 적게 남는다. legalize 가
   // 어차피 0 으로 만들지만, 남은 양이 많을수록 legalize 가 배치를 더 많이
@@ -142,6 +121,7 @@ export function placeDesign(input, {
   for (const c of res.candidates) push(c);
 
   let tried = 0, fail = 0, rescued = 0, best = null;
+  const tSearch = (performance.now() - t0) / 1000;
   // 왜 실패했는지 세어둔다. "legalize 12/96 성공" 만으로는 고칠 데를 못 찾는다 —
   // 방향 조합이 안 맞는 것(INFEASIBLE)과 격자 정수를 못 맞춘 것(GRID_*)은
   // 처방이 다르다.
@@ -150,17 +130,33 @@ export function placeDesign(input, {
   // **여러 모양**을 내보내기 위해서다 — 하위 모듈은 면적이 같아도 모양이 다르면
   // 위층에서 전혀 다른 레이아웃이 된다. ALIGN 도 하위 모듈을 여러 개 만들어
   // 둔다 (PRIMITIVE_..._PG0_0 ~ _PG0_3).
-  const byShape = new Map();
+  /** legalize 결과 하나의 점수 — 반전까지 정한 뒤에 잰다. 반전은 좌표를 안 건드리고
+   *  배선길이만 바꾸니 여기서 정해도 늦지 않고, 정하지 않고 재면 내보낼 것과 다른
+   *  값으로 고르게 된다. */
+  const measure = (c, r) => {
+    const fr = flips ? refineFlips(c.problem, plan, r.cx, r.cy) : null;
+    const sx = fr ? fr.sx : c.problem.sx, sy = fr ? fr.sy : c.problem.sy;
+    const ea = exactArea(r.cx, r.cy, c.problem.w, c.problem.h);
+    const hp = hpwl(r.cx, r.cy, c.problem.pinInst, c.problem.pinOff,
+                    c.problem.pinNet, c.problem.nNet, sx, sy, c.problem.pinExt);
+    return { sc: scoreOf(ea.area, hp, hpwlWeight), r, fr, sx, sy, ea, hp };
+  };
+  /** 종횡비를 로그 눈금으로 묶는다 (1.25 배 간격). 모양이 비슷하면 한 칸. */
+  const shapeKey = (ea) => {
+    const ar = (ea.box[2] - ea.box[0]) / Math.max(1e-9, ea.box[3] - ea.box[1]);
+    return Math.round(Math.log(ar) / Math.log(1.25));
+  };
+
+  // --- 1) 격자 없이 legalize — 후보를 줄 세우는 단계 ---
+  //
+  // 격자(정수 분기)는 LP 를 수십 번 다시 푼다. 후보 144 개에 다 걸면 hsc 에서
+  // 마지막 단계가 1 분이 된다. 순위는 격자 없는 LP 로 거의 정해지므로 (격자는
+  // 좌표를 pitch 배수로 몇십 nm 옮길 뿐이다) 먼저 격자 없이 전부 풀어 줄을 세우고,
+  // 격자는 내보낼 것들(최선 + 모양별 최선)에만 건다.
+  const pool = [];
   for (const c of ordered) {
     if (tried >= limit) break;
     tried++;
-    // 앵커: oX = cx - sX*(tx0+tx1)/2 가 pitch 의 배수여야 한다. 우리 템플릿은
-    // bbox 가 [0,0,w,h] 라 (tx0+tx1)/2 = w/2 다. 반전 부호는 무시해도 되는데,
-    // 예제 PDK 의 59 개 템플릿 전부 w/2 와 h/2 가 pitch 의 배수라 sX 를 곱해도
-    // 격자 조건이 같기 때문이다 (아래 gridOff 로 결과를 검증한다).
-    const anchors = grid
-      ? [Array.from(c.problem.w, (v) => v / 2), Array.from(c.problem.h, (v) => v / 2)]
-      : null;
     // legalize 가 INFEASIBLE 이면 **여유 영역을 넓혀 다시 푼다.**
     //
     // 영역 제약은 X_i in [rx0+w/2, rx1-w/2] 라 slack 을 키우면 실행가능
@@ -171,34 +167,77 @@ export function placeDesign(input, {
     // cascode 28/34 — 전부 INFEASIBLE). 실패한 후보는 그냥 버려지므로
     // "변이를 고른다"가 사실상 살아남은 스무 개 안에서만 일어났다.
     const args = { z0: c.z0, N: c.N, n: c.problem.n, w: c.problem.w,
-                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region,
-                   forced, grid, anchors };
+                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region, forced };
     let r = legalize(args);
+    let usedSlack = null;
     for (const sl of retrySlack) {
       if (r.status === "OPTIMAL" || r.status === "NODIRECTION") break;
       r = legalize({ ...args, slack: sl });
-      if (r.status === "OPTIMAL") rescued++;
+      if (r.status === "OPTIMAL") { rescued++; usedSlack = sl; }
     }
     if (r.status !== "OPTIMAL") {
       fail++;
       failBy.set(r.status, (failBy.get(r.status) ?? 0) + 1);
       continue;
     }
-    // 반전까지 정한 뒤에 잰다. 반전은 좌표를 안 건드리고 배선길이만 바꾸니
-    // 여기서 정해도 늦지 않고, 정하지 않고 재면 내보낼 것과 다른 값으로 고르게 된다.
-    const fr = flips ? refineFlips(c.problem, plan, r.cx, r.cy) : null;
-    const sx = fr ? fr.sx : c.problem.sx, sy = fr ? fr.sy : c.problem.sy;
-    const ea = exactArea(r.cx, r.cy, c.problem.w, c.problem.h);
-    const hp = hpwl(r.cx, r.cy, c.problem.pinInst, c.problem.pinOff,
-                    c.problem.pinNet, c.problem.nNet, sx, sy);
-    const sc = ea.area / rA + hpwlWeight * (hp / rW);
-    const cand = { sc, c, r, fr, sx, sy, ea, hp };
-    if (!best || sc < best.sc) best = cand;
-    // 종횡비를 로그 눈금으로 묶는다 (1.25 배 간격). 모양이 비슷하면 한 칸.
-    const ar = (ea.box[2] - ea.box[0]) / Math.max(1e-9, ea.box[3] - ea.box[1]);
-    const key = Math.round(Math.log(ar) / Math.log(1.25));
-    if (!byShape.has(key) || sc < byShape.get(key).sc) byShape.set(key, cand);
+    pool.push({ ...measure(c, r), c, args: usedSlack ? { ...args, slack: usedSlack } : args });
+    if (onProgress) onProgress(tried, limit, null, "legalize");
   }
+  pool.sort((a, b) => a.sc - b.sc);
+
+  // --- 2) 점수 상위 몇 개는 분리 방향을 뒤집어 본다 ---
+  //
+  // 연속해가 나란히 놓은 쌍을 LP 는 못 뒤집는다. 침범량이 비슷했던 쌍부터
+  // 방향을 바꿔 다시 풀고 점수가 좋아지면 받는다 (legalize.mjs refineDirections).
+  let refined = 0;
+  if (refineTop > 0 && pool.length) {
+    const seenKey = new Set();
+    const top = [];
+    for (const k of pool) {                       // 최선 + 모양별 최선, 점수 순
+      const key = shapeKey(k.ea);
+      if (top.length && seenKey.has(key)) continue;
+      seenKey.add(key); top.push(k);
+      if (top.length >= refineTop) break;
+    }
+    for (const k of top) {
+      const rr = refineDirections(k.args, k.r.dirs,
+        (r) => measure(k.c, r).sc, { maxFlips: refineFlipsMax });
+      if (!rr || !rr.flips) continue;
+      refined += rr.flips;
+      pool.push({ ...measure(k.c, rr.r), c: k.c, args: k.args });
+    }
+    pool.sort((a, b) => a.sc - b.sc);
+  }
+
+  // --- 3) 격자 — 내보낼 것들에만 ---
+  //
+  // 앵커: oX = cx - sX*(tx0+tx1)/2 가 pitch 의 배수여야 한다. 우리 템플릿은
+  // bbox 가 [0,0,w,h] 라 (tx0+tx1)/2 = w/2 다. 반전 부호는 무시해도 되는데,
+  // 예제 PDK 의 59 개 템플릿 전부 w/2 와 h/2 가 pitch 의 배수라 sX 를 곱해도
+  // 격자 조건이 같기 때문이다 (아래 gridOff 로 결과를 검증한다).
+  // 모양 칸마다 점수 순으로 첫 성공을 남긴다. 실패하면 그 칸의 다음 후보로.
+  const byShape = new Map();
+  let gridTried = 0;
+  const maxGrid = 24;
+  for (const k of pool) {
+    const key = shapeKey(k.ea);
+    if (byShape.has(key)) continue;
+    let cand = k;
+    if (grid) {
+      if (gridTried >= maxGrid) break;
+      gridTried++;
+      const anchors = [Array.from(k.c.problem.w, (v) => v / 2), Array.from(k.c.problem.h, (v) => v / 2)];
+      const r = legalize({ ...k.args, grid, anchors, dirs: k.r.dirs });
+      if (r.status !== "OPTIMAL") {
+        failBy.set(r.status, (failBy.get(r.status) ?? 0) + 1);
+        continue;
+      }
+      cand = { ...measure(k.c, r), c: k.c, args: k.args };
+    }
+    byShape.set(key, cand);
+    if (!best || cand.sc < best.sc) best = cand;
+  }
+  const tLegal = (performance.now() - t0) / 1000 - tSearch;
 
   if (!best)
     return { ok: false,
@@ -240,11 +279,12 @@ export function placeDesign(input, {
     grid, gridOff: grid ? gridOffgrid(P, lg.cx, lg.cy, sx, sy, grid) : null,
     assignment: picked.assignment, region: picked.region,
     tried, legalizeFail: fail, legalizeFailBy: Object.fromEntries(failBy),
-    legalizeRescued: rescued,
+    legalizeRescued: rescued, dirFlips: refined, gridTried,
+    secs: { search: tSearch, legalize: tLegal },
     legalScore: best.sc,
     alternatives: alts,
     configs: res.configs, assignments: res.assignments,
-    starts: res.starts, rounds: res.rounds, medOverlap,
+    starts: res.starts, rounds: res.rounds, medOverlap, runner: res.runner,
     totalAssignments: res.totalAssignments,
     design, groups, problem: P, candidates: res.candidates,
   };
@@ -345,6 +385,9 @@ export function synthesizeTemplate(design, result, grid = null) {
     W = Math.ceil(W / (2 * qx)) * 2 * qx;
     H = Math.ceil(H / (2 * qy)) * 2 * qy;
   }
+  // 포트의 사각형은 그 포트에 붙은 자식 핀 사각형들의 **합집합**이다. ALIGN 의
+  // 하위 모듈 핀 경계와 같은 뜻이고, 상위의 HPWL_extend 가 그 폭을 그대로 본다.
+  // (예전에는 무게중심 한 점이었다 — 핀 반폭을 재기 시작하면서 바꿨다.)
   const acc = new Map();
   design.instances.forEach((inst, di) => {
     const pi = result.problem.keep.indexOf(di);
@@ -356,18 +399,21 @@ export function synthesizeTemplate(design, result, grid = null) {
       if (net == null) continue;
       const px = result.cx[pi] + result.sx[pi] * off[0] - x0;   // 원점을 bbox 왼아래로
       const py = result.cy[pi] + result.sy[pi] * off[1] - y0;
-      if (!acc.has(net)) acc.set(net, []);
-      acc.get(net).push([px, py]);
+      const ex = off[2] ?? 0, ey = off[3] ?? 0;
+      const r = acc.get(net);
+      if (!r) acc.set(net, [px - ex, py - ey, px + ex, py + ey]);
+      else {
+        r[0] = Math.min(r[0], px - ex); r[1] = Math.min(r[1], py - ey);
+        r[2] = Math.max(r[2], px + ex); r[3] = Math.max(r[3], py + ey);
+      }
     }
   });
 
   const terminals = [];
   for (const port of design.ports) {
-    const pts = acc.get(port);
-    if (!pts || !pts.length) continue;
-    const mx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
-    const my = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-    terminals.push({ netName: port, netType: "pin", layer: "M1", rect: [mx, my, mx, my] });
+    const r = acc.get(port);
+    if (!r) continue;
+    terminals.push({ netName: port, netType: "pin", layer: "M1", rect: r.slice() });
   }
   return { bbox: [0, 0, W, H], terminals, subinsts: {}, globalRoutes: [], globalRouteGrid: [] };
 }
@@ -409,7 +455,7 @@ export function synthesizeTemplate(design, result, grid = null) {
  */
 export const SUB_VARIANTS = 3;
 
-export function placeHierarchy({ topology, primitives, templates }, opts = {}) {
+export async function placeHierarchy({ topology, primitives, templates }, opts = {}) {
   // subBatch: 하위 모듈에만 주는 시작점 예산. 하위 모듈은 블록이 두세 개라
   // 설정 수가 적고 한 번이 싸다 — 같은 예산을 줘도 최상위보다 훨씬 깊이 판다.
   // 그리고 하위의 모양이 곧 상위의 입력이라 여기 쓰는 돈이 제일 남는다.
@@ -432,7 +478,7 @@ export function placeHierarchy({ topology, primitives, templates }, opts = {}) {
     if (rest.onConfig)
       opt.onConfig = (i, total, best, phase) =>
         rest.onConfig(name, isTop, i, total, best, phase);
-    const r = placeDesign({ design }, opt);
+    const r = await placeDesign({ design }, opt);
     if (!r.ok) return { ok: false, module: name, reason: r.reason, detail: r };
     results.set(name, r);
     if (isTop) break;                                     // top 은 굳힐 필요가 없다

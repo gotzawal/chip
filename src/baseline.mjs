@@ -7,7 +7,9 @@
  */
 import { topIndex, moduleOrder } from "./design.mjs";
 
-/** ALIGN 의 place 결과에서 블록 사각형과 기준선을 뽑는다. */
+/** ALIGN 의 place 결과에서 블록 사각형과 기준선을 뽑는다.
+ *  HPWL 은 배치기와 같은 자 — 넷마다 핀 경계 사각형의 bbox 반둘레 — 로 잰다.
+ */
 export function baseline(place, topName) {
   const leafBox = new Map(), leafTerm = new Map();
   for (const l of place.leaves ?? []) {
@@ -27,17 +29,24 @@ export function baseline(place, topName) {
     const bb = boxOf(cn);
     if (!bb) return out;
     const cx0 = (bb[0] + bb[2]) / 2, cy0 = (bb[1] + bb[3]) / 2;
+    // 핀은 [중심 오프셋 x, y, 반폭 x, y] — 배치기(design.mjs templateInfo)와 같은 꼴.
+    // HPWL 은 핀 경계 사각형으로 잰다 (ALIGN 의 HPWL_extend). 배치기의 값과
+    // 같은 자로 재야 "ALIGN 대비" 가 비교가 된다.
     const terms = leafTerm.get(cn);
     if (terms?.length) {
       for (const t of terms) {
         const r = t.rect;
-        out.set(t.name, [(r[0] + r[2]) / 2 - cx0, (r[1] + r[3]) / 2 - cy0]);
+        const cur = out.get(t.name);
+        const rr = cur ? [cur[0] - cur[2] + cx0, cur[1] - cur[3] + cy0, cur[0] + cur[2] + cx0, cur[1] + cur[3] + cy0]
+                       : [r[0], r[1], r[2], r[3]];
+        const u = [Math.min(rr[0], r[0]), Math.min(rr[1], r[1]), Math.max(rr[2], r[2]), Math.max(rr[3], r[3])];
+        out.set(t.name, [(u[0] + u[2]) / 2 - cx0, (u[1] + u[3]) / 2 - cy0, (u[2] - u[0]) / 2, (u[3] - u[1]) / 2]);
       }
       return out;
     }
     const m = byConcrete.get(cn);
     if (!m) return out;
-    const acc = new Map();
+    const acc = new Map();          // 포트 -> 자식 핀 사각형들의 합집합
     for (const inst of m.instances ?? []) {
       const child = pinsOf(inst.concrete_template_name);
       const tb = boxOf(inst.concrete_template_name);
@@ -49,15 +58,19 @@ export function baseline(place, topName) {
       for (const [formal, off] of child) {
         const net = fa.get(formal);
         if (net == null) continue;
-        if (!acc.has(net)) acc.set(net, []);
-        acc.get(net).push([ccx + tr.sX * off[0], ccy + tr.sY * off[1]]);
+        const px = ccx + tr.sX * off[0], py = ccy + tr.sY * off[1];
+        const r = acc.get(net);
+        if (!r) acc.set(net, [px - off[2], py - off[3], px + off[2], py + off[3]]);
+        else {
+          r[0] = Math.min(r[0], px - off[2]); r[1] = Math.min(r[1], py - off[3]);
+          r[2] = Math.max(r[2], px + off[2]); r[3] = Math.max(r[3], py + off[3]);
+        }
       }
     }
     for (const port of m.parameters ?? []) {
-      const pts = acc.get(port);
-      if (!pts?.length) continue;
-      out.set(port, [pts.reduce((s, p) => s + p[0], 0) / pts.length - cx0,
-                     pts.reduce((s, p) => s + p[1], 0) / pts.length - cy0]);
+      const r = acc.get(port);
+      if (!r) continue;
+      out.set(port, [(r[0] + r[2]) / 2 - cx0, (r[1] + r[3]) / 2 - cy0, (r[2] - r[0]) / 2, (r[3] - r[1]) / 2]);
     }
     return out;
   };
@@ -85,14 +98,15 @@ export function baseline(place, topName) {
       const net = fa.get(formal);
       if (net == null || skip.has(String(net).toUpperCase())) continue;
       if (!nets.has(net)) nets.set(net, []);
-      nets.get(net).push([ccx + tr.sX * off[0], ccy + tr.sY * off[1]]);
+      const px = ccx + tr.sX * off[0], py = ccy + tr.sY * off[1];
+      nets.get(net).push([px - off[2], py - off[3], px + off[2], py + off[3]]);
     }
   }
   let hpwl = 0;
-  for (const pts of nets.values()) {
-    if (pts.length < 2) continue;
-    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-    hpwl += Math.max(...xs) - Math.min(...xs) + Math.max(...ys) - Math.min(...ys);
+  for (const rs of nets.values()) {
+    if (rs.length < 2) continue;
+    hpwl += Math.max(...rs.map((r) => r[2])) - Math.min(...rs.map((r) => r[0]))
+          + Math.max(...rs.map((r) => r[3])) - Math.min(...rs.map((r) => r[1]));
   }
   const b = top.bbox;
   return { rects, bbox: b, hpwl,

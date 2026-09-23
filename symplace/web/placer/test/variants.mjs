@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { loadDesign, alignBaseline } from "./_load.mjs";
 import { variantGroups, countAssignments, flipPlan, topIndex,
          moduleOrder } from "../../../../src/design.mjs";
-import { multiStartVariants, refineFlips, exactArea, hpwl } from "../../../../src/solver.mjs";
+import { multiStartVariants, refineFlips, exactArea, hpwl, scoreOf } from "../../../../src/solver.mjs";
 import { legalize, exactOverlap } from "../../../../src/legalize.mjs";
 import { symmetryResidual } from "../../../../src/place.mjs";
 
@@ -49,7 +49,7 @@ for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
   })() : null;
 
   const t0 = Date.now();
-  const res = multiStartVariants(design, groups, { batch: BATCH, iters: ITERS, seed: 1 });
+  const res = await multiStartVariants(design, groups, { batch: BATCH, iters: ITERS, seed: 1 });
   console.log(`  변이조합 ${nAssign}, 설정(배정x영역) ${res.configs}, ` +
               `후보 ${res.candidates.length}개, ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
@@ -64,13 +64,17 @@ for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
     if (r.status !== "OPTIMAL") continue;
     const fr = refineFlips(c.problem, plan, r.cx, r.cy);
     const ea = exactArea(r.cx, r.cy, c.problem.w, c.problem.h);
+    // 핀 경계로 잰 HPWL (ALIGN 의 HPWL_extend) 과 핀 중심으로 잰 것을 둘 다 남긴다.
+    // 점수는 배치기와 같은 scoreOf (경계 HPWL).
     const hp = hpwl(r.cx, r.cy, c.problem.pinInst, c.problem.pinOff,
-                    c.problem.pinNet, c.problem.nNet, fr.sx, fr.sy);
+                    c.problem.pinNet, c.problem.nNet, fr.sx, fr.sy, c.problem.pinExt);
+    const hpC = hpwl(r.cx, r.cy, c.problem.pinInst, c.problem.pinOff,
+                     c.problem.pinNet, c.problem.nNet, fr.sx, fr.sy);
     let tot = 0;
     for (let i = 0; i < c.problem.n; i++) tot += c.problem.w[i] * c.problem.h[i];
-    const sc = ea.area / tot + hp / (Math.sqrt(tot) * Math.max(1, c.problem.nNet));
+    const sc = scoreOf(ea.area, hp);
     if (!best.has(k) || sc < best.get(k).sc)
-      best.set(k, { sc, c, r, fr, ea, hp, tot,
+      best.set(k, { sc, c, r, fr, ea, hp, hpC, tot,
                     ov: exactOverlap(r.cx, r.cy, c.problem.w, c.problem.h) });
   }
   ok(best.size > 0, "legalize 된 배정이 하나도 없다");
@@ -78,7 +82,7 @@ for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
 
   const ranked = [...best.entries()].sort((a, b) => a[1].sc - b[1].sc);
   const rA = base?.area ?? 1, rW = base?.hpwl ?? 1;
-  console.log(`  배정별 최고 (legalize 후) — 면적비 / HPWL비 / 점수` +
+  console.log(`  배정별 최고 (legalize 후) — 면적비 / HPWL비(핀 중심) / HPWL 경계 / 점수` +
               `   [legalize 성공 ${best.size}/${nAssign} 배정]`);
   // 60 줄을 다 찍으면 읽을 수 없다. 위아래와 ALIGN 의 것만 남긴다.
   const alignKey = alignAssign?.join(",");
@@ -91,7 +95,7 @@ for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
     const mark = alignAssign && k === alignAssign.join(",") ? "  <- ALIGN 의 선택" : "";
     console.log(`    [${k.padEnd(11)}] ` +
                 `${v.c.concrete.map((n) => n.split("_").pop()).join(" ").padEnd(18)} ` +
-                `${(v.ea.area / rA).toFixed(3)}  ${(v.hp / rW).toFixed(3)}  ` +
+                `${(v.ea.area / rA).toFixed(3)}  ${(v.hpC / rW).toFixed(3)}  ${v.hp.toFixed(0).padStart(6)}  ` +
                 `${v.sc.toFixed(4)}${mark}  (${ranked.findIndex(([q]) => q === k) + 1}위)`);
   }
   if (skipped) console.log(`      ... ${skipped} 개 생략 ...`);

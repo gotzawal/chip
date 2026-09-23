@@ -73,9 +73,13 @@ export function templateInfo(tjson) {
       cur[2] = Math.max(cur[2], r[2]); cur[3] = Math.max(cur[3], r[3]);
     }
   }
+  // 넷마다 [중심 오프셋 x, y, 반폭 x, y]. 반폭은 ALIGN 의 HPWL_extend 가 재는
+  // 핀 경계 사각형이다 — 폭 5,000 짜리 핀 막대를 점으로 보면 길쭉한 변이가
+  // 공짜로 보인다 (energy.mjs wirelength 의 설명).
   const pins = new Map();
   for (const [net, r] of acc)
-    pins.set(net, [(r[0] + r[2]) / 2 - cx, (r[1] + r[3]) / 2 - cy]);
+    pins.set(net, [(r[0] + r[2]) / 2 - cx, (r[1] + r[3]) / 2 - cy,
+                   (r[2] - r[0]) / 2, (r[3] - r[1]) / 2]);
   return { w: x1 - x0, h: y1 - y0, pins, bbox: [x0, y0, x1, y1] };
 }
 
@@ -268,10 +272,11 @@ export function buildProblem(design, groups, assignment, { flips = null } = {}) 
   let nNet = 0;
   cnt.forEach((c, e) => { if (c >= 2) remap[e] = nNet++; });
 
-  const pi = [], po = [], pn = [];
+  const pi = [], po = [], pe = [], pn = [];
   pinNetRaw.forEach((e, p) => {
     if (remap[e] < 0) return;
     pi.push(pinInst[p]); po.push(pinOffPairs[p][0], pinOffPairs[p][1]); pn.push(remap[e]);
+    pe.push(pinOffPairs[p][2] ?? 0, pinOffPairs[p][3] ?? 0);
   });
 
   return {
@@ -280,6 +285,7 @@ export function buildProblem(design, groups, assignment, { flips = null } = {}) 
     w: Float64Array.from(w), h: Float64Array.from(h),
     sx: Float64Array.from(sx), sy: Float64Array.from(sy),
     pinInst: Int32Array.from(pi), pinOff: Float64Array.from(po),
+    pinExt: Float64Array.from(pe),
     pinNet: Int32Array.from(pn), nNet,
     netNames: netNames.filter((_, e) => remap[e] >= 0),
     constraints: design.constraints,
@@ -472,6 +478,7 @@ export function makeObjective(problem, region, { M = 48 } = {}) {
   const obj = new Objective({
     z0, N, nInst: problem.n, w: problem.w, h: problem.h,
     pinInst: problem.pinInst, pinOff: problem.pinOff, pinNet: problem.pinNet,
+    pinExt: problem.pinExt ?? null,
     nNet: problem.nNet, region, M, sx: problem.sx, sy: problem.sy,
   });
   return { obj, z0, N, A, b, rank, skipped };

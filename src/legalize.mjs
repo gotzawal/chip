@@ -92,9 +92,46 @@ export function chooseDirections(cx, cy, w, h, z0 = null, N = null, forced = nul
       let k = -1;
       for (let q = 0; q < 4; q++) if (feasible[q] && (k < 0 || v[q] < v[k])) k = q;
       if (k < 0) { dirs.push({ i, j, dir: -1 }); continue; }   // 어느 방향도 불가
-      dirs.push({ i, j, dir: k });
+      // 두 번째로 적게 미는 방향도 남긴다 — refineDirections 가 뒤집어 볼 후보다.
+      // gap 은 "그쪽으로 가면 얼마나 더 밀어야 하나" 를 그 방향의 필요 거리로 나눈 것.
+      let alt = -1;
+      for (let q = 0; q < 4; q++) if (q !== k && feasible[q] && (alt < 0 || v[q] < v[alt])) alt = q;
+      dirs.push({ i, j, dir: k, alt, gap: alt < 0 ? Infinity : (v[alt] - v[k]) / need[alt] });
     }
   return dirs;
+}
+
+/** 분리 방향을 몇 개 뒤집어 보며 더 나은 legalize 를 찾는다.
+ *
+ *  legalize 는 연속해에서 읽은 방향을 **박고** LP 를 푼다. 연속해가 두 블록을
+ *  나란히 놓았으면 LP 는 그 둘을 위아래로 못 옮긴다 — 그래서 후보의 면적이
+ *  "그 배정의 면적" 이 아니라 "그 표본이 우연히 도달한 면적" 이 된다
+ *  (symplace/PLAN-place-variants-gpu.md 2.3 절). ALIGN 은 위상(수열쌍)마다
+ *  ILP 로 압축해 이 문제가 없다. 여기서는 그 값싼 대체로, 침범량이 비슷했던
+ *  쌍(gap 이 작은 순)의 방향을 하나씩 뒤집어 LP 를 다시 풀고, evaluate 가 준
+ *  점수가 좋아지면 받는다. 상위 후보 몇 개에만 쓴다 — LP 가 후보당 수십 ms 다.
+ *
+ *  args 는 legalize 의 인자 (dirs 는 여기서 넣는다). evaluate(r) 은 OPTIMAL 인
+ *  결과의 점수 (낮을수록 좋다). 반환 { r, score, dirs, flips } — flips 는 받은 뒤집기 수.
+ */
+export function refineDirections(args, dirs, evaluate, { maxFlips = 6 } = {}) {
+  let cur = legalize({ ...args, dirs });
+  if (cur.status !== "OPTIMAL") return null;
+  let curScore = evaluate(cur);
+  let flips = 0;
+  const order = dirs.map((d, idx) => ({ idx, gap: d.gap ?? Infinity }))
+    .filter((c) => dirs[c.idx].alt >= 0 && !dirs[c.idx].forced && Number.isFinite(c.gap))
+    .sort((a, b) => a.gap - b.gap).slice(0, maxFlips);
+  for (const c of order) {
+    const trial = dirs.map((d) => ({ ...d }));
+    const d = trial[c.idx];
+    [d.dir, d.alt] = [d.alt, d.dir];
+    const r = legalize({ ...args, dirs: trial });
+    if (r.status !== "OPTIMAL") continue;
+    const s = evaluate(r);
+    if (s < curScore - 1e-9) { cur = r; curScore = s; dirs = trial; flips++; }
+  }
+  return { r: cur, score: curScore, dirs, flips };
 }
 
 /**
@@ -304,5 +341,5 @@ export function legalize({ z0, N, n, w, h, cxRef, cyRef, region,
     }
     cx[i] = sx; cy[i] = sy;
   }
-  return { status: "OPTIMAL", theta, cx, cy };
+  return { status: "OPTIMAL", theta, cx, cy, dirs: D };
 }
