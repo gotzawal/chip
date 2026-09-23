@@ -3,7 +3,7 @@
  *
  *  route.mjs (ALIGN 배선), checkref.mjs (파이썬 검사기 기준값) 가 같이 쓴다.
  *  페이지와 다른 점: CDN 대신 setup.sh 가 받아둔 npm 꾸러미와 휠, 그리고 pnr: true 면
- *  페이지가 이제 안 싣는 PnR 휠(symplace/scripts/wasm/pnr/)을 싣는다.
+ *  PnR 휠(py/pnr/ — 페이지의 "ALIGN 원본" 배선과 같은 파일)을 싣는다.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -18,14 +18,12 @@ export const WORK_CACHE = process.env.SYMPLACE_CACHE ?? path.join(process.env.HO
 // node 의 Buffer 는 공용 ArrayBuffer 의 일부일 수 있다. Pyodide 에는 제 것으로 넘긴다.
 const rd = (f) => new Uint8Array(fs.readFileSync(f));
 
-/** 파이썬 원문. FRONT 는 frontworker.mjs 에서 그대로 읽고 (페이지와 같은 앞단),
- *  PYROUTE 는 ALIGN 배선 경로 pyroute.py (예전에 페이지에 있던 것 — 이제 하네스에만 있다). */
+/** 파이썬 원문 — 페이지 워커들과 같은 파일 (py/). FRONT = py/front.py (앞단),
+ *  PYROUTE = py/pyroute.py (ALIGN 원본 배선), TAP = py/aligntap.py (RouteWork 마다 기록). */
 export function workerPython(name) {
-  if (name === "PYROUTE") return fs.readFileSync(path.join(HERE, "pyroute.py"), "utf8");
-  const fw = fs.readFileSync(path.join(ROOT, "frontworker.mjs"), "utf8");
-  const m = new RegExp("const " + name + " = String\\.raw`([\\s\\S]*?)`;").exec(fw);
-  if (!m) throw new Error("frontworker.mjs 에서 " + name + " 를 못 찾았다");
-  return m[1];
+  const file = { FRONT: "front.py", PYROUTE: "pyroute.py", TAP: "aligntap.py" }[name];
+  if (!file) throw new Error("모르는 파이썬 원문: " + name);
+  return fs.readFileSync(path.join(ROOT, "py", file), "utf8");
 }
 
 /**
@@ -58,7 +56,7 @@ export async function bootAlign({ blasfix = true, pnr = true, log = () => {} } =
   log("libz3");
 
   if (pnr) {
-    const dir = path.join(ROOT, "symplace/scripts/wasm/pnr");
+    const dir = path.join(ROOT, "py/pnr");
     const whl = fs.readFileSync(path.join(dir, "list.txt"), "utf8").trim().split(/\s+/)[0];
     py.unpackArchive(rd(path.join(dir, whl)), "zip", { extractDir: site });
     // micropip 이 하는 일과 같다: 확장 모듈은 지역(local) 범위로 미리 적재한다

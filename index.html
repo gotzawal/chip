@@ -322,7 +322,10 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
     </label>
     <button class="run" id="run">배치 실행</button>
     <button class="run" id="routeRun" disabled
-            title="배치한 뒤 이 탭에서 배선한다 — Rust 격자 배선기(wasm), 검사는 ALIGN 과 같은 DRC/LVS">배선 실행</button>
+            title="배치한 뒤 이 탭에서 배선한다 — ALIGN 배선기를 Rust 로 옮긴 것(wasm). 검사는 ALIGN 과 같은 DRC/LVS">배선 · Rust 이식</button>
+    <button class="run" id="alignRun" disabled
+            title="같은 배치를 ALIGN 원본(파이썬 흐름 + C++ 배선기)으로 배선한다. 처음 누르면 약 40 MB 를 받는다.
+Rust 이식과 번갈아 돌리면 아래 '배선 대조' 에 둘이 같은지 나온다.">배선 · ALIGN 원본</button>
     <label class="drop" id="drop" title="회로 넷리스트(.sp)를 올린다 — 앞단부터 브라우저에서 돌린다">
       <input type="file" id="file" multiple accept=".sp,.cir,.json">
       <span id="dropText">회로 올리기 — .sp 넷리스트 또는 앞단 출력</span>
@@ -362,6 +365,11 @@ data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 �
           <span id="zoom" style="margin-left:auto"></span>
           <span style="color:var(--faint)">휠 확대 · 끌어 이동 · 더블클릭 초기화</span>
         </div>
+      </div>
+      <div class="card" id="cmpCard" hidden style="margin-top:16px">
+        <h2>배선 대조 — ALIGN 원본 vs Rust 이식 (같은 배치)</h2>
+        <dl class="metrics" id="cmpMetrics"></dl>
+        <div class="body" id="cmpBody" style="border-top:1px solid var(--hair)"></div>
       </div>
       <div class="card" style="margin-top:16px">
         <h2>소자 변이 — 우리가 고른 것 vs ALIGN</h2>
@@ -444,6 +452,8 @@ async function loadExampleList() {
   return EXAMPLES;
 }
 import { makeView, drawPanel, drawRouted, zoomAt, GROUPS } from "./view.mjs";
+import { compareResults, shapeKey } from "./src/route/align/compare.mjs";
+import { MODES } from "./src/route/align/records.mjs";
 // 기준선은 워커 없이 여기서 바로 뽑는다. 모듈 워커가 서지 않는 브라우저
 // (구형 사파리 — 맥·iOS 에서 이것 때문에 그림이 통째로 비었다) 에서도
 // 첫 화면은 나와야 한다.
@@ -455,7 +465,10 @@ const view = makeView();
 let what = "place";          // place | route
 let who = "both";            // both | ours | align
 let frame = null;            // 최적화 중간 상태
-let routed = null;           // 배선 기하 {ours, align}
+let routed = null;           // 배선 기하 {ours (Rust 이식), alignLive (ALIGN 원본), align (저장소의 ALIGN 기준선)}
+let rustRun = null;          // Rust 이식 한 판 {key, geo, gds, errors, records, secs}
+let alignRun = null;         // ALIGN 원본 한 판 {key, geo, gds, gdsCxx, errors, records, secs}
+let cmp = null;              // 둘의 대조 (같은 배치일 때) — src/route/align/compare.mjs
 let drcIndex = null;         // 배선/DRC 실제 결과
 let drcWho = "ours";
 const layersOn = new Set(["metal", "via", "device"]);   // 웰은 기본 꺼짐
@@ -531,8 +544,11 @@ function shots() {
   const emptyOurs = ["아직 우리 배치가 없습니다", "배치 실행을 누르세요"];
   const emptyRoute = ["아직 배선 결과가 없습니다", "배선 실행을 누르세요"];
   const items = what === "route"
-    ? [{ key: "align", geo: routed?.align, label: "ALIGN", empty: emptyRoute },
-       { key: "ours", geo: routed?.ours, label: "우리", empty: emptyRoute }]
+    ? [{ key: "align", geo: routed?.alignLive ?? routed?.align,
+         label: routed?.alignLive ? "ALIGN 원본" : "ALIGN 기준선 (ALIGN 배치)", empty: emptyRoute,
+         mark: cmp && !cmp.layout.same ? new Set(cmp.layout.onlyA) : null },
+       { key: "ours", geo: routed?.ours, label: "Rust 이식", empty: emptyRoute,
+         mark: cmp && !cmp.layout.same ? new Set(cmp.layout.onlyB) : null }]
     : (() => {
         const live = oriented(oursNow());
         const tag = frame ? `탐색 중 · ${frame.module}` : "우리";
@@ -601,7 +617,8 @@ function redraw() {
     const p = panels[k];
     if (what === "route")
       drawRouted(ctx, p, it.geo, { pal, view, on: layersOn, box,
-                                   label: it.label, empty: it.empty });
+                                   label: it.label, empty: it.empty,
+                                   mark: it.mark, markKey: shapeKey, markColor: c("--copper") });
     else
       drawPanel(ctx, p, it.data, { pal, view, box, label: it.label,
                                    accent: it.accent, axes: it.axes, empty: it.empty });
@@ -671,7 +688,7 @@ const resetView = () => { view.s = 1; view.tx = 0; view.ty = 0; redraw(); };
 cv.addEventListener("dblclick", resetView);
 
 const TITLE = { place: "배치", route: "배선" };
-const WHO = { both: "나란히", ours: "우리", align: "ALIGN (기준선)" };
+const WHO = { both: "나란히", ours: "우리", align: "ALIGN" };
 function setView(nextWhat, nextWho) {
   what = nextWhat ?? what;
   who = nextWho ?? who;
@@ -856,6 +873,7 @@ function topSubckt(text) {
 // 배선은 이 워커와 무관하다 — routeworker.mjs 가 JS + wasm 으로 한다.
 let frontWorker = null, frontPend = null;
 let uploadName = null;   // 올린 넷리스트 이름 — 산출물 파일 이름에 쓴다
+let uploadSrc = null;    // 올린 .sp 원문 {sp, constraints} — ALIGN 원본 배선이 쓴다
 function frontSend(msg, want, fresh) {
   return new Promise((resolve, reject) => {
     if (fresh) { frontWorker?.terminate(); frontWorker = null; frontPend = null; }
@@ -909,6 +927,7 @@ async function ingest(fileList) {
     uploadName = name;
     const cf = all.find((f) => /\.const\.json$/i.test(f.name));
     const constText = cf ? await cf.text() : "";
+    uploadSrc = { sp: text, constraints: constText };
     setStatus('<span class="dot"></span><span>앞단 준비 — 처음이면 약 40MB 를 받습니다</span>');
     const r = await runFront(text, name, subckt, constText);
     setStatus(`<span>앞단 완료 — 모듈 ${r.modules}, 인스턴스 ${r.instances}, ` +
@@ -918,6 +937,7 @@ async function ingest(fileList) {
 
   const files = all.filter((f) => f.name.endsWith(".json"));
   if (!files.length) throw new Error(".sp 넷리스트나 앞단 출력 JSON 이 필요합니다");
+  uploadSrc = null;
 
   // 한 덩이로 묶인 것인가?
   if (files.length === 1) {
@@ -979,7 +999,7 @@ async function ingest(fileList) {
       $("ex").value = "__upload__";
       text.textContent = `올림 — 모듈 ${blob.topology.modules.length}, 인스턴스 ${nInst}` +
         (blob._missing?.length ? `  (템플릿 ${blob._missing.length}개 없음)` : "");
-      base = null; ours = null; frame = null; routed = null; liveRec = null;
+      base = null; ours = null; frame = null; routed = null; liveRec = null; clearRuns();
       $("metrics").textContent = "";
       variantRows(null);
       showDrc(null); clearDownloads();
@@ -1071,12 +1091,16 @@ let liveRec = null;             // 이번 세션에서 낸 배선 결과 (DRC �
 function drcRec() {
   const name = $("ex").value;
   const ref = drcIndex?.find((r) => r.name === name);
-  return { name, align: ref?.align ?? null, ours: liveRec };
+  const live = alignRun && {
+    errors: alignRun.errors.map((t) => ({ text: t, file: "" })), gdsBytes: alignRun.gds?.byteLength ?? 0,
+    gdsName: alignRun.gdsName, rects: alignRun.geo?.terminals?.length ?? 0 };
+  return { name, align: live || (ref?.align ?? null), ours: liveRec };
 }
 
 async function loadRouted(name) {
   routed = null;
   liveRec = null;
+  clearRuns();
   if (!drcIndex) {
     try {
       drcIndex = await (await fetch("./routed/index.json")).json();
@@ -1186,7 +1210,7 @@ function handle(m) {
               `${m.phase ?? "설정"} ${m.i}/${m.total} · ${m.t.toFixed(0)}s</span>`);
   } else if (m.type === "done") {
     ours = m; frame = null; busy = false; $("run").disabled = false;
-    $("routeRun").disabled = false;
+    routeButtons(true);
     redraw(); showResult(m);
     placeDownloads();
     setStatus(`<span>완료 — ${m.secs.toFixed(1)}s · 설정 ${m.configs} 개 · ` +
@@ -1284,24 +1308,15 @@ function routeSend(msg) {
 async function runRoute() {
   if (!ours || busy) return;
   busy = true;
-  $("routeRun").disabled = true; $("run").disabled = true;
-  setStatus('<span class="dot"></span><span>배선 중 — Rust 배선기 (wasm)</span>');
-  const placement = {
-    bbox: [0, 0, Math.round(ours.bbox[2] - ours.bbox[0]),
-           Math.round(ours.bbox[3] - ours.bbox[1])],
-    instances: ours.rects.map((r) => ({
-      name: r.name, concrete: r.concrete,
-      oX: Math.round(r.sx > 0 ? r.x : r.x + r.w),
-      oY: Math.round(r.sy > 0 ? r.y : r.y + r.h),
-      sX: r.sx > 0 ? 1 : -1, sY: r.sy > 0 ? 1 : -1,
-    })),
-    subModules: ours.subModules ?? [],
-  };
+  routeButtons(false); $("run").disabled = true;
+  setStatus('<span class="dot"></span><span>배선 중 — Rust 이식 (wasm)</span>');
+  const placement = routePlacement();
   try {
     const name = $("ex").value;
     const blob = await loadExample(name);
     const leaves = await leavesFor(name, blob);
     const m = await routeSend({ design: { topology: blob.topology }, leaves, placement });
+    m.key = placementKey(placement);
     showRouted(m);
     const st = m.stats;
     setStatus(`<span>배선 완료 — DRC/LVS ${m.nerrors}건, 넷 ${st.nets}` +
@@ -1315,7 +1330,204 @@ async function runRoute() {
       (net ? "배선기나 리프 도형을 못 받았습니다 (" + msg + ")" : msg) + "</span>");
     console.error("[배선 실패]", err);
   } finally {
-    busy = false; $("run").disabled = false; $("routeRun").disabled = false;
+    busy = false; $("run").disabled = false; routeButtons(true);
+  }
+}
+
+/** 배선기에 넘길 배치 — 페이지 배치(ours)에서.
+ *  oX 는 transformation 의 원점이다: sX=+1 이면 x, sX=-1 이면 x + w (oY 도 같다). */
+function routePlacement() {
+  return {
+    bbox: [0, 0, Math.round(ours.bbox[2] - ours.bbox[0]),
+           Math.round(ours.bbox[3] - ours.bbox[1])],
+    instances: ours.rects.map((r) => ({
+      name: r.name, concrete: r.concrete,
+      oX: Math.round(r.sx > 0 ? r.x : r.x + r.w),
+      oY: Math.round(r.sy > 0 ? r.y : r.y + r.h),
+      sX: r.sx > 0 ? 1 : -1, sY: r.sy > 0 ? 1 : -1,
+    })),
+    subModules: ours.subModules ?? [],
+  };
+}
+
+/** 같은 배치인지 가를 열쇠 (배치 JSON 의 해시) */
+function placementKey(p) {
+  const s = JSON.stringify(p);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(16) + ":" + s.length;
+}
+
+function routeButtons(on) {
+  $("routeRun").disabled = !on;
+  $("alignRun").disabled = !on;
+}
+
+// --- 배선 · ALIGN 원본: alignworker.mjs (Pyodide + ALIGN 파이썬 + C++ PnR 휠) ---
+//
+// Rust 이식이 ALIGN 과 같은지 보려고 둔다. 같은 배치로 두 버튼을 번갈아 누르면 아래 "배선 대조"
+// 카드가 최종 도형·GDS·RouteWork 단계별 기록을 견준다. 앞단(.sp -> 1_topology, 2_primitives)은
+// 워커 안에서 설계마다 한 번 돈다 — 예제는 netlists/<예제>.sp, 올린 회로는 올린 원문으로.
+let alignWorker = null, alignPend = null;
+function alignSend(msg) {
+  return new Promise((resolve, reject) => {
+    if (!alignWorker) {
+      alignWorker = new Worker(new URL("./alignworker.mjs", import.meta.url), { type: "module" });
+      alignWorker.onmessage = (ev) => {
+        const m = ev.data;
+        if (m.type === "log") {
+          setStatus(`<span class="dot"></span><span>ALIGN 원본 ${m.step}/7 ${m.text.replace(/[<>]/g, "")}</span>`);
+          return;
+        }
+        const p = alignPend; alignPend = null;
+        if (!p) return;
+        if (m.type === "error") {
+          console.error("[ALIGN 원본 배선 원문]\n" + m.msg);
+          if (m.fatal) { alignWorker?.terminate(); alignWorker = null; }
+          p.reject(new Error(m.msg.split("\n")[0]));
+        } else p.resolve(m);
+      };
+      alignWorker.onerror = (ev) => {
+        ev.preventDefault?.();
+        const p = alignPend; alignPend = null;
+        alignWorker?.terminate(); alignWorker = null;
+        p?.reject(new Error(ev.message || "ALIGN 워커 오류"));
+      };
+    }
+    alignPend = { resolve, reject };
+    alignWorker.postMessage(msg);
+  });
+}
+
+/** ALIGN 원본 배선에 넘길 넷리스트 원문 */
+async function netlistFor(name) {
+  if (name === "__upload__") {
+    if (!uploadSrc) throw new Error("ALIGN 원본 배선에는 .sp 넷리스트가 필요합니다 — .sp 로 올린 회로만 됩니다");
+    return uploadSrc;
+  }
+  const get = async (ext, must) => {
+    const r = await fetch(`./netlists/${name}.${ext}`);
+    if (!r.ok) { if (must) throw new Error(`netlists/${name}.${ext} → ${r.status}`); return ""; }
+    return r.text();
+  };
+  const [sp, constraints] = await Promise.all([get("sp", true), get("const.json", false)]);
+  return { sp, constraints };
+}
+
+async function runAlignRoute() {
+  if (!ours || busy) return;
+  busy = true;
+  routeButtons(false); $("run").disabled = true;
+  setStatus('<span class="dot"></span><span>ALIGN 원본으로 배선 — 처음이면 Pyodide·ALIGN (약 40 MB) 을 받습니다</span>');
+  const placement = routePlacement();
+  try {
+    const src = await netlistFor($("ex").value);
+    const name = designName() || "design";
+    const m = await alignSend({ name, sp: src.sp, constraints: src.constraints,
+                                subckt: topSubckt(src.sp), placement });
+    alignRun = { key: placementKey(placement), geo: m.geo, gds: m.gds, gdsName: m.gdsName,
+                 gdsCxx: m.gdsCxx, errors: m.errors ?? [], records: m.records, secs: m.secs };
+    routed = { ...(routed ?? {}), alignLive: m.geo };
+    addDownload(new Blob([m.gds], { type: "application/octet-stream" }),
+                name + ".align.gds", "GDS — ALIGN 원본");
+    compareRuns();
+    setView("route", "both");
+    showDrc();
+    setStatus(`<span>ALIGN 원본 배선 완료 — DRC/LVS ${m.nerrors}건, 기록 ${m.records.length} 단계` +
+              `  (${m.secs.toFixed(1)} s)${cmp ? " · " + cmpLine() : ""}</span>`);
+  } catch (err) {
+    const msg = err.message || "";
+    const net = /failed to fetch|networkerror|dynamically imported|→ \d+|-> \d+/i.test(msg);
+    setStatus(`<span style="color:var(--copper)">ALIGN 원본 배선 실패 — ` +
+      (net ? "Pyodide·ALIGN 을 못 받았습니다 (" + msg.replace(/[<>]/g, "") + ")"
+           : msg.replace(/[<>]/g, "")) + "</span>");
+    console.error("[ALIGN 원본 배선 실패]", err);
+  } finally {
+    busy = false; $("run").disabled = false; routeButtons(true);
+  }
+}
+
+// --- 배선 대조: 같은 배치의 두 판을 견준다 ---
+function clearRuns() {
+  rustRun = null; alignRun = null; cmp = null;
+  showCompare();
+}
+
+function compareRuns() {
+  cmp = rustRun && alignRun && rustRun.key === alignRun.key ? compareResults(alignRun, rustRun) : null;
+  showCompare();
+  if (what === "route") redraw();
+}
+
+/** 상태 줄에 붙일 한 줄 */
+function cmpLine() {
+  if (!cmp) return "";
+  const L = cmp.layout;
+  const bad = (cmp.stages ?? []).filter((r) => !r.same).length;
+  return L.same && cmp.gds !== false && !bad ? "Rust 이식과 같음"
+    : `Rust 이식과 다름 (도형 ${L.onlyA.length + L.onlyB.length}${cmp.stages ? `, 단계 ${bad}` : ""})`;
+}
+
+function showCompare() {
+  const card = $("cmpCard"), dl = $("cmpMetrics"), body = $("cmpBody");
+  card.hidden = !rustRun && !alignRun;
+  if (card.hidden) return;
+  dl.textContent = ""; body.textContent = "";
+  const run = (r) => r ? `${r.secs.toFixed(r.secs < 10 ? 2 : 1)} s <small>DRC/LVS ${r.errors.length}건 · ` +
+    `도형 ${(r.geo?.terminals ?? []).filter((t) => t.layer !== "Outline" && !t.color).length}</small>` : "-";
+  mkRow(dl, "ALIGN 원본", run(alignRun));
+  mkRow(dl, "Rust 이식", run(rustRun));
+  if (!rustRun || !alignRun) {
+    body.innerHTML = '<p style="margin:0;color:var(--muted)">같은 배치로 <b>배선 · ALIGN 원본</b> 과 ' +
+      '<b>배선 · Rust 이식</b> 을 둘 다 누르면 여기서 견줍니다.</p>';
+    return;
+  }
+  if (!cmp) {
+    body.innerHTML = '<p style="margin:0;color:var(--muted)">두 판의 배치가 다릅니다 — 배치를 다시 풀었으면 ' +
+      '두 버튼을 다시 누르세요.</p>';
+    return;
+  }
+  const L = cmp.layout;
+  mkRow(dl, "최종 도형", L.same ? `같음 <small>${L.nA} 개${L.bboxSame ? "" : ""}</small>`
+    : `다름 <small>ALIGN 에만 ${L.onlyA.length} · Rust 에만 ${L.onlyB.length}` +
+      (L.bboxSame ? "" : " · bbox 다름") + "</small>", L.same ? "win" : "lose");
+  mkRow(dl, "GDS", cmp.gds == null ? "-" : cmp.gds ? "같음 <small>시각 빼고 바이트까지</small>" : "다름",
+        cmp.gds ? "win" : cmp.gds === false ? "lose" : "");
+  const st = cmp.stages;
+  if (st) {
+    const bad = st.filter((r) => !r.same).length;
+    mkRow(dl, "단계 기록", bad ? `다름 <small>${bad} / ${st.length}</small>` : `같음 <small>${st.length} 단계</small>`,
+          bad ? "lose" : "win");
+  } else {
+    mkRow(dl, "단계 기록", "- <small>Rust 쪽 기록이 없습니다</small>");
+  }
+  if (L.byLayer.length) {
+    const p = document.createElement("p");
+    p.style.cssText = "margin:0 0 8px;color:var(--muted);font-size:12px";
+    p.textContent = "다른 도형 (층별): " + L.byLayer.map(([l, n]) => `${l} ${n}`).join(" · ") +
+      " — 배선 보기에서 테두리로 짚었습니다";
+    body.append(p);
+  }
+  if (st) {
+    const tw = document.createElement("div"); tw.className = "tw";
+    const tb = document.createElement("table");
+    tb.innerHTML = "<thead><tr><th>모듈</th><th>단계</th><th>ALIGN</th><th>Rust</th><th>결과</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    const ms = (recs, r) => {
+      const x = recs?.find((q) => q.module === r.module && q.mode === r.mode);
+      return x ? `${x.ms.toFixed(0)} ms` : "-";
+    };
+    for (const r of st) {
+      const tr = document.createElement("tr");
+      const res = r.same ? '<span style="color:var(--good)">같음</span>'
+        : r.missing ? `없음 (${r.missing === "A" ? "ALIGN" : "Rust"} 쪽)`
+        : `<b style="color:var(--copper)">${r.count} 곳 다름</b><br><small>` +
+          r.first.slice(0, 3).map((d) => `${d.path}: ${d.b} / ALIGN ${d.a}`.replace(/[<>]/g, "")).join("<br>") + "</small>";
+      tr.innerHTML = `<td>${r.module}</td><td>${r.mode} ${MODES[r.mode] ?? ""}</td>` +
+        `<td>${ms(alignRun.records, r)}</td><td>${ms(rustRun.records, r)}</td><td>${res}</td>`;
+      tbody.append(tr);
+    }
+    tb.append(tbody); tw.append(tb); body.append(tw);
   }
 }
 
@@ -1331,6 +1543,8 @@ function showRouted(m) {
   // 갈아끼워서, 배선이 끝나는 순간 옆에 있던 ALIGN 배선이 사라졌다 —
   // 정작 비교가 필요한 순간에 비교할 것이 없어졌다.
   if (m.geo) routed = { ...(routed ?? {}), ours: m.geo };
+  rustRun = { key: m.key, geo: m.geo, gds: m.gds, errors: m.errors ?? [], records: m.records ?? null, secs: m.secs };
+  compareRuns();
   routeDownloads(m);
   setView("route", "both");      // 나란히. 비교가 이 페이지가 하는 일이다.
   showDrc();                     // setView 뒤에 (표와 그림이 서로를 따라간다)
@@ -1383,14 +1597,15 @@ function placementJson() {
   };
 }
 $("routeRun").addEventListener("click", runRoute);
+$("alignRun").addEventListener("click", runAlignRoute);
 
 async function run() {
   if (busy) return;
   busy = true; $("run").disabled = true; ours = null; frame = null;
   // 새 배치를 풀기 시작하면 **이전 배치의 배선 결과는 더 이상 이 배치의 것이
   // 아니다.** 우리 쪽만 지운다 — ALIGN 기준선은 배치와 무관하므로 남긴다.
-  if (routed?.ours) routed = { ...routed, ours: null };
-  liveRec = null;
+  if (routed) routed = { ...routed, ours: null, alignLive: null };
+  liveRec = null; clearRuns();
   showDrc();
   $("subCard").hidden = true;
   clearDownloads("계산 중…");
@@ -1437,7 +1652,7 @@ const sel = $("ex");
 sel.addEventListener("change", () => {
   const v = sel.value;
   if (v === "__upload__") {
-    base = null; ours = null; frame = null; routed = null; liveRec = null;
+    base = null; ours = null; frame = null; routed = null; liveRec = null; clearRuns();
     $("metrics").textContent = ""; variantRows(null);
     showDrc(null); clearDownloads(); redraw();
     setStatus("<span>올린 설계 — 배치 실행을 누르세요</span>");

@@ -1,10 +1,8 @@
 /** ALIGN 배선 경로를 node 에서 끝까지 — 앞단 + ALIGN 배선기 (비교 기준).
  *
- *  페이지는 이제 이 경로를 안 쓴다 (배선은 src/route/ 의 JS + Rust wasm — newroute.mjs).
- *  이 스크립트는 같은 배치를 ALIGN 의 C++ 배선기(축소 PnR 휠)로 배선해 기준값을 낸다.
- *  앞단은 frontworker.mjs 의 FRONT 원문을 그 파일에서 그대로 읽고, 배선은 pyroute.py
- *  (예전에 페이지 워커에 있던 PYROUTE) 를 쓴다. 적재는 align.mjs (CDN 대신 setup.sh 가
- *  받아둔 npm 꾸러미와 휠).
+ *  같은 배치를 ALIGN 의 C++ 배선기(축소 PnR 휠)로 배선해 기준값을 낸다. 페이지의 "배선 · ALIGN
+ *  원본"(alignworker.mjs) 과 같은 원문이다: 앞단 py/front.py, 배선 py/pyroute.py. 적재는 align.mjs
+ *  (CDN 대신 setup.sh 가 받아둔 npm 꾸러미와 휠).
  *
  *    node route.mjs <예제> [--place=<place.json>] [옵션]
  *

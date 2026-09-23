@@ -1,11 +1,11 @@
-"""ALIGN 배선 경로 — 예전에 페이지(frontworker.mjs)가 돌리던 것. 지금은 node 하네스의 **기준 경로**다.
+"""ALIGN 원본 배선 — ALIGN 의 파이썬 흐름과 C++ 배선기(축소 PnR 휠, py/pnr/)로 우리 배치를 배선한다.
 
-페이지의 배선은 src/route/ (JS + Rust wasm) 로 옮겼다. 이 파일은 같은 배치를 ALIGN 의 C++ 배선기
-(축소 PnR 휠, symplace/scripts/wasm/pnr/) 로 배선해 비교 기준을 만드는 데 쓴다:
-  route.mjs     ALIGN 배선을 node 에서 끝까지 (시간, DRC)
-  checkref.mjs  ALIGN 검사기의 입출력을 기록 (JS 검사기·도형 합성 대조용)
+Rust 로 옮긴 배선기(symplace/alignroute)의 기준이다. 같은 원문을 셋이 쓴다:
+  alignworker.mjs  페이지의 "배선 · ALIGN 원본" 버튼 (Rust 이식과 번갈아 돌려 견준다)
+  route.mjs        node 하네스: ALIGN 배선을 끝까지 (시간, DRC)
+  checkref.mjs     ALIGN 검사기의 입출력을 기록 (JS 검사기·도형 합성 대조용)
 
-route(work, name, top_level, placement_json) — 앞단(FRONT)이 /work/<name> 에 만든 작업 디렉터리 위에서.
+route(work, name, top_level, placement_json) — 앞단(py/front.py)이 /work/<name> 에 만든 작업 디렉터리 위에서.
 """
 import base64, json, logging, os, pathlib, shutil, traceback
 
@@ -259,9 +259,13 @@ def route(work, name, top_level, placement_json):
         # 첫 GDS 는 원본 바이트째 넘긴다 — 페이지가 그대로 내려받게 한다
         # (80K~200K 라 base64 로 옮겨도 부담이 없다).
         blob = base64.b64encode(gds[0].read_bytes()).decode() if gds else None
+        # 파이썬 판 GDS (gen_gds_json + python-gdsii) — 우리 src/route/gds.mjs 가 바이트까지 맞추는 쪽
+        pyg = sorted(w.glob("*.python.gds"))
         return json.dumps({
             "ok": True,
             "gdsB64": blob,
+            "pyGdsB64": base64.b64encode(pyg[0].read_bytes()).decode() if pyg else None,
+            "pyGdsName": pyg[0].name if pyg else None,
             "gds": [{"name": p.name, "bytes": p.stat().st_size} for p in gds],
             "errors": errs[:40], "nerrors": len(errs),
             "geo": {"bbox": geo.get("bbox"), "terminals": geo.get("terminals", [])} if geo else None,

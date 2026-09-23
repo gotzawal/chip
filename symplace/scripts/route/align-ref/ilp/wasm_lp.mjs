@@ -6,7 +6,7 @@ import path from "node:path";
 
 const CACHE = path.join(process.env.HOME, ".cache/symplace/pyodide-0.27.8");
 const WHL = path.resolve(path.dirname(new URL(import.meta.url).pathname),
-                         "../../../wasm/pnr/pnr-0.9.8-cp312-cp312-emscripten_3_1_58_wasm32.whl");
+                         "../../../../../py/pnr/pnr-0.9.8-cp312-cp312-emscripten_3_1_58_wasm32.whl");
 const [inFile, outFile] = process.argv.slice(2);
 
 const { loadPyodide } = await import(path.join(CACHE, "package/pyodide.mjs"));
