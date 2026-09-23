@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<title>Symmetry Placer</title>
+<title>Analog Layout Generator</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <style>
   /* 팔레트는 이 주제에서 나왔다. 구리(배선 금속)가 강조색, 마젠타는 대칭축 —
@@ -270,23 +270,21 @@
 
 <div class="wrap">
   <header>
-    <p class="tag">Analog layout · netlist to GDS, in the browser</p>
-    <h1>Symmetry Placer</h1>
+    <p class="tag">Netlist to GDS · in the browser</p>
+    <h1>Analog Layout Generator</h1>
     <p class="lede">
-      회로 넷리스트 하나면 된다. <b>앞단 · 배치 · 배선 · GDS · DRC 가 전부 이 탭
-      안에서</b> 돈다 — 서버도, 설치도, 빌드도 없다.
+      아날로그 회로의 넷리스트(<code>.sp</code>)를 넣으면 <b>칩 레이아웃(GDS)</b>을 만들어 준다.
+      회로 읽기 · 배치 · 배선 · 검사 · GDS 내보내기까지 <b>전부 이 브라우저 탭 안에서</b> 돈다 —
+      서버도, 설치도 없다.
     </p>
     <p class="lede">
-      배치기는 대칭을 벌점으로 누르지 않고 <b>좌표계로 흡수한다</b> — 움직일 수 있는
-      방향(<code>z = z₀ + Nθ</code>)이 애초에 대칭을 지키는 방향뿐이라, 대칭 오차가
-      늘 0 이고 자유도도 줄어든다. 소자 변이 · 거울 반전 · 영역 종횡비까지 스스로
-      골라 <b>ALIGN 의 배치 단계를 대신한다</b>.
+      넷리스트에서 차동쌍·전류 거울 같은 소자 묶음을 찾아 트랜지스터 모양을 만들고, 짝을 이뤄야 하는
+      소자는 <b>좌우 대칭</b>으로 두면서 면적과 선 길이가 작아지게 배치한다. 그다음 신호선과 전원망(VDD·GND)을
+      금속층에 잇고, 설계 규칙(DRC)과 회로 연결(LVS)을 검사해 GDS 파일로 내보낸다 — KLayout 에서 열린다.
     </p>
     <p class="lede">
-      배선은 <b>ALIGN 의 배선 단계를 그대로 옮긴 것</b>이다 — C++ 배선기(전역·상세·전원)는
-      Rust(wasm)로, 배선기에 넘기는 자료와 도형 모으기·DRC/LVS·GDS 는 JS 로. 같은 배치면 결과가
-      ALIGN 과 바이트까지 같아야 하고, <b>배선 · ALIGN 원본</b> 으로 같은 배치를 ALIGN 그대로
-      돌려 곧바로 견줄 수 있다. 파이썬(Pyodide)은 그 ALIGN 원본과 <code>.sp</code> 앞단에만 뜬다.
+      오픈소스 아날로그 레이아웃 도구 <b>ALIGN</b> 과 같은 공정 규칙(FinFET 14 nm 모의 PDK)을 쓰고, 배선
+      결과도 ALIGN 과 같다. 예제 회로 다섯 개가 들어 있고, 같은 배치를 ALIGN 으로도 돌려 나란히 견줘 볼 수 있다.
     </p>
   </header>
 
