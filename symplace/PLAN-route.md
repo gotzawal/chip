@@ -26,7 +26,9 @@
    Pyodide 워커는 `.sp` 를 올릴 때(앞단)만 뜬다. (4 절)
 
 **진행.** 0 단계 끝남 (`4c907d4`): 워커의 BLAS 우회로 5 예제가 두 번 연속, 계층 그대로
-배선된다 (DRC 0/4/0/1/0). 나머지는 4 절의 순서대로.
+배선된다 (DRC 0/4/0/1/0). 리프 도형을 예제에 실었다 (`e88b300`). 심판의 검사기
+(`src/route/check.mjs`)가 파이썬과 116/116 사례에서 글자 그대로 같다 — 5 예제의 10 모듈
+전부와 일부러 망가뜨린 106 사례. 나머지는 4 절의 순서대로.
 
 ---
 
@@ -318,6 +320,13 @@ data/<예제>.leaves.json                         리프 전체 도형 (배선�
 - 합격선: ALIGN 이 배선한 5 예제(하네스 `--dump` 로 뽑은 검사기 입력)에서 오류 목록이
   파이썬과 같다. 일부러 망가뜨린 배치(도형을 옮겨 SHORT·OPEN·간격·최소 길이 위반을 만든 것)
   에서도 같다. GDS 는 ALIGN 의 `.python.gds` 와 경계·라벨 다중집합이 같다.
+- **check.mjs 는 끝남.** `test/check.mjs` 가 대조한다: 저장소의 고정 사례
+  (`fixtures/check-*.json`, 두 모듈 x 53 조작 — 넷·단자 바꾸기, 비아·핀·금속 지우기, 밀기,
+  줄이기, 끊기, 폭 바꾸기, 비아 붙이기, 막기, 섞기)와 캐시의 5 예제 배선 기록. 오류 목록과
+  정리된 도형(색 사본까지)이 글자 그대로 같다. 원본이 죽는 입력(비아 밑에 금속이 없음:
+  `find_touching` 의 assert, `_find_rect_covering_via` 의 KeyError)만 다르게 둔다 — JS 는
+  죽지 않고 DRC 오류로 적는다. 그런 사례는 그 두 곳만 고친 파이썬과 나머지를 대조한다.
+  PDK 표는 `src/route/pdk.mjs` (layers.json 그대로).
 
 **3 단계 — Rust 배선기** (`symplace/router`).
 - 격자: x 는 M1/M3 트랙(80), y 는 M2/M4 트랙(84). 신호는 M1~M4, 필요하면 M5/M6.
@@ -369,6 +378,16 @@ node route.mjs high_speed_comparator --prof # 계층 그대로 + 단계별 시�
   워커를 고치면 다시 돌리기만 하면 된다. `boot()` 의 적재 순서만 손으로 옮겨 두었다.
 - 배선마다 `BLAS_idamax` 값, 남은 `libmyBLAS.so` 등록, LP 생성 수, wasm 힙을 찍는다.
 - `--dump=<폴더>` 는 Pyodide 안의 `/work/<예제>` 를 꺼낸다 — 1·3 단계의 기준값이다.
+
+검사기 기준값 (2 단계):
+
+```bash
+node checkref.mjs capture telescopic_ota    # 배선하면서 모듈마다 검사기 입출력을 기록
+                                            #   -> ~/.cache/symplace/check/<예제>.json
+node mutate.mjs telescopic_ota TELESCOPIC_OTA ../../../web/placer/fixtures/check-x.json --seed=3
+node checkref.mjs check <사례.json> <사례.json>   # 망가뜨린 사례에 파이썬 답을 채운다
+node ../../../web/placer/test/check.mjs     # JS 검사기 대조
+```
 - 시간은 node 기준이다. 브라우저는 받는 시간이 더해진다.
 
 ## 부록 B — 짚은 순서

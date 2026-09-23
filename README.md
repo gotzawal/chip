@@ -440,4 +440,5 @@ node symplace/web/placer/test/legalize.mjs   # 겹침 0 / 대칭 잔차 / 면적
 node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 돌린 Adam
 node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 비교
 node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와 맞는가
+node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == ALIGN 파이썬 검사기
 ```
