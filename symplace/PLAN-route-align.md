@@ -5,6 +5,26 @@ ALIGN 과 달라 쓸모가 없다고 봐서, ALIGN 의 C++ 배선 알고리즘�
 배선 코드를 네 갈래(입력 DB, 전역 배선, 상세 배선, 전원)로 읽고 돌려 본 결과와, 그에 따른 순서다.
 조사에 쓴 도구와 기준값 만드는 법은 `scripts/route/align-ref/` (부록 A).
 
+## 결과 (2026-09-23) — 끝났다
+
+계획대로 옮겼고 **ALIGN 과 같다**. 페이지의 "배선 · Rust 이식" 이 이 길이다 (`src/route/pipeline.mjs` +
+`src/route/alignroute.wasm`, 소스 `symplace/alignroute/`). "배선 · ALIGN 원본" 과 번갈아 눌러 견준다.
+
+| 단계 | 어디 | 대조 |
+|---|---|---|
+| 입력·PnRDB·배치 심기·계층 부기 (1) | `src/route/align/` (JS) | 10 판 20 모듈 필드마다 (`test/aligndb.mjs`) |
+| 전역 배선, 모드 4 (3) | `alignroute/src/gr` + lp_solve C 소스 | 기준 20 회 + 제약 변형 30 회, ALIGN C++ 네이티브 빌드와 무작위 7,000 회 (내부 상태까지) |
+| 상세 배선, 모드 5 (4) | `alignroute/src/dr` (libc++ 18 sort 이식 포함) | 기준 20 회 + 흔든 배치 56 회 + 제약 변형 14 회. C++ 오라클(clang++ + libc++ 18)과 무작위 대조 중 |
+| 전원 격자·전원 배선, 모드 2·3 (5) | `alignroute/src/pr` | 기준 20 회 + 막기 시험 16 회 |
+| 한 판 잇기 (6·7) | `src/route/pipeline.mjs` | 5 예제 x 두 배치, 흔든 배치 47 판, 제약 변형 14 판: 모듈마다 최종 도형(차례까지)·GDS·오류 문구·단계 기록 (`test/route.mjs --router=wasm`) |
+
+- 시간 (브라우저): telescopic_ota 0.22 s (ALIGN 원본 4.1 s), high_speed_comparator 0.57 s (14.0 s).
+  예상(0.6~5 s)보다 빠르다. wasm 1.3 MB.
+- 옛 독립 배선기(`symplace/router`, `router.wasm`, `problem.mjs`)는 걷어냈다.
+- ALIGN 자신이 죽는 입력이 있다 (부록 C). 거기서는 견줄 기준이 없다.
+- 아래는 계획 당시의 글이다 (4 절의 `symplace/router`, `router.wasm` 은 `symplace/alignroute`,
+  `alignroute.wasm` 이 됐다).
+
 ## 요약
 
 - **목표**: 같은 입력(설계, 리프 도형, 배치, PDK)에서 ALIGN 배선기(축소 PnR 휠 `pnr-0.9.8`,
@@ -358,3 +378,13 @@ hanan 라우터, cap placer, guard ring, 중간 덤프·로그·그림 파일 �
 - `SinkDataComp` 의 크기 검사 오타로 한 점짜리 키를 읽을 때 범위를 넘는다 (예제에서는 안 탔다).
 - `get_variables` 가 N 칸 배열에 N+1 개를 쓴다 (기준에서는 죽은 임시 변수를 덮는다).
 - 빈 `node_L_path[0]` 읽기, 빈 multimap 의 `begin()` — 예제에서는 안 탔다.
+
+## 부록 C — ALIGN 자신이 죽는 입력
+
+기준이 없어 "같다" 를 가를 수 없는 경우다. 찾으면 여기에 적는다.
+
+| 입력 | ALIGN (Pyodide) | Rust 이식 |
+|---|---|---|
+| high_speed_comparator + `Route` 제약 (M2~M5, vin_o·vip_o 는 M2~M3) | 최상위 전역 배선에서 `GlobalGraph::dijkstra` 가 길을 못 찾고 ("ulist empty") 널 함수 호출로 죽는다 | `Err("Empty path")` 로 멈춘다 — ALIGN C++ 네이티브 빌드도 같은 자리에서 `Empty path` 를 던진다 |
+| high_speed_comparator, 우리 배치기의 흔든 배치 `b48-w4-l2` (인버터 하위 모듈이 두 줄로 쌓인 변형 640 x 4704) | 배선 **전**, 최상위 모듈의 배치 심기(`PlacerIfc` — `Placer::setPlacementInfoFromJson` 언저리)에서 `memory access out of bounds` 로 죽는다. 같은 배치에서 인버터만 옆으로 놓인 변형으로 바꾸면 안 죽는다 | 끝까지 간다 (DRC/LVS 0). 우리 JS 판은 배치 심기에서 배선기가 읽는 것만 옮겼다 — 배치 비용 셈(HPWL 등)과 `design`·`SeqPair` 생성은 옮기지 않았다 |
+

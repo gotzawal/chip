@@ -70,8 +70,20 @@ for (const ex of rows) {
       py.runPython(fs.readFileSync(path.join(HERE, "tap.py"), "utf8"));
     }
     py.runPython("import shutil, os; shutil.rmtree('/work/tap', ignore_errors=True); os.makedirs('/work/tap'); CALLS.clear()");
-    const r = JSON.parse(py.globals.get("route")("/work/" + ex, ex, top, key));
+    // 배치를 먼저 남긴다 — ALIGN 이 죽어도(wasm 트랩) 어떤 배치였는지 안다 (result.json 이 없는 폴더)
     fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "placement.json"), key);
+    let r;
+    try {
+      r = JSON.parse(py.globals.get("route")("/work/" + ex, ex, top, key));
+    } catch (e) {
+      // ALIGN 자신이 죽는 배치 (wasm 트랩 — 예: 하위 모듈이 두 줄로 쌓인 변형, PLAN-route-align.md 부록 C).
+      // 적어 두고 Pyodide 를 새로 띄운다 — 죽은 인스턴스는 다시 못 쓴다.
+      fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify({ ok: false, fatal: true, error: String(e.message).split("\n")[0] }, null, 1));
+      console.log(`${ex.padEnd(27)} ${tag.padEnd(16)} ALIGN 이 죽었다: ${String(e.message).split("\n")[0]}`);
+      py = null; done++;
+      continue;
+    }
     for (const n of py.FS.readdir("/work/tap")) if (!n.startsWith(".")) fs.writeFileSync(path.join(dir, n), py.FS.readFile("/work/tap/" + n));
     fs.writeFileSync(path.join(dir, "placement.json"), key);
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify({ ok: r.ok, nerrors: r.nerrors, errors: r.errors, error: r.error }, null, 1));

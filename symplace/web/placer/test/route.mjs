@@ -98,7 +98,7 @@ function diffTerms(mine, ref) {
 const noTime = (g) => { const c = structuredClone(g); for (const l of c.bgnlib) { l.time = null; for (const s of l.bgnstr) s.time = null; } return c; };
 
 const index = RROOT ? fs.readdirSync(TAP).sort() : J(path.join(ROOT, "data/index.json")).map((x) => (typeof x === "string" ? x : x.name));
-let bad = 0, runs = 0;
+let bad = 0, runs = 0, alignDead = 0;
 for (const ex of index) {
   if (opt("ex") && opt("ex") !== ex) continue;
   const exDir = path.join(TAP, ex);
@@ -108,12 +108,27 @@ for (const ex of index) {
   for (const tag of fs.readdirSync(exDir).sort()) {
     if (opt("tag") && opt("tag") !== tag) continue;
     const dir = path.join(exDir, tag);
-    if (!fs.existsSync(path.join(dir, "calls.json"))) continue;
+    const alignFailed = !fs.existsSync(path.join(dir, "calls.json")) && fs.existsSync(path.join(dir, "result.json")) &&
+      J(path.join(dir, "result.json")).ok === false;
+    if (!fs.existsSync(path.join(dir, "calls.json")) && !alignFailed) continue;
     const pf = fs.existsSync(path.join(dir, "placement.json")) ? path.join(dir, "placement.json")
       : tag === "ours" ? path.join(PLACE, `place-${ex}.json`) : null;
     const placement = pf ? (fs.existsSync(pf) ? J(pf) : null) : tag === "align" ? placementFromAlign(design.place) : null;
     const head = `${ex.padEnd(27)} ${tag.padEnd(16)}`;
     if (!placement) { console.log(`${head} (배치가 없다)`); continue; }
+    if (alignFailed) {
+      // ALIGN 자신이 죽은 배치 — 견줄 기준이 없다. Rust 이식이 어떻게 하는지만 적는다 (다름으로 세지 않는다).
+      const why = J(path.join(dir, "result.json")).error;
+      if (!wasm) { console.log(`${head} ALIGN 이 죽은 배치 (${why}) — --router=wasm 으로 Rust 쪽을 본다`); continue; }
+      let note;
+      try {
+        const o = await routeDesign({ design: { topology: design.topology, primitives: design.primitives }, leaves, placement, router: wasm });
+        note = `Rust 이식은 끝까지 간다 (DRC/LVS ${o.errors.length})`;
+      } catch (e) { note = `Rust 이식도 멈춘다: ${e.message.split("\n")[0].slice(0, 120)}`; }
+      console.log(`${head} ALIGN 이 죽은 배치 (${why}) — ${note}`);
+      alignDead++;
+      continue;
+    }
     runs++;
     const tap = tapModules(dir);
     const router = wasm ?? tapRouter(tap.records);
@@ -185,5 +200,5 @@ for (const ex of index) {
     if (verbose) for (const w of out.warnings) console.log("    경고: " + w);
   }
 }
-console.log(`\n${runs} 판 — ${bad ? `다름 ${bad} 판` : "모두 같다"}`);
+console.log(`\n${runs} 판 — ${bad ? `다름 ${bad} 판` : "모두 같다"}` + (alignDead ? ` (ALIGN 이 죽은 배치 ${alignDead} 개는 따로)` : ""));
 if (bad || !runs) process.exit(1);
