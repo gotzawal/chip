@@ -1,0 +1,24 @@
+{
+ "format": "gds-fixture/1",
+ "check": "check-hsc-primitive.json",
+ "label": "그대로",
+ "name": "PRIMITIVE_8231979_PG0",
+ "bbox": [
+  0,
+  0,
+  1280,
+  2352
+ ],
+ "pinSwitch": false,
+ "time": [
+  2026,
+  1,
+  2,
+  3,
+  4,
+  5
+ ],
+ "sha256": "2ecfba234213e50e9a6d1fc23048a4af7a7d49f1cc48e8fb04c083dba58a47df",
+ "bytes": 8766,
+ "terminals": 134
+}

@@ -1,0 +1,24 @@
+{
+ "format": "gds-fixture/1",
+ "check": "check-telescopic-top.json",
+ "label": "그대로",
+ "name": "TELESCOPIC_OTA",
+ "bbox": [
+  -52,
+  -52,
+  1440,
+  12968
+ ],
+ "pinSwitch": true,
+ "time": [
+  2026,
+  1,
+  2,
+  3,
+  4,
+  5
+ ],
+ "sha256": "72a7bd444cae7da964454b22626359aff8854799d6b0feb1057990be8202a2af",
+ "bytes": 78816,
+ "terminals": 1095
+}

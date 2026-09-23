@@ -26,9 +26,9 @@
    Pyodide 워커는 `.sp` 를 올릴 때(앞단)만 뜬다. (4 절)
 
 **진행.** 0 단계 끝남 (`4c907d4`): 워커의 BLAS 우회로 5 예제가 두 번 연속, 계층 그대로
-배선된다 (DRC 0/4/0/1/0). 리프 도형을 예제에 실었다 (`e88b300`). 심판의 검사기
-(`src/route/check.mjs`)가 파이썬과 116/116 사례에서 글자 그대로 같다 — 5 예제의 10 모듈
-전부와 일부러 망가뜨린 106 사례. 나머지는 4 절의 순서대로.
+배선된다 (DRC 0/4/0/1/0). 리프 도형을 예제에 실었다 (`e88b300`). 심판 셋이 파이썬과
+글자 그대로 같다 — 검사기(`src/route/check.mjs`, 116/116 사례), 도형 합성
+(`compose.mjs`, 10 모듈 + 격자 오류 150 문구), GDS (`gds.mjs`, 바이트까지). 나머지는 4 절의 순서대로.
 
 ---
 
@@ -327,6 +327,17 @@ data/<예제>.leaves.json                         리프 전체 도형 (배선�
   `find_touching` 의 assert, `_find_rect_covering_via` 의 KeyError)만 다르게 둔다 — JS 는
   죽지 않고 DRC 오류로 적는다. 그런 사례는 그 두 곳만 고친 파이썬과 나머지를 대조한다.
   PDK 표는 `src/route/pdk.mjs` (layers.json 그대로).
+- **compose.mjs · gds.mjs · hier.mjs 도 끝남.**
+  - `hier.mjs`: `pgHierarchy` 가 manipulate_hierarchy 의 전원 포트 걷어내기(`_PG0` 사본)를
+    옮긴 것이다. 3_pnr/inputs 의 verilog.json 과 모듈·포트·fa_map·제약이 같다.
+  - `compose.mjs`: 블록 도형(리프 또는 정리된 하위 모듈)을 변환하고 넷 이름을 모듈 넷으로
+    (`fa_map` -> 전역 전원 -> `<블록>/<넷>`, V0 는 `<블록>/<소자>:<단자>`), 검사기 subinsts 순서,
+    배선 도형의 격자 검사 문구. `test/compose.mjs` 가 10 모듈에서 ALIGN 이 검사기에 넣은 목록의
+    블록 부분과 순서·이름·좌표가 같음을, `fixtures/grid.json` 으로 격자 문구 150 개를 맞춘다.
+    리프 파일에 subinsts 순서(`s`)를 더했다 — V0 가 나오는 순서와 달라서.
+  - `gds.mjs`: `gen_gds_json.translate` + `json2gds`(python-gdsii 레코드). 모듈 6 개의
+    `.python.gds.json` 이 같고, 최상위 `.python.gds` 는 바이트까지 같다. 저장소 고정값은
+    검사기 고정 사례를 정리해 쓴 GDS 의 sha256 (`fixtures/gds-*.json`).
 
 **3 단계 — Rust 배선기** (`symplace/router`).
 - 격자: x 는 M1/M3 트랙(80), y 는 M2/M4 트랙(84). 신호는 M1~M4, 필요하면 M5/M6.
@@ -386,7 +397,11 @@ node checkref.mjs capture telescopic_ota    # 배선하면서 모듈마다 검�
                                             #   -> ~/.cache/symplace/check/<예제>.json
 node mutate.mjs telescopic_ota TELESCOPIC_OTA ../../../web/placer/fixtures/check-x.json --seed=3
 node checkref.mjs check <사례.json> <사례.json>   # 망가뜨린 사례에 파이썬 답을 채운다
+node checkref.mjs gds <사례.json> <gds-고정값.json> # 그 사례로 파이썬이 쓴 GDS 의 sha256
+node checkref.mjs grid <grid.json>          # 격자 검사 문구 고정값
 node ../../../web/placer/test/check.mjs     # JS 검사기 대조
+node ../../../web/placer/test/compose.mjs   # 도형 합성 대조 (기록이 있으면)
+node ../../../web/placer/test/gds.mjs <route.mjs --dump 폴더...>   # GDS 대조
 ```
 - 시간은 node 기준이다. 브라우저는 받는 시간이 더해진다.
 

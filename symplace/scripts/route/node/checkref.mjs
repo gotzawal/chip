@@ -9,6 +9,15 @@
  *        고정 사례(test/checkcases.mjs 꼴, mutate.mjs 가 만든다)를 펴서 파이썬 검사기에
  *        넣고, 답(results)을 채운 사례 파일을 쓴다. 입력과 출력이 같은 파일이어도 된다.
  *
+ *    node checkref.mjs gds <사례.json> <출력.json> [--label=그대로]
+ *        그 사례를 파이썬 검사기로 정리하고 ALIGN 의 GDS 경로(gen_gds_json.translate + json2gds)
+ *        로 쓴 바이트의 sha256 을 적는다 — JS GDS(src/route/gds.mjs) 대조용 고정값.
+ *        최상위(후처리 있음)면 _generate_json 처럼 Outline 을 맨 앞에 넣고 핀·라벨을 쓴다.
+ *
+ *    node checkref.mjs grid <출력.json>
+ *        배선 도형의 격자 검사(gen_viewer_json 의 add_terminal) 문구를 여러 층·여러 자리에서
+ *        뽑는다 — src/route/compose.mjs 의 offGrid 대조용 고정값.
+ *
  *  검사기는 gen_viewer_json 이 만드는 것과 같은 캔버스다:
  *  get_generator('MOSGenerator', pdk)(Pdk().load(layers.json), 28, 12, 2, 3, 1, 1, 1).
  */
@@ -167,6 +176,57 @@ def _run_case(c):
     r["terminalsOut"] = cnv._cap_out
     return r
 
+def gds_digest(case_json, name, bbox_json, time_json):
+    import datetime, hashlib, io
+    from align.cell_fabric import gen_gds_json
+    from align.gdsconv.json2gds import convert_GDSjson_GDS_fps
+    c = json.loads(case_json)
+    r = _run_case(c)
+    top = bool(c.get("postprocess"))
+    bbox = json.loads(bbox_json)
+    terms = r["terminalsOut"]
+    if top:
+        terms.insert(0, {"layer": "Outline", "netName": None, "netType": "drawing", "rect": bbox})
+    ifp = io.StringIO(json.dumps({"bbox": bbox, "terminals": terms}))
+    ofp = io.StringIO()
+    pdk = _pdk.Pdk().load(PDKDIR / 'layers.json')
+    gen_gds_json.translate(name, '', top, ifp, ofp, timestamp=datetime.datetime(*json.loads(time_json)),
+                           p=pdk, labelOnce=True, reqLabels=None)
+    out = io.BytesIO()
+    convert_GDSjson_GDS_fps(io.StringIO(ofp.getvalue()), out)
+    b = out.getvalue()
+    return json.dumps({"sha256": hashlib.sha256(b).hexdigest(), "bytes": len(b), "terminals": len(terms)})
+
+def offgrid_msgs(terms_json):
+    """gen_viewer_json 의 add_terminal 격자 검사 — 원문을 그대로 옮겨 PDK 단위 도형에 건다."""
+    gen = get_generator('MOSGenerator', PDKDIR)
+    cnv = gen(_pdk.Pdk().load(PDKDIR / 'layers.json'), 28, 12, 2, 3, 1, 1, 1)
+    scale_factor = 1
+    out = []
+    for t in json.loads(terms_json):
+        layer, netName, tag = t["layer"], t["netName"], t.get("tag")
+        r = [2 * v for v in t["rect"]]
+        errors = []
+        def f(gen, value, tag=None):
+            if value%2 != 0:
+                errors.append(f"Off grid:{tag} {layer} {netName} {r} {r[2]-r[0]} {r[3]-r[1]}: {value} (in 2x units) is not divisible by two.")
+            else:
+                value = value * scale_factor // 2
+                p = gen.clg.inverseBounds(value)
+                if p[0] != p[1]:
+                    errors.append(f"Off grid:{tag} {layer} {netName} {r} {r[2]-r[0]} {r[3]-r[1]}: {value} doesn't land on grid, lb and ub are: {p}")
+        if layer in ["M1", "M3", "M5"]:
+            center = (r[0] + r[2])//2
+        elif layer in ["M2", "M4", "M6"]:
+            center = (r[1] + r[3])//2
+        else:
+            center = None
+        if center is not None:
+            lyr = layer.lower() if layer.lower() in cnv.generators else layer.upper()
+            f(cnv.generators[lyr], center, tag)
+        out.append(errors)
+    return json.dumps(out)
+
 def check_cases(cases_json):
     out = []
     for c in json.loads(cases_json):
@@ -228,7 +288,49 @@ if (mode === "capture") {
   fs.writeFileSync(outp, JSON.stringify(fx));
   const crashed = res.filter((r) => r.crash).length;
   log(`${res.length} 건 (파이썬이 죽은 것 ${crashed}) -> ${outp}`);
+} else if (mode === "gds") {
+  const [inp, outp] = args.slice(1).filter((a) => !a.startsWith("--"));
+  if (!inp || !outp) { console.error("사용법: node checkref.mjs gds <사례.json> <출력.json> [--label=그대로]"); process.exit(2); }
+  const fx = JSON.parse(fs.readFileSync(inp, "utf8"));
+  const label = opt("label") ?? "그대로";
+  const c = fx.cases.find((k) => k.label === label);
+  if (!c) { console.error(`${inp}: "${label}" 사례가 없다`); process.exit(2); }
+  const [ex, module] = fx.source.split(" ");
+  const cap = JSON.parse(fs.readFileSync(path.join(WORK_CACHE, "check", ex + ".json"), "utf8"));
+  const rec = cap.cases.find((k) => k.module === module);
+  const time = [2026, 1, 2, 3, 4, 5];
+  const { py } = await bootAlign({ log });
+  py.runPython(PY);
+  py.setStdout({ batched: () => {} });
+  py.setStderr({ batched: () => {} });
+  const input = expandCase(fx.base, c);
+  const r = JSON.parse(py.globals.get("gds_digest")(JSON.stringify(input), module, JSON.stringify(rec.bbox), JSON.stringify(time)));
+  const out = { format: "gds-fixture/1", check: path.basename(inp), label, name: module, bbox: rec.bbox,
+                pinSwitch: !!input.postprocess, time, ...r };
+  fs.writeFileSync(outp, JSON.stringify(out, null, 1) + "\n");
+  log(`${module} GDS ${r.bytes} 바이트 sha256 ${r.sha256.slice(0, 16)}… -> ${outp}`);
+} else if (mode === "grid") {
+  const outp = args[1];
+  if (!outp) { console.error("사용법: node checkref.mjs grid <출력.json>"); process.exit(2); }
+  const cases = [];
+  const W = { M1: 32, M2: 32, M3: 40, M4: 40, M5: 64, M6: 64 }, P = { M1: 80, M2: 84, M3: 80, M4: 84, M5: 144, M6: 144 };
+  for (const ly of Object.keys(W)) {
+    const v = ly === "M1" || ly === "M3" || ly === "M5";
+    for (const c of [0, P[ly], 3 * P[ly], -P[ly], -2 * P[ly]]) {
+      for (const d of [0, 1, 7, P[ly] / 2, P[ly] - 3, -5]) {
+        const lo = c + d - W[ly] / 2, hi = c + d + W[ly] / 2 + (d === 7 ? 1 : 0);   // d == 7 이면 폭이 홀수 -> 2 배 중심이 홀수
+        cases.push({ layer: ly, netName: d === 1 ? null : "N" + cases.length, tag: d === 0 ? null : "path_metal",
+                     rect: v ? [lo, 100, hi, 400] : [100, lo, 400, hi] });
+      }
+    }
+  }
+  cases.push({ layer: "V1", netName: "X", rect: [3, 5, 35, 37] }, { layer: "M7", netName: "X", rect: [3, 5, 35, 37] });
+  const { py } = await bootAlign({ log });
+  py.runPython(PY);
+  const res = JSON.parse(py.globals.get("offgrid_msgs")(JSON.stringify(cases)));
+  fs.writeFileSync(outp, JSON.stringify({ format: "grid-fixture/1", cases, results: res }) + "\n");
+  log(`${cases.length} 도형, 격자 오류 ${res.flat().length} -> ${outp}`);
 } else {
-  console.error("사용법: node checkref.mjs capture <예제> | check <입력.json> <출력.json>");
+  console.error("사용법: node checkref.mjs capture <예제> | check <입력.json> <출력.json> | gds <사례.json> <출력.json> | grid <출력.json>");
   process.exit(2);
 }

@@ -6,11 +6,14 @@
  *
  *    { format: "leaves/1",
  *      leaves: { <concrete>: { bbox: [x0,y0,x1,y1],
- *                              t: [[layer, net, pin, x0, y0, x1, y1, terminal?], ...] } } }
+ *                              t: [[layer, net, pin, x0, y0, x1, y1, terminal?], ...],
+ *                              s: [subinst, ...]? } } }
  *
  *    net       netName (없으면 null — 소자층 도형은 넷이 없다)
  *    pin       1 이면 netType "pin", 0 이면 "drawing"
  *    terminal  [subinst, 단자] — V0 접점에만 있다. 검사기가 소자 단자를 가르는 데 쓴다.
+ *    s         리프 JSON 의 subinsts 이름들 (그 순서 그대로). 도형 합성이 검사기의 subinsts 를
+ *              ALIGN 과 같은 순서로 채우는 데 쓴다 — V0 가 나오는 순서와 다르다. 없으면 [].
  *
  *  리프 LEF 는 이것의 함수다 (SIZE = bbox, PIN = pin 도형, OBS = 나머지 중 M1~M6·V1~V5).
  *  5 예제 59 개 리프에서 ALIGN 이 쓴 .lef 와 전부 일치했다 (symplace/PLAN-route.md 3 절).
@@ -20,7 +23,7 @@ export const LEAVES_FORMAT = "leaves/1";
 
 /** ALIGN 리프 JSON 하나 -> 압축 항목. */
 export function packLeaf(d) {
-  return {
+  const e = {
     bbox: d.bbox.map(Number),
     t: (d.terminals ?? []).map((t) => {
       const row = [t.layer, t.netName ?? null, t.netType === "pin" ? 1 : 0, ...t.rect.map(Number)];
@@ -28,6 +31,9 @@ export function packLeaf(d) {
       return row;
     }),
   };
+  const s = Object.keys(d.subinsts ?? {});
+  if (s.length) e.s = s;
+  return e;
 }
 
 /** {concrete: ALIGN 리프 JSON} -> 파일 한 덩이. */
@@ -37,7 +43,7 @@ export function packLeaves(byConcrete) {
   return { format: LEAVES_FORMAT, leaves };
 }
 
-/** 압축 항목 -> ALIGN 리프 JSON 과 같은 모양 {bbox, terminals}. */
+/** 압축 항목 -> ALIGN 리프 JSON 과 같은 모양 {bbox, terminals, subinsts}. subinsts 는 이름 배열이다. */
 export function unpackLeaf(e) {
   return {
     bbox: e.bbox.slice(),
@@ -46,6 +52,7 @@ export function unpackLeaf(e) {
       if (terminal) t.terminal = terminal.slice();
       return t;
     }),
+    subinsts: (e.s ?? []).slice(),
   };
 }
 

@@ -154,6 +154,8 @@ def run(sp_text, name, subckt, const_text):
                     row.append(t["terminal"])
                 rows.append(row)
             leaves[cn] = {"bbox": d["bbox"], "t": rows}
+            if d.get("subinsts"):
+                leaves[cn]["s"] = list(d["subinsts"].keys())
     return json.dumps({"topology": topology, "primitives": prims,
                        "templates": templates, "place": None,
                        "leaves": {"format": "leaves/1", "leaves": leaves}})

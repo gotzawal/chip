@@ -153,7 +153,7 @@ node symplace/web/placer/pack-example.mjs      "$ALIGN_WORK/my_ota" my_ota --lab
 같이 담는다. terminals 는 `netType == "pin"` 만 남긴다 (예제 하나가 84K -> 13K).
 
 리프 셀의 전체 도형은 따로 `data/<이름>.leaves.json` 에 쓴다 (`src/route/leaves.mjs`
-형식, 예제 하나 41~222K). 배선할 때만 받으므로 첫 화면은 그대로 가볍다.
+형식, 예제 하나 41~219K). 배선할 때만 받으므로 첫 화면은 그대로 가볍다.
 `--leaves-only` 를 주면 이것만 쓰고 `data/<이름>.json` 은 안 건드린다 — 지금 예제
 다섯 개의 리프 파일은 브라우저 앞단(node 하네스 `--dump`)의 출력으로 이렇게 만들었다.
 
@@ -441,4 +441,6 @@ node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 
 node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 비교
 node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와 맞는가
 node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == ALIGN 파이썬 검사기
+node symplace/web/placer/test/compose.mjs    # 도형 합성 == gen_viewer_json
+node symplace/web/placer/test/gds.mjs        # GDS == ALIGN 파이썬 GDS (바이트)
 ```
