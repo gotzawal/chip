@@ -15,9 +15,8 @@
  *  JSON 은 파이썬이 쓴 것과 열쇠 순서까지 같게 만든다 (pydantic .dict() 의 필드 순서).
  *  단위는 PDK(layers.json) 단위. PnRDB 단위(x2)는 scalePlacementVerilog(invert) 가 만든다.
  */
-import { pgHierarchy } from "../hier.mjs";
+import { pgHierarchy, topModule } from "../hier.mjs";
 import { unpackLeaf } from "../leaves.mjs";
-import { topModule } from "../problem.mjs";
 import { clone } from "./pnrdb.mjs";
 
 // ---------------------------------------------------------------- LEF (cell_fabric/gen_lef.py)

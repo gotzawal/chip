@@ -30,10 +30,9 @@ import { traverseHierTree } from "../../../../src/route/align/place.mjs";
 import { recordOf } from "../../../../src/route/align/records.mjs";
 import { viewerBbox, viewerBlocks, viewerWires } from "../../../../src/route/align/wires.mjs";
 import { composeModule } from "../../../../src/route/compose.mjs";
-import { faMapOf, pgHierarchy, powerNetsOf } from "../../../../src/route/hier.mjs";
+import { faMapOf, pgHierarchy, placementFromAlign, powerNetsOf } from "../../../../src/route/hier.mjs";
 import { readLeaves, unpackLeaf } from "../../../../src/route/leaves.mjs";
 import { MOCK_PDK } from "../../../../src/route/pdk.mjs";
-import { placementFromAlign } from "../../../../src/route/problem.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const CACHE = process.env.SYMPLACE_CACHE ?? path.join(process.env.HOME ?? "", ".cache/symplace");

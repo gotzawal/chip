@@ -32,7 +32,7 @@ py.runPython(workerPython("PYROUTE"));
 py.runPython(fs.readFileSync(path.join(HERE, "instrument.py"), "utf8"));
 
 const placement = alignPlace
-  ? JSON.stringify((await import(path.resolve(HERE, "../../../../../src/route/problem.mjs")))
+  ? JSON.stringify((await import(path.resolve(HERE, "../../../../../src/route/hier.mjs")))
       .placementFromAlign(JSON.parse(fs.readFileSync(path.resolve(HERE, `../../../../../data/${ex}.json`), "utf8")).place))
   : fs.readFileSync(path.join(WORK_CACHE, `place-${ex}.json`), "utf8");
 const r = JSON.parse(py.globals.get("route")("/work/" + ex, ex, top, placement));

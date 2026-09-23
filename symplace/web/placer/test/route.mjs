@@ -1,94 +1,182 @@
-/** 새 배선 경로 전체 (src/route/pipeline.mjs — 페이지의 배선 워커가 부르는 것) —
- *  배선 문제 -> Rust 배선기(src/route/router.wasm) -> 도형 합성 -> DRC/LVS -> GDS.
+/** 배선 한 판 (src/route/pipeline.mjs — 페이지의 "배선 · Rust 이식" 이 부르는 것) 이 ALIGN 과 같은가.
  *
- *  예제마다 ALIGN 배치(늘 있다)와 캐시의 우리 배치(있으면)로 배선하고:
- *    - 못 이은 넷이 없다
- *    - SHORT · OPEN · DRC · 후처리 · 격자 오류가 0 이다
- *    - DIFFERENT WIDTH 는 소자층(리프 안)의 것뿐이다 — ALIGN 결과에도 똑같이 있다
- *  배선이 더한 금속 길이(층별)와 비아 수를 찍는다 — 배선 뒤와 배선 전을 검사기로 합친 도형의 차.
- *  대칭 넷 쌍은 거울 경로를 그대로 쓴 쌍 수와, 두 넷의 배선 길이 차(가장 큰 것)를 찍는다.
- *  캐시에 ALIGN 배선 기록(checkref.mjs capture)이 있으면 같은 배치의 ALIGN 배선도 같은 잣대로
- *  나란히 찍는다 (ALIGN 은 M5/M6 전원 격자까지 친다).
+ *  예제마다 (우리 배치, ALIGN 배치) 로 돌리고, ALIGN 이 같은 배치로 낸 것과 견준다:
+ *    모듈마다   검사기가 낸 도형 == <모듈>_<j>.json 의 terminals (차례까지), bbox
+ *    최상위     GDS JSON == <TOP>_0.python.gds.json (시각만 빼고) — 바이트는 gdsBytes 가 같은 차례로 쓴다
+ *    오류       DRC/LVS 문구 == pyroute.py 가 모은 3_pnr/*.errors (앞 40 줄과 개수)
+ *    단계 기록   (--router=wasm) Rust 배선기의 기록 == 탭 덤프의 m*_out (records.mjs compareRuns)
  *
- *    node symplace/web/placer/test/route.mjs
+ *  배선기: --router=tap (기본) 은 ALIGN 이 낸 기록(탭 덤프)을 그대로 돌려주는 가짜다 — 배선기 밖의 모든 것
+ *  (입력, 계층, 도형 모으기, 검사, GDS)을 본다. --router=wasm 은 src/route/alignroute.wasm (Rust 이식) 으로 끝까지.
+ *
+ *    node symplace/web/placer/test/route.mjs [--ex=예제] [--tag=ours|align|<설정>] [--router=tap|wasm] [--tap=<뿌리>] [-v]
+ *
+ *  기준: ~/.cache/symplace/tap/<예제>/<ours|align>/ (align-ref/tap/runall.mjs — calls.json, m*_out, result.json),
+ *        ~/.cache/symplace/aligndb/<예제>/<ours|align>/align_*.json (align-ref/db/dumphn.mjs).
+ *  --tap=~/.cache/symplace/tap-vary 는 흔든 배치 (align-ref/tap/vary.mjs): 배치는 그 폴더의 placement.json 이고
+ *  최종 도형 기준(aligndb)이 없어 오류 문구와 단계 기록만 견준다.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { compareRuns, recordOf } from "../../../../src/route/align/records.mjs";
+import { loadAlignRouter } from "../../../../src/route/alignroute.mjs";
+import { gdsJson } from "../../../../src/route/gds.mjs";
+import { placementFromAlign } from "../../../../src/route/hier.mjs";
 import { MOCK_PDK } from "../../../../src/route/pdk.mjs";
 import { routeDesign } from "../../../../src/route/pipeline.mjs";
-import { placementFromAlign } from "../../../../src/route/problem.mjs";
-import { loadRouter } from "../../../../src/route/router.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const CACHE = process.env.SYMPLACE_CACHE ?? path.join(process.env.HOME ?? "", ".cache/symplace");
+const args = process.argv.slice(2);
+const opt = (k, d) => args.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3) ?? d;
+const verbose = args.includes("-v");
 const J = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
-const router = await loadRouter(fs.readFileSync(path.join(ROOT, "src/route/router.wasm")));
-const DIR = Object.fromEntries(MOCK_PDK.Abstraction.filter((l) => /^M\d+$/.test(l.Layer)).map((l) => [l.Layer, l.Direction.toLowerCase()]));
+const home = (p) => p.replace(/^~(?=\/|$)/, process.env.HOME ?? "");
 
-/** 층별 금속 길이(트랙 방향 합)와 비아 수 — 검사기가 합친 도형에서, 색 사본은 빼고 */
-function measure(shapes) {
-  const len = {}, vias = {};
-  for (const t of shapes) {
-    if (t.color) continue;
-    if (DIR[t.layer]) len[t.layer] = (len[t.layer] ?? 0) + (DIR[t.layer] === "v" ? t.rect[3] - t.rect[1] : t.rect[2] - t.rect[0]);
-    else if (/^V\d+$/.test(t.layer)) vias[t.layer] = (vias[t.layer] ?? 0) + 1;
+const TAP = path.resolve(home(opt("tap", path.join(CACHE, "tap"))));
+const DB = TAP === path.join(CACHE, "tap") ? path.join(CACHE, "aligndb") : null;
+const useWasm = opt("router", "tap") === "wasm";
+const wasm = useWasm ? await loadAlignRouter(fs.readFileSync(path.join(ROOT, "src/route/alignroute.wasm"))) : null;
+
+/** 탭 덤프의 호출을 모듈마다 묶는다 (같은 모듈의 같은 모드가 또 나오면 다음 모듈) */
+function tapModules(dir) {
+  const calls = J(path.join(dir, "calls.json"));
+  const file = (c, io) => path.join(dir, `${String(c.k).padStart(2, "0")}_${c.node}_m${c.mode}_${io}.json`);
+  const mods = [];
+  for (const c of calls) {
+    if (!mods.length || mods.at(-1).name !== c.node || mods.at(-1).calls.some((d) => d.mode === c.mode)) mods.push({ name: c.node, calls: [] });
+    mods.at(-1).calls.push(c);
   }
-  return { len, vias };
-}
-/** 배선이 더한 것 = 배선 뒤 - 배선 전 (둘 다 검사기가 합친 도형). 같은 배치면 ALIGN 과 견줄 수 있다. */
-function added(after, before) {
-  const a = measure(after), b = measure(before);
-  const len = {};
-  for (const l of Object.keys(a.len)) { const d = a.len[l] - (b.len[l] ?? 0); if (d) len[l] = d; }
-  const nv = Object.keys(a.vias).reduce((s, l) => s + a.vias[l] - (b.vias[l] ?? 0), 0);
-  const um = Object.values(len).reduce((x, y) => x + y, 0) / 1000;
-  const by = Object.keys(len).sort().map((l) => `${l} ${(len[l] / 1000).toFixed(1)}`).join(" ");
-  return `금속 ${um.toFixed(1).padStart(5)} µm (${by}), 비아 ${nv}`;
+  const records = mods.flatMap((m) => m.calls.map((c) => ({ module: m.name, mode: c.mode, out: recordOf(J(file(c, "out")), c.mode) })));
+  return { mods, records };
 }
 
-let bad = 0, n = 0;
-const rows = J(path.join(ROOT, "data/index.json")).map((x) => (typeof x === "string" ? { name: x } : x));
-for (const { name: ex } of rows) {
-  const lp = path.join(ROOT, "data", ex + ".leaves.json");
-  if (!fs.existsSync(lp)) continue;
+/** 가짜 배선기 — 모듈 #k 에 ALIGN 이 낸 기록을 돌려준다 */
+function tapRouter(recs) {
+  let k = 0;
+  const groups = [];
+  for (const r of recs) {
+    if (!groups.length || groups.at(-1)[0].module !== r.module || groups.at(-1).some((x) => x.mode === r.mode)) groups.push([]);
+    groups.at(-1).push(r);
+  }
+  return {
+    async route(job) {
+      const g = groups[k++];
+      if (!g) throw new Error(`기준에 없는 배선 호출 ${job.node.name}`);
+      if (g[0].module !== job.node.name) throw new Error(`모듈 차례: ALIGN ${g[0].module} / JS ${job.node.name}`);
+      return { records: job.modes.map((mode) => {
+        const r = g.find((x) => x.mode === mode);
+        if (!r) throw new Error(`${job.node.name}: 모드 ${mode} 기록이 기준에 없다`);
+        return { module: r.module, mode, ms: 0, out: structuredClone(r.out) };
+      }), warnings: [] };
+    },
+  };
+}
+
+const tkey = (t) => JSON.stringify([t.layer, t.netName ?? null, t.netType, t.rect, t.terminal ?? null, t.color ?? null]);
+/** 도형 목록 두 개 — 차례까지. 처음 다른 자리와 개수 차 */
+function diffTerms(mine, ref) {
+  const a = mine.map(tkey), b = ref.map(tkey);
+  if (a.length === b.length && a.every((x, i) => x === b[i])) return null;
+  const i = a.findIndex((x, j) => x !== b[j]);
+  const ms = new Map();
+  for (const x of a) ms.set(x, (ms.get(x) ?? 0) + 1);
+  for (const x of b) ms.set(x, (ms.get(x) ?? 0) - 1);
+  const onlyA = [...ms].filter(([, n]) => n > 0).reduce((s, [, n]) => s + n, 0);
+  const onlyB = [...ms].filter(([, n]) => n < 0).reduce((s, [, n]) => s - n, 0);
+  return `도형 ${a.length} / ALIGN ${b.length}, 차례 ${i} 부터 다름 (${a[i] ?? "없음"} / ALIGN ${b[i] ?? "없음"}), ` +
+         `우리만 ${onlyA} ALIGN 만 ${onlyB}`;
+}
+const noTime = (g) => { const c = structuredClone(g); for (const l of c.bgnlib) { l.time = null; for (const s of l.bgnstr) s.time = null; } return c; };
+
+const index = J(path.join(ROOT, "data/index.json")).map((x) => (typeof x === "string" ? x : x.name));
+let bad = 0, runs = 0;
+for (const ex of index) {
+  if (opt("ex") && opt("ex") !== ex) continue;
+  const exDir = path.join(TAP, ex);
+  if (!fs.existsSync(exDir) || !fs.existsSync(path.join(ROOT, "data", ex + ".leaves.json"))) continue;
   const design = J(path.join(ROOT, "data", ex + ".json"));
-  const leaves = J(lp);
-  const runs = [["ALIGN", design.place && placementFromAlign(design.place)]];
-  const pf = path.join(CACHE, `place-${ex}.json`);
-  if (fs.existsSync(pf)) runs.push(["우리", J(pf)]);
-  for (const [tag, placement] of runs) {
-    if (!placement) continue;
-    // 페이지와 같은 길 (src/route/pipeline.mjs — 배선 워커가 부르는 것)
-    const out = routeDesign({ design, leaves, placement, router });
-    const { problem, pre, wires, result: res, stats: st } = out;
-    const r = { ms: st.routerMs, pairs: st.pairs, mirrored: st.mirrored };
-    // 소자층(리프 안)의 DIFFERENT WIDTH 는 ALIGN 결과에도 똑같이 있다 — 빼고 센다
-    const lines = out.errors.filter((l) => !/^DIFFERENT WIDTH \('Rectangles on layer (?!M\d|V\d)/.test(l));
+  const leaves = J(path.join(ROOT, "data", ex + ".leaves.json"));
+  for (const tag of fs.readdirSync(exDir).sort()) {
+    if (opt("tag") && opt("tag") !== tag) continue;
+    const dir = path.join(exDir, tag);
+    if (!fs.existsSync(path.join(dir, "calls.json"))) continue;
+    const pf = fs.existsSync(path.join(dir, "placement.json")) ? path.join(dir, "placement.json")
+      : tag === "ours" ? path.join(CACHE, `place-${ex}.json`) : null;
+    const placement = pf ? (fs.existsSync(pf) ? J(pf) : null) : tag === "align" ? placementFromAlign(design.place) : null;
+    const head = `${ex.padEnd(27)} ${tag.padEnd(16)}`;
+    if (!placement) { console.log(`${head} (배치가 없다)`); continue; }
+    runs++;
+    const tap = tapModules(dir);
+    const router = wasm ?? tapRouter(tap.records);
     const errs = [];
-    if (st.failed.length) errs.push(`못 이은 넷: ${st.failed.join(", ")}`);
-    if (lines.length) errs.push(`${lines.length} 오류: ${lines.slice(0, 4).join("\n      ")}`);
-    const gdsOk = out.gds.length > 1000 && out.gds[2] === 0 && out.gds[3] === 2;   // HEADER 레코드
-    if (!gdsOk) errs.push("GDS 가 이상하다");
-    // 대칭 넷 쌍: 배선 금속 길이가 얼마나 같은가 (정합의 잣대), 거울 그대로인 쌍 수
-    const wl = (name) => wires.filter((w) => w.netName === name && DIR[w.layer])
-      .reduce((a, w) => a + (DIR[w.layer] === "v" ? w.rect[3] - w.rect[1] : w.rect[2] - w.rect[0]), 0);
-    const bal = problem.nets.map((x, k) => [x, k]).filter(([x, k]) => x.sym > k && x.parts > 1)
-      .map(([x]) => { const a = wl(x.name), b = wl(problem.nets[x.sym].name); return Math.abs(a - b) / Math.max(a, b, 1); });
-    const symText = r.pairs ? `  대칭 ${r.mirrored}/${r.pairs} 거울, 길이 차 최대 ${(100 * Math.max(0, ...bal)).toFixed(0)}%` : "";
-    console.log(`${ex.padEnd(28)} ${tag.padEnd(5)} 넷 ${String(problem.nets.filter((x) => x.parts > 1).length).padStart(2)}` +
-                `  ${added(res.terminals, pre.terminals)}${symText}  배선기 ${r.ms.toFixed(0)}ms` +
-                `  GDS ${(out.gds.length / 1024).toFixed(0)}K  ${errs.length ? "틀림" : "OK"}`);
-    if (tag === "우리") {
-      const cf = path.join(CACHE, "check", ex + ".json");
-      if (fs.existsSync(cf)) {
-        const top = J(cf).cases.find((c) => c.isTop);
-        console.log(`${"".padEnd(28)} ALIGN 배선기, 같은 배치  ${added(top.terminalsOut, pre.terminals)}  (M5/M6 은 전원 격자)`);
-      }
+    let out;
+    const t0 = performance.now();
+    try {
+      out = await routeDesign({ design: { topology: design.topology, primitives: design.primitives }, leaves, placement, router });
+    } catch (e) {
+      bad++;
+      console.log(`${head} 오류  ${e.stack.split("\n").slice(0, 3).join(" | ")}`);
+      continue;
     }
+    const ms = performance.now() - t0;
+
+    // 모듈마다 검사기 출력과 bbox (aligndb 에 ALIGN 의 <모듈>_<j>.json 이 있으면)
+    const dbDir = DB && path.join(DB, ex, tag);
+    let nMod = 0;
+    if (dbDir && fs.existsSync(dbDir)) {
+      for (const [variant, c] of out.outputs) {
+        const f = path.join(dbDir, `align_${variant}.json`);
+        if (!fs.existsSync(f)) { errs.push(`${variant}: ALIGN 출력이 없다`); continue; }
+        const ref = J(f);
+        const isTop = variant === `${out.name}_0`;
+        const mine = isTop ? out.geo.terminals : c.terminals;
+        const d = diffTerms(mine, ref.terminals);
+        if (d) errs.push(`${variant}: ${d}`);
+        if (JSON.stringify(c.bbox) !== JSON.stringify(ref.bbox)) errs.push(`${variant}: bbox ${c.bbox} / ALIGN ${ref.bbox}`);
+        nMod++;
+      }
+      const gf = path.join(dbDir, `align_${out.name}_0.python.gds.json`);
+      if (fs.existsSync(gf)) {
+        const top = out.outputs.get(`${out.name}_0`);
+        const mine = gdsJson({ name: out.name, terminals: out.geo.terminals, bbox: top.bbox, pinSwitch: true }, MOCK_PDK);
+        if (JSON.stringify(noTime(mine)) !== JSON.stringify(noTime(J(gf)))) {
+          const a = noTime(mine).bgnlib[0].bgnstr[0].elements, b = noTime(J(gf)).bgnlib[0].bgnstr[0].elements;
+          const i = a.findIndex((e, j) => JSON.stringify(e) !== JSON.stringify(b[j]));
+          errs.push(`GDS JSON 다름: 요소 ${a.length} / ALIGN ${b.length}, ${i} 번째부터 (${JSON.stringify(a[i])?.slice(0, 120)} / ALIGN ${JSON.stringify(b[i])?.slice(0, 120)})`);
+        }
+      } else errs.push("(GDS 기준 없음)");
+    }
+
+    // 오류 문구 (pyroute.py 는 앞 40 줄만 남긴다)
+    const rj = path.join(dir, "result.json");
+    let errNote = "";
+    if (fs.existsSync(rj)) {
+      const r = J(rj);
+      if (r.nerrors !== out.errors.length) errs.push(`DRC/LVS ${out.errors.length} 건 / ALIGN ${r.nerrors} 건`);
+      const k = r.errors.findIndex((l, i) => l !== out.errors[i]);
+      if (k >= 0) errs.push(`오류 문구 ${k} 번째: ${out.errors[k]?.slice(0, 160)} / ALIGN ${r.errors[k].slice(0, 160)}`);
+      errNote = `DRC/LVS ${String(r.nerrors).padStart(2)}`;
+    }
+
+    // 단계 기록 (Rust 배선기일 때)
+    let stNote = "";
+    if (wasm) {
+      const rows = compareRuns(tap.records, out.records);
+      const diffRows = rows.filter((r) => !r.same);
+      stNote = `단계 ${rows.length - diffRows.length}/${rows.length}`;
+      for (const r of diffRows.slice(0, 6))
+        errs.push(`단계 ${r.module} 모드 ${r.mode}: ` + (r.missing ? `한쪽에 없다 (${r.missing})` :
+          `${r.count} 곳 — ` + r.first.slice(0, 3).map((d) => `${d.path}: ${d.b} / ALIGN ${d.a}`).join("; ")));
+    }
+    const ok = !errs.some((e) => !e.startsWith("("));
+    if (!ok) bad++;
+    console.log(`${head} 모듈 ${String(out.outputs.size).padStart(2)} (도형 대조 ${nMod})  ${errNote}  ${stNote}  ` +
+                `GDS ${(out.gds.length / 1024).toFixed(0)}K  ${ms.toFixed(0)} ms  ${ok ? "같다" : "다름"}`);
     for (const e of errs) console.log("    " + e);
-    n++; if (errs.length) bad++;
+    if (verbose) for (const w of out.warnings) console.log("    경고: " + w);
   }
 }
-if (bad) { console.error(`\n${n} 건 중 ${bad} 건 틀림`); process.exit(1); }
-console.log(`\n${n} 건 모두 DRC/LVS 0`);
+console.log(`\n${runs} 판 — ${bad ? `다름 ${bad} 판` : "모두 같다"}`);
+if (bad || !runs) process.exit(1);

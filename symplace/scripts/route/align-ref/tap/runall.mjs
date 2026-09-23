@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { bootAlign, runFront, workerPython, WORK_CACHE, ROOT } from "../../node/align.mjs";
-import { placementFromAlign } from "../../../../../src/route/problem.mjs";
+import { placementFromAlign } from "../../../../../src/route/hier.mjs";
 const J = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 const only = process.argv[2];
 const rows = J(path.join(ROOT, "data/index.json")).map((x) => (typeof x === "string" ? x : x.name));

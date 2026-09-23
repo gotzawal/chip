@@ -16,13 +16,15 @@ import { BLOCK, TERMINAL } from "./pnrdb.mjs";
 
 const scaleOf = (sf) => (v) => Math.floor((sf * v) / 2);
 
-/** @returns {Array<{netName, netType:"drawing", layer, rect:number[], tag}>} */
+/** @returns {Array<{netName, netType:"drawing", layer, rect:number[], tag, raw:number[]}>}
+ *  raw 는 PnRDB 단위 사각형 — gen_viewer_json 의 격자 검사(add_terminal)와 rational_scaling 이 이것을 본다. */
 export function viewerWires(hN, scaleFactor = 1) {
   const s = scaleOf(scaleFactor);
   const out = [];
   const add = (net, con, tag) => {
     const b = con.placedBox;
-    out.push({ netName: net, netType: "drawing", layer: con.metal, rect: [b.LL.x, b.LL.y, b.UR.x, b.UR.y].map(s), tag });
+    const raw = [b.LL.x, b.LL.y, b.UR.x, b.UR.y];
+    out.push({ netName: net, netType: "drawing", layer: con.metal, rect: raw.map(s), tag, raw });
   };
   const via = (net, v, tag) => { for (const k of ["UpperMetalRect", "LowerMetalRect", "ViaRect"]) add(net, v[k], tag); };
   for (const n of [...hN.Nets, ...hN.PowerNets]) {
@@ -42,6 +44,23 @@ export function viewerWires(hN, scaleFactor = 1) {
     for (const v of pg.vias) via(pg.name, v, "power grid via");
   }
   return out;
+}
+
+/** gen_viewer_json 의 fa_map — 넷(Nets 다음 PowerNets)에 물린 블록 핀 "<블록>/<핀>" -> 넷 이름.
+ *  모듈 계층(1_topology)이 아니라 배선한 노드에서 짓는다. 한 핀이 두 넷에 물리면 ALIGN 처럼 멈춘다. */
+export function viewerFaMap(hN) {
+  const m = new Map();
+  for (const n of [...hN.Nets, ...hN.PowerNets]) {
+    for (const c of n.connected) {
+      if (c.type !== BLOCK) continue;
+      const bc = hN.Blocks[c.iter2];
+      const blk = bc.instance[bc.selectedInstance];
+      const formal = `${blk.name}/${blk.blockPins[c.iter].name}`;
+      if (m.has(formal)) throw new Error(`gen_viewer_json: ${formal} 가 두 넷에 물려 있다 (${m.get(formal)}, ${n.name})`);
+      m.set(formal, n.name);
+    }
+  }
+  return m;
 }
 
 /** 모듈의 bbox (배선 뒤 LL/UR) — PDK 단위 */

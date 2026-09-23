@@ -27,9 +27,9 @@ const INDICES = { h: [[1, 3], 0], v: [[0, 2], 1], "*": [[0, 2], 1] };
 
 // ---------------------------------------------------------------- 파이썬 repr
 // 오류 문구를 ALIGN 의 .errors 파일과 같은 글자로 쓰려고 쓴다.
-const pyStr = (s) => (s == null ? "None"
+export const pyStr = (s) => (s == null ? "None"
   : !s.includes("'") ? `'${s}'` : !s.includes('"') ? `"${s}"` : `'${s.replace(/'/g, "\\'")}'`);
-const pyList = (a) => "[" + a.join(", ") + "]";
+export const pyList = (a) => "[" + a.join(", ") + "]";
 const pyName = (s) => (s == null ? "None" : String(s));        // f"{x}" — str(), 따옴표 없음
 const pyBool = (b) => (b ? "True" : "False");
 const pyTuple = (items) => "(" + items.join(", ") + (items.length === 1 ? ",)" : ")");

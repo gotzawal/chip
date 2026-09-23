@@ -68,3 +68,27 @@ export function faMapOf(module) {
 
 /** 전역 전원 넷 이름들 (global_signals 의 actual). */
 export const powerNetsOf = (hier) => new Set((hier.global_signals ?? []).map((g) => g.actual));
+
+/** 아무 데도 인스턴스로 안 쓰이는 모듈이 최상위다. */
+export function topModule(topology) {
+  const used = new Set(topology.modules.flatMap((m) => m.instances.map((i) => i.abstract_template_name)));
+  const tops = topology.modules.filter((m) => !used.has(m.name));
+  if (tops.length !== 1) throw new Error(`최상위 모듈이 ${tops.length} 개다: ${tops.map((m) => m.name).join(", ")}`);
+  return tops[0];
+}
+
+/** ALIGN 의 배치 결과(scaled_placement_verilog — data/<예제>.json 의 place)를 배선이 받는 배치 모양으로.
+ *  예제 파일에 늘 들어 있으므로 캐시 없이 배선 경로를 시험할 수 있다. */
+export function placementFromAlign(place) {
+  const used = new Set(place.modules.flatMap((m) => m.instances.map((i) => i.concrete_template_name)));
+  const tops = place.modules.filter((m) => !used.has(m.concrete_name));
+  if (tops.length !== 1) throw new Error(`ALIGN 배치의 최상위가 ${tops.length} 개다`);
+  const inst = (i) => ({ name: i.instance_name, concrete: i.concrete_template_name,
+                         oX: i.transformation.oX, oY: i.transformation.oY, sX: i.transformation.sX, sY: i.transformation.sY });
+  return {
+    bbox: tops[0].bbox.slice(),
+    instances: tops[0].instances.map(inst),
+    subModules: place.modules.filter((m) => m !== tops[0]).map((m) => ({
+      abstract: m.abstract_name, concrete: m.concrete_name, bbox: m.bbox.slice(), instances: m.instances.map(inst) })),
+  };
+}

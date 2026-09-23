@@ -66,14 +66,15 @@ function inverseBounds(lines, v) {
 }
 
 /** add_terminal 의 격자 검사. M1/M3/M5 는 x 중심, M2/M4/M6 은 y 중심이 트랙 위여야 한다.
- *  문구는 ALIGN 과 같다 (사각형은 2 배 단위로 찍힌다). */
-export function offGrid(t, grids, tag = null) {
+ *  문구는 ALIGN 과 같다 (사각형은 2 배 단위로 찍힌다). raw 는 PnRDB(2 배) 단위 사각형 — 주면 그것을 본다
+ *  (배선기가 낸 도형은 홀수 좌표일 수 있어 반으로 줄인 뒤에는 되살릴 수 없다). */
+export function offGrid(t, grids, tag = null, raw = null) {
   const layer = t.layer;
   let axis = null;
   if (["M1", "M3", "M5"].includes(layer)) axis = 0;
   else if (["M2", "M4", "M6"].includes(layer)) axis = 1;
   if (axis == null) return [];
-  const r = t.rect.map((v) => 2 * v);
+  const r = raw ?? t.rect.map((v) => 2 * v);
   const center = Math.floor((r[axis] + r[axis + 2]) / 2);
   const head = `Off grid:${tag ?? "None"} ${layer} ${t.netName ?? "None"} ${pyList(r)} ${r[2] - r[0]} ${r[3] - r[1]}: `;
   if (center % 2 !== 0) return [head + `${center} (in 2x units) is not divisible by two.`];

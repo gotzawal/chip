@@ -283,9 +283,10 @@
       골라 <b>ALIGN 의 배치 단계를 대신한다</b>.
     </p>
     <p class="lede">
-      배선은 이 PDK 의 격자에 맞춰 새로 짠 <b>Rust 배선기</b>(wasm, gzip 40 KB 남짓)가 맡고,
-      결과는 ALIGN 의 DRC/LVS 검사기를 그대로 옮긴 것으로 잰다. 파이썬(Pyodide)은
-      <code>.sp</code> 를 올려 앞단을 돌릴 때만 뜬다.
+      배선은 <b>ALIGN 의 배선 단계를 그대로 옮긴 것</b>이다 — C++ 배선기(전역·상세·전원)는
+      Rust(wasm)로, 배선기에 넘기는 자료와 도형 모으기·DRC/LVS·GDS 는 JS 로. 같은 배치면 결과가
+      ALIGN 과 바이트까지 같아야 하고, <b>배선 · ALIGN 원본</b> 으로 같은 배치를 ALIGN 그대로
+      돌려 곧바로 견줄 수 있다. 파이썬(Pyodide)은 그 ALIGN 원본과 <code>.sp</code> 앞단에만 뜬다.
     </p>
   </header>
 
@@ -1252,9 +1253,9 @@ function startJob(msg) {
   setTimeout(() => fallback("첫 소식이 없습니다"), 6000);
 }
 
-// --- 배선: routeworker.mjs (JS + Rust wasm) ---
+// --- 배선 · Rust 이식: routeworker.mjs (src/route/pipeline.mjs — JS + alignroute.wasm) ---
 //
-// 배선에 드는 것: 설계의 topology, 리프 셀의 전체 도형(예제는 data/<이름>.leaves.json,
+// 배선에 드는 것: 설계의 topology·primitives, 리프 셀의 전체 도형(예제는 data/<이름>.leaves.json,
 // 올린 .sp 는 앞단이 같이 낸다), 그리고 지금 배치. 파이썬은 안 뜬다.
 //
 // oX 는 transformation 의 원점이다. 화면 좌표(x = cx - w/2)에서 되돌린다:
@@ -1274,17 +1275,18 @@ async function leavesFor(name, blob) {
 }
 
 // 워커가 안 서는 브라우저에서는 같은 코드(src/route/pipeline.mjs)를 메인 스레드에서 돌린다.
-// 배선은 수십 ms 라 페이지가 멎는 일도 거의 없다.
 let routeWorker = null;
 async function routeOnMain(msg) {
-  const [{ routeDesign, routeMessage }, { loadRouter }] = await Promise.all(
-    [import("./src/route/pipeline.mjs"), import("./src/route/router.mjs")]);
+  const [{ routeDesign, routeMessage }, { loadAlignRouter }] = await Promise.all(
+    [import("./src/route/pipeline.mjs"), import("./src/route/alignroute.mjs")]);
   const t0 = performance.now();
-  const r = await fetch("./src/route/router.wasm");
-  if (!r.ok) throw new Error(`src/route/router.wasm → ${r.status}`);
-  const out = routeDesign({ ...msg, router: await loadRouter(await r.arrayBuffer()) });
+  const r = await fetch("./src/route/alignroute.wasm");
+  if (!r.ok) throw new Error(`src/route/alignroute.wasm → ${r.status}`);
+  const out = await routeDesign({ ...msg, router: await loadAlignRouter(await r.arrayBuffer()), say: routeSay });
   return routeMessage(out, (performance.now() - t0) / 1000);
 }
+const routeSay = (text) =>
+  setStatus(`<span class="dot"></span><span>배선 중 — Rust 이식 · ${String(text).replace(/[<>]/g, "")}</span>`);
 function routeSend(msg) {
   return new Promise((resolve, reject) => {
     const main = (why) => {
@@ -1297,7 +1299,8 @@ function routeSend(msg) {
     } catch (err) { main(err.message); return; }
     routeWorker.onmessage = (ev) => {
       const m = ev.data;
-      if (m.type === "error") { console.error("[배선 원문]\n" + m.msg); reject(new Error(m.msg.split("\n")[0])); }
+      if (m.type === "log") routeSay(m.text);
+      else if (m.type === "error") { console.error("[배선 원문]\n" + m.msg); reject(new Error(m.msg.split("\n")[0])); }
       else resolve(m);
     };
     routeWorker.onerror = (ev) => { ev.preventDefault?.(); main(ev.message || "워커 오류"); };
@@ -1315,14 +1318,14 @@ async function runRoute() {
     const name = $("ex").value;
     const blob = await loadExample(name);
     const leaves = await leavesFor(name, blob);
-    const m = await routeSend({ design: { topology: blob.topology }, leaves, placement });
+    const m = await routeSend({ design: { topology: blob.topology, primitives: blob.primitives }, leaves, placement });
     m.key = placementKey(placement);
     showRouted(m);
     const st = m.stats;
-    setStatus(`<span>배선 완료 — DRC/LVS ${m.nerrors}건, 넷 ${st.nets}` +
-              (st.failed.length ? `, <b>못 이은 넷 ${st.failed.length}</b> (${st.failed.join(", ")})` : "") +
-              (st.pairs ? `, 대칭 쌍 ${st.pairs} 중 거울 그대로 ${st.mirrored}` : "") +
-              `, GDS ${(m.gds.byteLength / 1024) | 0}K  (${(m.secs * 1000).toFixed(0)} ms)</span>`);
+    if (m.warnings?.length) console.warn("[배선기 경고]\n" + m.warnings.join("\n"));
+    setStatus(`<span>Rust 이식 배선 완료 — DRC/LVS ${m.nerrors}건, 모듈 ${st.modules}, 넷 ${st.nets}` +
+              `, 배선기 ${st.routerMs.toFixed(0)} ms, GDS ${(m.gds.byteLength / 1024) | 0}K` +
+              `  (${m.secs.toFixed(m.secs < 10 ? 2 : 1)} s)${cmp ? " · " + cmpLine() : ""}</span>`);
   } catch (err) {
     const msg = err.message || "";
     const net = /failed to fetch|networkerror|→ \d+/i.test(msg);
@@ -1426,7 +1429,7 @@ async function runAlignRoute() {
     const m = await alignSend({ name, sp: src.sp, constraints: src.constraints,
                                 subckt: topSubckt(src.sp), placement });
     alignRun = { key: placementKey(placement), geo: m.geo, gds: m.gds, gdsName: m.gdsName,
-                 gdsCxx: m.gdsCxx, errors: m.errors ?? [], records: m.records, secs: m.secs };
+                 gdsCxx: m.gdsCxx, errors: m.errors ?? [], nerrors: m.nerrors ?? 0, records: m.records, secs: m.secs };
     routed = { ...(routed ?? {}), alignLive: m.geo };
     addDownload(new Blob([m.gds], { type: "application/octet-stream" }),
                 name + ".align.gds", "GDS — ALIGN 원본");
@@ -1464,8 +1467,9 @@ function cmpLine() {
   if (!cmp) return "";
   const L = cmp.layout;
   const bad = (cmp.stages ?? []).filter((r) => !r.same).length;
-  return L.same && cmp.gds !== false && !bad ? "Rust 이식과 같음"
-    : `Rust 이식과 다름 (도형 ${L.onlyA.length + L.onlyB.length}${cmp.stages ? `, 단계 ${bad}` : ""})`;
+  return L.same && cmp.gds !== false && cmp.errors !== false && !bad ? "Rust 이식과 같음"
+    : `Rust 이식과 다름 (도형 ${L.onlyA.length + L.onlyB.length}${cmp.errors === false ? ", 오류 문구" : ""}` +
+      `${cmp.stages ? `, 단계 ${bad}` : ""})`;
 }
 
 function showCompare() {
@@ -1473,7 +1477,7 @@ function showCompare() {
   card.hidden = !rustRun && !alignRun;
   if (card.hidden) return;
   dl.textContent = ""; body.textContent = "";
-  const run = (r) => r ? `${r.secs.toFixed(r.secs < 10 ? 2 : 1)} s <small>DRC/LVS ${r.errors.length}건 · ` +
+  const run = (r) => r ? `${r.secs.toFixed(r.secs < 10 ? 2 : 1)} s <small>DRC/LVS ${r.nerrors ?? r.errors.length}건 · ` +
     `도형 ${(r.geo?.terminals ?? []).filter((t) => t.layer !== "Outline" && !t.color).length}</small>` : "-";
   mkRow(dl, "ALIGN 원본", run(alignRun));
   mkRow(dl, "Rust 이식", run(rustRun));
@@ -1493,6 +1497,9 @@ function showCompare() {
       (L.bboxSame ? "" : " · bbox 다름") + "</small>", L.same ? "win" : "lose");
   mkRow(dl, "GDS", cmp.gds == null ? "-" : cmp.gds ? "같음 <small>시각 빼고 바이트까지</small>" : "다름",
         cmp.gds ? "win" : cmp.gds === false ? "lose" : "");
+  mkRow(dl, "DRC/LVS 문구", cmp.errors == null ? "-" : cmp.errors ? `같음 <small>${alignRun.nerrors} 건</small>`
+    : `다름 <small>ALIGN ${alignRun.nerrors} 건 · Rust ${rustRun.nerrors} 건</small>`,
+        cmp.errors ? "win" : cmp.errors === false ? "lose" : "");
   const st = cmp.stages;
   if (st) {
     const bad = st.filter((r) => !r.same).length;
@@ -1543,7 +1550,8 @@ function showRouted(m) {
   // 갈아끼워서, 배선이 끝나는 순간 옆에 있던 ALIGN 배선이 사라졌다 —
   // 정작 비교가 필요한 순간에 비교할 것이 없어졌다.
   if (m.geo) routed = { ...(routed ?? {}), ours: m.geo };
-  rustRun = { key: m.key, geo: m.geo, gds: m.gds, errors: m.errors ?? [], records: m.records ?? null, secs: m.secs };
+  rustRun = { key: m.key, geo: m.geo, gds: m.gds, errors: m.errors ?? [], nerrors: m.nerrors ?? 0,
+              records: m.records ?? null, secs: m.secs };
   compareRuns();
   routeDownloads(m);
   setView("route", "both");      // 나란히. 비교가 이 페이지가 하는 일이다.
