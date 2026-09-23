@@ -389,6 +389,12 @@ JS 가 스스로 만든 N 은 값이 아니라 성질로 확인한다:
 `A(z0 + N theta) = b`(임의 theta), `N^T N = I`, `dim = n - rank`. 전부 통과.
 `A`, `b` 자체는 생성 알고리즘이 같으므로 원소까지 대조한다.
 
+**gpu** — `test/gpu.mjs`: GPU runner 의 calibrate 한 번(W, D, B, lam, mu)이 무차원 CPU
+문제와 상대오차 1e-5~1e-7, 600 스텝 뒤 최선 점수가 소수 넷째 자리까지 같고, 끊어
+돌린 것이 비트까지 같다. headless Chromium(WebGPU, SwiftShader)에서 돈다 —
+Playwright 전역 설치가 필요하다 (`_browser.mjs`). `WEBGPU_NODE` 로 dawn 의 node
+바인딩도 쓸 수 있지만 SwiftShader 와의 조합이 이따금 죽는다.
+
 ## 처리량 (node, 단일 스레드)
 
 ```
@@ -533,10 +539,12 @@ cascode_current_mirror_ota 11 -> 0     1.111 그대로   1.304 -> 1.306
   설정이 batch 보다 많아지면 전부 1 개가 된다. 예산이 늘어도 **깊이는 안 깊어진다**.
   (예산에 따라 결과가 널뛰던 것은 모양 다양성 쪽 버그였고 고쳤다 — 이제
   단조롭다. 남은 건 깊이를 명시적으로 고정하는 것.)
-- **legalize 방향 조합**: cascode 는 성공이 11/68 뿐이다. 실패한 것을 그냥
-  버리는데, 방향 몇 개를 뒤집어 재시도하면 살릴 수 있다. (hsc 에서는 이게
-  병목이 아니었다 — 전수로 풀어도 최선이 같았다. 예제마다 다르다.)
-- **WebGPU**: batch 축이 1024 라 컴퓨트 셰이더에 그대로 맞는다.
-  지금은 검증된 단일 Objective 를 B 번 도는 구조다 — 정확성이 먼저였다.
+- **legalize 방향 조합**: 실패는 여유 영역을 넓혀 다시 풀고(cascode 34/34), 성공한
+  상위 후보는 침범량이 비슷했던 쌍의 방향을 뒤집어 다시 풀어 본다
+  (`refineDirections`). 실패한 후보의 방향을 뒤집어 살리는 것은 아직이다.
+- **WebGPU**: 됐다 — `src/gpu/runner.mjs`, 검사는 `test/gpu.mjs` (headless Chromium)
+  와 `test/page.mjs`. 밀도항은 랭크 N 항등식으로 바꿔 CPU 도 3 배 빨라졌다.
+  실제 GPU 에서의 시간은 아직 재지 못했다 (여기는 SwiftShader 뿐이다).
+  루트 README 의 "WebGPU" 절과 `symplace/PLAN-place-variants-gpu.md`.
 - **변이·반전·영역을 따로 고른다**: 변이는 전역 탐색, 반전은 좌표 고정 후
   좌표하강, 영역은 후보 몇 개. 셋을 같이 푸는 게 원칙적으로는 낫다.

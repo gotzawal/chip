@@ -19,11 +19,17 @@ import { readDesign, topIndex, moduleOrder, variantGroups,
 import { baseline, axes } from "./baseline.mjs";
 import { placeHierarchy, symmetryResidual, orderViolations,
          spreadShapes, SUB_VARIANTS } from "./place.mjs";
+import { createGpuRunner } from "./gpu/runner.mjs";
 
 export async function runJob(data, post) {
   const { name, blob, batch, previewOnly, grid = [80, 84],
-          hpwlWeight, lamRatio } = data;
+          hpwlWeight, lamRatio, gpu = true, perConfig = 32 } = data;
   try {
+    // WebGPU 가 있으면 연속 단계(Adam)를 거기서 돈다 — 시작점을 설정마다 perConfig 개.
+    // 없으면 CPU 로, 총 시작점 batch 개 (예전과 같다). 어느 쪽인지 화면에 알린다.
+    let runner = null;
+    if (gpu && !previewOnly && globalThis.navigator?.gpu)
+      runner = await createGpuRunner(globalThis.navigator.gpu).catch(() => null);
     const topName = blob.topology.modules[topIndex(blob.topology)].name;
     const order = moduleOrder(blob.topology);
     const base = blob.place ? baseline(blob.place, topName) : null;
@@ -32,13 +38,15 @@ export async function runJob(data, post) {
     const d0 = readDesign({ ...blob, top: order[0] });
     post({ type: "baseline", base, topName, order,
                   modules: order.length,
-                  leafCombos: countAssignments(variantGroups(d0)) });
+                  leafCombos: countAssignments(variantGroups(d0)),
+                  runner: previewOnly ? null : (runner ? "gpu" : "cpu") });
     if (previewOnly) return;          // 기준선만 뽑고 끝 — 배치는 안 돌린다
 
     const t0 = performance.now();
     let seen = 0, frames = 0, lastFrame = 0;
-    const r = placeHierarchy(blob, {
+    const r = await placeHierarchy(blob, {
       batch, iters: 600, seed: 1, grid,
+      ...(runner ? { runner, perConfig } : {}),
       ...(hpwlWeight ? { hpwlWeight } : {}),
       ...(lamRatio ? { lamRatio } : {}),
       onProgress: (done, total) => {
@@ -133,7 +141,8 @@ export async function runJob(data, post) {
       axes: axes(P, top.cx, top.cy).map((a) => ({ ...a, at: a.at - (a.vert ? ox0 : oy0) })),
       combos: top.totalAssignments, configs: top.configs,
       hpwlWeight, lamRatio, medOverlap: top.medOverlap,
-      starts: top.starts, rounds: top.rounds,
+      starts: top.starts, rounds: top.rounds, runner: runner ? "gpu" : "cpu",
+      perConfig: runner ? perConfig : null,
       tried: top.tried, legalFail: top.legalizeFail,
       legalFailBy: top.legalizeFailBy, legalRescued: top.legalizeRescued,
       hpwlBeforeFlip: top.hpwlBeforeFlip,

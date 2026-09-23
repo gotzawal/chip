@@ -292,12 +292,22 @@
       </select>
     </label>
     <label class="field slide"
-           title="고를 때의 저울. 후보 점수 = (1-a) x 면적/기준 + a x HPWL/기준 이고,
-순위만 보므로 면적 1 : 배선 a/(1-a) 와 같다. 무게 1 에서는 면적이 배선을 2:1 로
-눌러 면적을 조금 얻고 배선을 크게 내주는 변이를 골랐다 (five_transistor_ota
-0.862x / 1.404x). 2 가 실측으로 균형이다. 다음 배치 실행부터 먹는다.">
-      <span>면적 ↔ 배선 <b id="hwVal">1 : 2.00</b></span>
-      <input type="range" id="hw" min="-40" max="40" step="1" value="10">
+           title="고를 때의 저울. 후보 점수 = log(면적) + w x log(HPWL) — ALIGN 배치기의
+비용과 같은 꼴이고, w = 1 이 ALIGN 의 LAMBDA 다. 면적 10% 와 배선 10% 가 같은 값이다.
+HPWL 은 핀 경계 사각형으로 잰다 (ALIGN 의 HPWL_extend). 다음 배치 실행부터 먹는다.">
+      <span>면적 ↔ 배선 <b id="hwVal">1 : 1.00</b></span>
+      <input type="range" id="hw" min="-40" max="40" step="1" value="0">
+    </label>
+    <label class="field" id="gpuField" hidden
+           title="WebGPU 가 있으면 연속 단계(Adam)를 GPU 에서 돈다. 그때 시작점은 총 예산이
+아니라 설정(변이 배정 x 영역)마다 이만큼이다. 시작점 96 짜리 CPU 예산은 설정당
+1~4 개였다 — 배정 하나의 점수가 표본 서너 개로 정해져 순위가 잡음 안에 있었다.">
+      <span>GPU 시작점/설정</span>
+      <select id="perConfig">
+        <option value="8">8</option>
+        <option value="32" selected>32</option>
+        <option value="128">128</option>
+      </select>
     </label>
     <label class="field slide"
            title="연속 단계의 저울. 시작점에서 밀도(퍼뜨리는 힘)의 기울기를
@@ -706,9 +716,12 @@ for (const btn of $("whoSeg").querySelectorAll("button"))
 // 슬라이더에서 같은 거리여야 한다. 한 칸이 2^0.1 = 1.072 배다.
 //
 //   면적 ↔ 배선     v in [-40, 40] -> hpwlWeight = 2^(v/10), 즉 1/16 ~ 16
-//                   점수는 면적/기준 + w x HPWL/기준. 순위만 보므로
-//                   (1-a)면적 + a배선 의 a = w/(1+w) 와 같은 저울이다.
+//                   점수는 log(면적) + w x log(HPWL). 1 이 ALIGN 의 LAMBDA.
 //   배선 ↔ 퍼뜨리기  v in [-20, 20] -> lamRatio  = 2^(v/10), 즉 1/4 ~ 4
+let runnerKind = null;                 // 마지막 배치가 어디서 돌았나 ("gpu" | "cpu")
+// WebGPU 가 보이면 "GPU 시작점/설정" 칸을 미리 연다. 실제로 쓰였는지는 워커의
+// baseline 소식이 다시 알려준다 (워커 안에서 어댑터를 못 얻을 수도 있다).
+$("gpuField").hidden = !globalThis.navigator?.gpu;
 const hpwlWeight = () => Math.pow(2, Number($("hw").value) / 10);
 const lamRatio = () => Math.pow(2, Number($("lam").value) / 10);
 function showWeights() {
@@ -793,7 +806,8 @@ function showResult(r) {
   if (r.medOverlap != null)
     mkRow(dl, "연속 단계 겹침", `${r.medOverlap.toFixed(3)} <small>후보 중앙값 · ` +
       `legalize 전</small>`);
-  mkRow(dl, "시작점", `${r.starts ?? "—"} <small>라운드 ${r.rounds ?? 1}</small>`);
+  mkRow(dl, "시작점", `${r.starts ?? "—"} <small>라운드 ${r.rounds ?? 1}` +
+    (r.runner === "gpu" ? ` · WebGPU, 설정당 ${r.perConfig}` : r.runner === "cpu" ? " · CPU" : "") + `</small>`);
   {
     const why = Object.entries(r.legalFailBy ?? {})
       .map(([k, v]) => `${k} ${v}`).join(" · ");
@@ -1182,7 +1196,12 @@ function handle(m) {
   if (m.type === "baseline") {
     base = m.base; showInfo(m);
     redraw();
-    setStatus('<span class="dot"></span><span>계산 중 — 변이 조합을 훑는다</span>');
+    if (m.runner) {
+      runnerKind = m.runner;
+      $("gpuField").hidden = m.runner !== "gpu";
+    }
+    setStatus(`<span class="dot"></span><span>계산 중 — 변이 조합을 훑는다` +
+              (m.runner ? ` <small>(${m.runner === "gpu" ? "WebGPU" : "CPU"})</small>` : "") + `</span>`);
   } else if (m.type === "progress") {
     setStatus(`<span class="dot"></span><span>${m.done}/${m.total} 후보 · ${m.t.toFixed(0)}s</span>`);
   } else if (m.type === "frame") {
@@ -1198,7 +1217,8 @@ function handle(m) {
     redraw(); showResult(m);
     placeDownloads();
     setStatus(`<span>완료 — ${m.secs.toFixed(1)}s · 설정 ${m.configs} 개 · ` +
-              `시작점 ${m.starts ?? "?"} (라운드 ${m.rounds ?? 1})</span>`);
+              `시작점 ${m.starts ?? "?"} (라운드 ${m.rounds ?? 1})` +
+              (m.runner ? ` · ${m.runner === "gpu" ? "WebGPU" : "CPU"}` : "") + `</span>`);
   } else if (m.type === "error") {
     busy = false; $("run").disabled = false;
     clearDownloads();
@@ -1423,6 +1443,7 @@ async function run() {
     const name = $("ex").value;
     const blob = await loadExample(name);
     startJob({ name, blob, batch: Number($("batch").value),
+               perConfig: Number($("perConfig").value),
                hpwlWeight: hpwlWeight(), lamRatio: lamRatio() });
   } catch (err) {
     busy = false; $("run").disabled = false;

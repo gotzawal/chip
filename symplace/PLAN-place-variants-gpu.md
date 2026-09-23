@@ -378,3 +378,34 @@ node symplace/scripts/place/prof.mjs                              # 4.1 의 표
 
 3 절을 구현할 때 `rescore` 의 HPWL_extend 열은 `test/variants.mjs` 에 합치고,
 이 스크립트들은 걷어내도 된다.
+
+## 6. 결과 (M0~M4 를 한 뒤)
+
+| 단계 | 한 것 | 검사 |
+|---|---|---|
+| M0 | `templateInfo` 에 핀 반폭, `hpwl`·`wirelength` 가 `x ± ex`, 점수 `log(area) + w·log(HPWL)`, 기본 무게 1, ALIGN 기준선도 같은 자로 | variants: 평면 설계 셋 모두 ALIGN 배정이 1 위이고 그것을 고른다 |
+| M1 | `Density.eval` 을 랭크 N 항등식으로 (rho·psi 없이 S 하나) | parity 1e-15, chunk 통과, 밀도항 66 -> 20 ms / 600 스텝 |
+| M2 | `src/gpu/runner.mjs` — 여섯 패스 WGSL, 설정표 채움, 무차원 f32, 동적 오프셋 스텝 유니폼 | `test/gpu.mjs`: calibrate 상대오차 1e-5~1e-7, 최선 점수 일치, chunk 비트 동일 |
+| M3 | `runner`/`perConfig` 경계 (`multiStartVariants` 가 async), job·페이지 통합, "GPU 시작점/설정" 칸 | `test/page.mjs`: 워커 안 WebGPU 로 끝까지 (five_transistor 1,440 시작점) |
+| M4 | `refineDirections` — legalize 상위 후보의 분리 방향 뒤집기 | place 통과 (뒤집기 0~3 회 채택) |
+
+CPU, 시작점 96, 씨앗 1 (핀 경계 HPWL, ALIGN 대비):
+
+```
+telescopic_ota              1.000 / 1.000   변이 5/5   bbox 같음   4.7 s  (전 10 s)
+current_mirror_ota          1.000 / 1.000   변이 5/5   bbox 같음   5.1 s  (전 16 s)
+five_transistor_ota         1.000 / 1.021   변이 3/3   bbox 같음   6.5 s  (전 32 s)
+cascode_current_mirror_ota  1.000 / 1.107   변이 10/11 bbox 같음  20.8 s  (전 65 s)
+high_speed_comparator       1.222 / 1.132   변이 4/10  6080x12936 48.0 s  (전 171 s)
+```
+
+hsc 가 남았다. 하위 모듈 넷의 변이가 ALIGN 과 다르게 올라가 최상위가 한 줄(2352)
+높다. 표본(설정당 시작점)을 늘리는 GPU 경로에서 다시 재야 한다 — 이 환경에는
+SwiftShader 뿐이라 실제 GPU 시간과 그 결과는 못 쟀다.
+
+상위 k 평균은 넣지 않았다 — 설정당 시작점이 수십 개면 최선 하나로도 순위가
+안정적이어서 (test/gpu.mjs 의 최선·중앙값이 CPU 와 같다) 필요가 확인되지 않았다.
+
+dawn 의 node 바인딩(`webgpu` 0.6.1) + SwiftShader 는 같은 코드에서 이따금 죽는다
+(세그폴트, 뮤텍스 단언). 검사는 headless Chromium 을 기본으로 둔다 —
+페이지가 실제로 쓰는 경로이기도 하다.

@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 import { readDesign, topIndex, variantGroups, countAssignments, flipPlan, powerGroundNets } from "../../../src/design.mjs";
-import { multiStartVariants, refineFlips, exactArea, hpwl } from "../../../src/solver.mjs";
+import { multiStartVariants, refineFlips, exactArea, hpwl, scoreOf } from "../../../src/solver.mjs";
 import { legalize } from "../../../src/legalize.mjs";
 
 const name = process.argv[2] ?? "five_transistor_ota";
@@ -50,7 +50,7 @@ const alignKey = alignTop ? groups.map((g) => {
   return Math.max(0, g.choices.indexOf(chosen.get(design.instances[g.members[0]].name)));
 }).join(",") : null;
 
-const res = multiStartVariants(design, groups, { batch: BATCH, iters: 600, seed: 1, hpwlWeight: 2 });
+const res = await multiStartVariants(design, groups, { batch: BATCH, iters: 600, seed: 1 });
 const plan = flipPlan(design, groups);
 const best = new Map();
 for (const c of res.candidates) {
@@ -62,10 +62,13 @@ for (const c of res.candidates) {
   const ea = exactArea(r.cx, r.cy, c.problem.w, c.problem.h);
   const hc = hpwl(r.cx, r.cy, c.problem.pinInst, c.problem.pinOff, c.problem.pinNet, c.problem.nNet, fr.sx, fr.sy);
   const he = extend(c.problem, r.cx, r.cy, fr.sx, fr.sy);
-  const ours = ea.area / res.refArea + 2 * hc / res.refHpwl;
+  // (a) 는 예전 점수(핀 중심, 무게 2, 블록 합계 면적 기준) 를 흉내낸 것이다.
+  let tot = 0;
+  for (let i = 0; i < c.problem.n; i++) tot += c.problem.w[i] * c.problem.h[i];
+  const ours = ea.area / tot + 2 * hc / (Math.sqrt(tot) * Math.max(1, c.problem.nNet));
   const cur = best.get(k);
   if (!cur || ours < cur.ours) best.set(k, { k, concrete: c.problem.concrete, area: ea.area, hc, he, ours, box: ea.box,
-    align: Math.log(ea.area) + Math.log(he), mixed: ea.area / res.refArea + 2 * he / (res.refHpwl * 2) });
+    align: Math.log(ea.area) + Math.log(he), mixed: scoreOf(ea.area, he) });
 }
 const rows = [...best.values()];
 const show = (key, label) => {
@@ -80,4 +83,4 @@ const show = (key, label) => {
 console.log(`${name}: 배정 ${rows.length}/${countAssignments(groups)} legalize 됨, ALIGN 배정 [${alignKey}]`);
 show("ours", "(a) 우리 점수 (핀 중심 HPWL)");
 show("align", "(b) ALIGN 저울 log(area)+log(HPWL_extend)");
-show("mixed", "(c) 우리 점수에 HPWL_extend 를 끼움");
+show("mixed", "(c) 지금 배치기의 점수 scoreOf (log, 핀 경계)");

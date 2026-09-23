@@ -79,8 +79,8 @@ function fromAlign() {
   return { blocks, area: (bb[2] - bb[0]) * (bb[3] - bb[1]), bbox: bb };
 }
 
-function fromOurs(opts) {
-  const r = placeDesign({ design }, { batch: 96, iters: 600, seed: 1, grid: [80, 84], ...opts });
+async function fromOurs(opts) {
+  const r = await placeDesign({ design }, { batch: 96, iters: 600, seed: 1, grid: [80, 84], ...opts });
   if (!r.ok) throw new Error(r.reason);
   const blocks = r.names.map((nm, k) => ({ name: nm, concrete: r.concrete[k],
     llx: r.cx[k] - r.w[k] / 2, lly: r.cy[k] - r.h[k] / 2, sX: r.sx[k], sY: r.sy[k] }));
@@ -93,7 +93,7 @@ const mA = measure(A.blocks);
 console.log(`ALIGN placement  ${A.blocks.map((b) => b.concrete.split("_").slice(-2).join("_")).join(" ")}  area ${A.area.toExponential(3)}`);
 console.log("   " + fmt(mA));
 for (const [n, o, c, e] of mA.perNet) console.log(`      ${n.padEnd(8)} ours ${o.toFixed(0).padStart(6)}  center ${c.toFixed(0).padStart(6)}  extend ${e.toFixed(0).padStart(6)}`);
-const O = fromOurs({});
+const O = await fromOurs({});
 const mO = measure(O.blocks);
 console.log(`OUR placement    ${O.blocks.map((b) => b.concrete.split("_").slice(-2).join("_")).join(" ")}  area ${O.area.toExponential(3)}  bbox ${(O.bbox[2]-O.bbox[0])}x${(O.bbox[3]-O.bbox[1])}`);
 console.log("   " + fmt(mO));

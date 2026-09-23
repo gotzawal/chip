@@ -63,6 +63,7 @@ view.mjs          캔버스 — 확대/이동, 패널, 배선 레이어
 src/job.mjs       배치 한 판 (워커에서도, 메인 스레드에서도 같은 코드가 돈다)
 src/baseline.mjs  ALIGN 기준선 뽑기 — 첫 화면이 워커 없이 뜨는 이유
 src/*.mjs         배치기 본체 (의존성 없는 ES 모듈)
+src/gpu/runner.mjs  연속 단계(Adam)를 WebGPU 컴퓨트 셰이더로 — 있으면 쓰고, 없으면 CPU
 src/route/        배선 — ALIGN 배선 단계의 이식: 입력·PnRDB(align/), Rust 배선기(alignroute.wasm),
                   도형 합성, DRC/LVS, GDS
 data/*.json       예제 5 개의 ALIGN 앞단 출력 (미리 만들어둬 첫 화면이 빠르다)
@@ -182,21 +183,46 @@ routed/index.json 한 줄     {name, align: {geo: "<이름>.align.json", rects, 
                                            errors: [{file, text}]}}   — errors 는 3_pnr/*.errors 의 줄
 ```
 
-## 배치 품질 (ALIGN 대비, 시작점 96, 무게 2, node 단일 스레드)
+## 배치 품질 (ALIGN 대비, CPU, 시작점 96, 무게 1, node 단일 스레드)
+
+HPWL 은 양쪽 다 **핀 경계 사각형**으로 잰다 (ALIGN 배치기의 `HPWL_extend` 와 같은 자,
+아래 "변이 선택" 절). 시간은 밀도항을 랭크 N 항등식으로 바꾼 뒤의 값이다 (3~5 배 빨라졌다).
 
 | 예제 | 면적 | HPWL | 시간 | 변이 |
 |---|---|---|---|---|
-| telescopic_ota | **1.000×** | 0.987× | 10 s | ALIGN 과 같은 것을 골랐다 (5/5) |
-| current_mirror_ota | **1.000×** | **1.000×** | 15 s | 같다 (5/5) |
-| five_transistor_ota | 1.077× | **0.803×** | 31 s | 셋 중 하나만 같다 |
-| cascode_current_mirror_ota | **0.988×** | 1.156× | 64 s | 모양은 11/11 같다 |
-| high_speed_comparator | **0.965×** | 1.150× | 211 s | 모양은 9/10 같다 |
+| telescopic_ota | **1.000×** | **1.000×** | 5 s | ALIGN 과 같다 (5/5) — bbox 까지 같다 |
+| current_mirror_ota | **1.000×** | **1.000×** | 5 s | 같다 (5/5) — bbox 까지 같다 |
+| five_transistor_ota | **1.000×** | 1.021× | 7 s | 같다 (3/3) — bbox 까지 같다 |
+| cascode_current_mirror_ota | **1.000×** | 1.107× | 21 s | 10/11, bbox 같다 |
+| high_speed_comparator | 1.222× | 1.132× | 48 s | 4/10 — 계층, 아래 "남은 것" |
 
 겹침은 다섯 다 정확히 0, 대칭 잔차는 1e-12 이하, 격자 밖 블록 0 이다.
 
-배선(HPWL)이 예전에 1.40 / 1.26 / 1.08 이던 자리다. 점수의 무게를 고친
-결과다 (아래 "변이 선택" 절). **씨앗에 따라 ±10% 흔들린다** — 한 번 재고
-결론 내리면 안 된다.
+five_transistor 가 1.077× / 0.803× 이던 자리다 — 그 0.803 은 핀을 점으로 잰
+착시였다 (같은 배치를 핀 경계로 재면 2.1 배). **씨앗에 따라 흔들린다** — 평면
+설계 넷은 이제 씨앗을 바꿔도 같은 변이가 나오지만, hsc 는 아직 아니다.
+WebGPU 가 있으면 시작점을 설정마다 수십 개 줄 수 있어 그 흔들림이 준다
+(아래 "WebGPU" 절).
+
+## WebGPU — 연속 단계를 GPU 에서
+
+브라우저에 WebGPU 가 있으면 (Chrome/Edge, Firefox, Safari 26) 연속 단계(Adam 600 스텝)를
+컴퓨트 셰이더로 돈다 (`src/gpu/runner.mjs`). 워크그룹 하나가 시작점 하나고, 한 스텝이
+여섯 패스(centers, wire, overlap, spectrum, grad, adam)다. CPU 의 `Objective.eval` +
+`adam` 과 **같은 계산**이다 — 좌표를 영역 긴 변으로 나눈 무차원 문제를 f32 로 풀고,
+calibrate 가 lam·mu 를 기울기 비로 잡으므로 궤적이 같다. `test/gpu.mjs` 가 재는 값:
+calibrate 한 번의 W·D·B·lam·mu 가 CPU(f64) 와 상대오차 1e-5~1e-7, 600 스텝 뒤 최선
+점수가 소수 넷째 자리까지 같고, 40 스텝씩 끊어 돌린 것이 비트까지 같다.
+
+GPU 일 때 예산의 뜻이 바뀐다. 총 시작점이 아니라 **설정(변이 배정 x 영역)마다
+"GPU 시작점/설정"** 개다 (기본 32). CPU 의 시작점 96 은 설정당 1~4 개라 배정 하나의
+점수가 표본 서너 개로 정해졌고, 그게 telescopic 이 씨앗에 따라 다른 변이를 고르던
+이유였다 (`symplace/PLAN-place-variants-gpu.md` 2.2 절). legalize·반전·정확한 면적은
+CPU(f64) 에 남는다. 어댑터가 없으면 CPU 로 조용히 떨어지고 화면에 CPU 라고 적는다.
+
+GPU 가 없는 기계에서 헤드리스 Chromium 의 SwiftShader(소프트웨어)로 잰 값이라 절대
+시간은 참고만: five_transistor 설정 180 x 8 = 1,440 시작점이 164 s 였다 (같은 조건의
+CPU 는 시작점 180 개에 6.5 s). 실제 GPU 에서의 시간은 아직 재지 못했다.
 
 ## 예산은 **라운드로** 쓴다
 
@@ -221,17 +247,19 @@ routed/index.json 한 줄     {name, align: {geo: "<이름>.align.json", rects, 
 | | 무엇을 바꾸나 | 파라미터 | 슬라이더 | 기본 |
 |---|---|---|---|---|
 | 연속 단계 | **어떤 해가 나오는가** | `lamRatio` | 배선 ↔ 퍼뜨리기, 1/4 ~ 4 | 1 |
-| 선택 | **나온 해 중 무엇을 고르나** | `hpwlWeight` | 면적 ↔ 배선, 1/16 ~ 16 | 2 |
+| 선택 | **나온 해 중 무엇을 고르나** | `hpwlWeight` | 면적 ↔ 배선, 1/16 ~ 16 | 1 |
 
 둘 다 **로그 눈금**이다. 저울은 비율이라 2 배와 1/2 배가 슬라이더에서 같은
 거리여야 한다. 한 칸이 `2^0.1 = 1.072` 배고, 기본값이 눈금에 정확히 떨어진다.
 
 ### 선택 저울 — 왜 `hpwlWeight` 인가
 
-점수가 `면적/refArea + w x HPWL/refHpwl + 3 x 겹침` 이고, 우리는 **순위만**
-쓴다. 그래서 볼록결합 `(1-a) x 면적 + a x 배선` 과 같은 저울이고
-(`a = w/(1+w)`), 0 에서 무한대까지 한 축으로 펴진다. `a` 대신 `w` 를 쓰는
-이유는 눈금이 로그일 때 `w` 가 곧 "면적 1 대 배선 w" 로 읽히기 때문이다.
+점수가 `log(면적) + w x log(HPWL) + 3 x 겹침` 이다 (`solver.mjs` 의 `scoreOf`).
+ALIGN 배치기의 비용 `log(area) + LAMBDA x log(HPWL_extend)` 와 같은 꼴이고,
+`w = 1` 이 ALIGN 의 `LAMBDA = 1` 이다. 로그라 기준값이 없다 — 면적 10% 와 배선 10%
+가 같은 값이고, 로그 눈금 슬라이더의 `w` 가 곧 "면적 1 대 배선 w" 로 읽힌다.
+(예전의 `면적/refArea + w x HPWL/refHpwl` 은 refHpwl 을 어떻게 잡느냐에 따라 저울이
+움직여서 기본을 2 로 보정해 두고 있었다. 그 보정이 필요 없어졌다.)
 
 이 저울은 **고를 때의 저울과 legalize 뒤의 저울이 같아야** 한다. 다르면
 legalize 할 상위 후보를 고르는 기준이 최종 기준과 어긋나 좋은 후보가 먼저
@@ -274,45 +302,38 @@ lamRatio   0.25    0.5     1       2       4
 ALIGN 은 수열쌍 담금질 **안에서** 좌표와 같이 골랐고, 우리는 다중 시작의
 한 축으로 넣어 고른다. 갈리는 지점은 셋이다.
 
-1. **점수가 다르다.** 우리 점수는 `면적/refArea + hpwlWeight x HPWL/refHpwl
-   + 3 x 겹침` 이다. **무게가 틀려 있었다** — `refHpwl = sqrt(refArea) x 넷수`
-   로 두면 배선 항이 0.5 언저리에서 놀아, 무게 1 에서는 면적이 배선을 2:1 로
-   눌렀다. 그래서 면적을 조금 얻고 배선을 크게 내주는 변이를 계속 골랐다.
-   기본을 2 로 바꿨다 (페이지의 "면적 ↔ 배선" 에서 고를 수 있다).
+1. **배선을 재는 자가 달랐다 — 핀은 점이 아니라 사각형이다.** 우리는 넷마다 핀
+   사각형 합집합의 **중심 한 점**으로 HPWL 을 쟀다. ALIGN 의 비용은 `HPWL_extend`,
+   핀 **경계 사각형**의 min/max 다. 손가락 16 개를 한 줄로 늘어놓은 `X16_Y1`
+   (5600x2352) 은 핀이 폭 5,032 짜리 가로 막대인데 우리 눈에는 블록 가운데 점
+   하나였다. 그래서 길쭉한 변이일수록 배선이 공짜로 보였다.
 
-   씨앗을 여러 개 돌려 재봤다 (면적 / HPWL, ALIGN 대비).
+   five_transistor_ota 실측 (같은 두 배치를 두 자로):
 
-   | 예제 | 무게 1 | 무게 2 |
-   |---|---|---|
-   | five_transistor_ota (씨앗 3) | 0.862/**1.404**, 0.923/1.160, 0.862/**1.404** | 1.077/**0.803**, 1.077/**0.803**, 0.923/1.160 |
-   | cascode_current_mirror_ota (씨앗 2) | 0.988/1.348, 1.148/1.124 | 0.988/**1.156**, 1.025/1.319 |
-   | telescopic_ota (씨앗 4) | 1.000/0.987 x3, 1.067/1.270 | 1.000/0.987 x3, 1.100/1.086 |
-   | current_mirror_ota | 1.000/1.000 | 1.000/1.000 |
+   | 배치 | 변이 | bbox | 핀 중심 HPWL | 핀 경계 HPWL (ALIGN) |
+   |---|---|---|---|---|
+   | ALIGN | X4_Y1 X8_Y2 X4_Y2 | 4160x5880 | 4,260 | 7,860 |
+   | 예전 우리 | X4_Y1 **X16_Y1 X8_Y1** | 5600x4704 | **3,420** | **16,732** |
 
-   **five_transistor 에서 분명하다** — 세 씨앗 모두 배선이 짧아졌고, 가장 나빴던
-   1.404x 가 사라졌다. telescopic 은 무게가 아니라 **씨앗 운**이다 (양쪽 다
-   네 번 중 한 번은 나쁜 해에 빠진다). cascode 는 씨앗 간 차이가 무게 차이보다
-   커서 **둘 중 어느 쪽이 낫다고 말할 수 없다**. 한 씨앗만 보고 무게 탓으로
-   읽으면 안 된다 — 여기서 한 번 그렇게 읽고 되돌렸다.
-
-   **후보를 고르는 저울과 최종 저울을 같게 맞췄다.** 다중 시작 단계의 점수는
-   무게 1 로 고정이었는데, 그러면 legalize 할 상위 후보를 고르는 기준이 최종
-   기준과 달라 좋은 후보가 legalize 전에 잘려 나간다.
+   핀 중심으로는 우리가 이기고 (그래서 0.803× 로 보고했다), 핀 경계로는 2.1 배 진다.
+   우리가 만든 후보 60 개를 ALIGN 저울로 다시 세우면 ALIGN 의 배정이 1 위였다.
+   고친 것: `templateInfo` 가 넷별 핀 반폭을 남기고, `hpwl` 과 연속 단계의
+   `wirelength` 가 `x ± ex` 로 잰다. 점수는 위의 로그 꼴로 바꿨다. 이제 평면
+   설계 넷은 전부 ALIGN 과 같은 변이를 고른다 (five_transistor 는 bbox 까지 같다).
+   분석 전문은 `symplace/PLAN-place-variants-gpu.md`.
 
    **후보 점수를 거울 반전 뒤의 배선길이로 매긴다.** 반전은 좌표를 안 건드리고
-   핀 위치만 바꾸는데 HPWL 이 0.64~0.77 배로 줄어든다. 반전 전 값으로 줄을
-   세우면 그 30% 가 후보마다 다르게 붙어 순위가 통째로 흔들렸다.
+   핀 위치만 바꾼다. 반전 전 값으로 줄을 세우면 그 차이가 후보마다 다르게 붙어
+   순위가 흔들린다. (핀을 점으로 재던 때는 반전 이득이 0.38 배까지 났는데, 그것도
+   착시였다 — 경계로 재면 0.7~0.9 배다.)
 
-   **아직 안 건드린 자리.** 위는 전부 "이미 나온 해 중에서 고르는" 쪽이다.
-   연속 단계가 내놓는 해 자체를 배선 쪽으로 기울이려면 에너지의
-   `E = W + lam*D + mu*B` 에서 `lam` 의 출발점(`calibrate` 의 `lamRatio`, 지금 1.0)
-   을 낮춰야 한다. 낮추면 블록이 더 겹친 채로 내려가 배선이 짧아지고 legalize
-   부담이 커진다. 재보지 않았으므로 기본은 안 건드렸다.
-
-   기준값 `refArea` 는 **배정 전체에 걸친 최소 블록 합계 면적**이다. 그룹마다
-   독립이라 전수 열거 없이 정확히 구한다. 예전에는 "이번에 본 배정들 중
-   최소" 를 썼는데, 그러면 조합이 많아 추첨으로 덮는 설계에서 **예산을 바꿀
-   때마다 기준이 흔들려** 면적과 배선의 저울이 같이 흔들렸다.
+   **표본이 적으면 순위가 잡음 안에 있다.** 설정마다 시작점이 1~4 개면 배정 하나의
+   점수가 표본 서너 개로 정해진다. telescopic 은 우리 저울로도 ALIGN 배정이 전수
+   비교에서 1 위인데 실행이 2 위를 고른 적이 있다 — 그 배정의 표본이 한 줄 배치를
+   못 찾았기 때문이다. WebGPU 가 있으면 설정당 수십 개를 준다 (위 "WebGPU" 절).
+   legalize 뒤에는 상위 후보 몇 개의 분리 방향을 뒤집어 다시 풀어 본다
+   (`legalize.mjs` 의 `refineDirections`) — 연속해가 나란히 놓은 쌍을 LP 가 못
+   뒤집는 것을 값싸게 보완한다.
 
 2. **조합이 많으면 추첨이다.** 상한을 예산에 묶어둔다. high_speed_comparator 는
    조합이 108 개인데 예전에는 상한이 64 로 고정이라 **ALIGN 이 고른 조합이
@@ -361,6 +382,11 @@ high_speed_comparator 를 같은 코드로 조건만 바꿔 재보면 이렇다.
 고칠 자리는 예산이 아니라 **연속단계 점수가 legalize 뒤 품질을 잘 예측하지
 못한다**는 쪽이다 — 상위 후보를 고르는 기준이 실제로 남는 것과 어긋난다.
 
+(위 수치는 핀을 점으로 재던 때의 것이다. 핀 경계로 재는 지금 저울로는 CPU 시작점
+96 에서 1.222x / 1.132x, bbox 6080x12936 — ALIGN 보다 한 줄(2352) 높다. 하위
+모듈 넷의 변이가 ALIGN 과 다르게 올라간 결과고, 평면 설계 넷이 전부 맞은 뒤에
+남은 유일한 자리다. 설정당 시작점을 늘리는 GPU 경로에서 다시 잰다.)
+
 ## 브라우저 배선 — ALIGN 배선 단계의 이식
 
 배선은 **ALIGN 의 배선 단계를 그대로 옮긴 것**이다. 같은 배치를 넣으면 ALIGN 과 같은 배선이 나와야 한다 —
@@ -401,7 +427,9 @@ Pyodide 에 ALIGN C++ 배선기(PnR 휠)를 올리던 워커, 같은 일을 node
 symplace/README.md          전체 설명 (파이썬 구현, 측정, ALIGN 메모리 패치)
 symplace/gpuplace/          파이썬 배치기 (numpy)
 symplace/alignroute/        Rust 배선기 — build.sh 가 src/route/alignroute.wasm 을 만든다
-symplace/scripts/           verify.sh (네이티브 ALIGN + 파이썬 배치기), z3 빌드, node 배선 하네스
+symplace/scripts/           verify.sh (네이티브 ALIGN + 파이썬 배치기), z3 빌드, node 배선 하네스,
+                            place/ (변이 선택 분석 스크립트 — PLAN-place-variants-gpu.md)
+symplace/PLAN-place-variants-gpu.md  변이 선택이 ALIGN 과 갈리던 이유(실측)와 WebGPU 계획·결과
 symplace/patches/           ALIGN 배선 단계 메모리 8.4GB -> 1.45GB 패치
 symplace/web/placer/test/   검사 — 파이썬 대조, 심플렉스 검증, legalize 성질 검사, 검사기·GDS 고정 사례
 symplace/web/placer/fixtures/  파이썬이 뽑아둔 정답 고정값 + 예제 5 개 앞단 출력
@@ -418,7 +446,9 @@ node symplace/web/placer/test/lp.mjs         # 심플렉스 검증
 node symplace/web/placer/test/parity.mjs     # 파이썬과 값 대조
 node symplace/web/placer/test/legalize.mjs   # 겹침 0 / 대칭 잔차 / 면적·배선
 node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 돌린 Adam
-node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 비교
+node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 비교 (ALIGN 배정의 순위)
+node symplace/web/placer/test/gpu.mjs        # GPU runner == CPU (headless Chromium, WebGPU)
+node symplace/web/placer/test/page.mjs high_speed_comparator gpu 96 32   # 페이지 통째로 (워커 + WebGPU)
 node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와 맞는가
 node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == ALIGN 파이썬 검사기
 node symplace/web/placer/test/compose.mjs    # 배선 도형의 격자 검사 == gen_viewer_json

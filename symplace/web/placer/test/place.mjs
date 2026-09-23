@@ -20,15 +20,25 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DES = path.join(HERE, "..", "fixtures", "design");
 const BATCH = Number(process.env.BATCH ?? 96);
 const ITERS = Number(process.env.ITERS ?? 600);
-// REF=align 이면 점수 정규화에 ALIGN 의 면적/HPWL 을 쓴다 (벤치마크 모드).
-// 기본은 설계 자신에서 뽑는다 — 새 넷리스트에는 ALIGN 의 답이 없으니 그게 진짜 경로다.
-const REF = process.env.REF ?? "self";
+// GPU=<설정당 시작점> 이면 WebGPU runner (dawn — test/gpu.mjs 의 설명) 로 돈다.
+let runner = null, perConfig = null;
+if (process.env.GPU) {
+  const { createRequire } = await import("node:module");
+  const mod = createRequire(import.meta.url)(process.env.WEBGPU_NODE ?? "webgpu");
+  Object.assign(globalThis, mod.globals);
+  const { createGpuRunner } = await import("../../../../src/gpu/runner.mjs");
+  runner = await createGpuRunner(mod.create([]));
+  if (!runner) { console.log("WebGPU 어댑터가 없다"); process.exit(2); }
+  perConfig = Number(process.env.GPU);
+}
 let fails = 0;
 const ok = (c, m) => { if (!c) { fails++; console.log("  실패 " + m); } };
 
+const wanted = process.argv.slice(2);          // 예제 이름을 주면 그것만
 for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
   const dir = path.join(DES, ex);
   if (!fs.statSync(dir).isDirectory()) continue;
+  if (wanted.length && !wanted.includes(ex)) continue;
   console.log("\n=== " + ex + " ===");
   const { topology, primitives, templates, place } = loadDesign(dir);
 
@@ -48,9 +58,8 @@ for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
   }
 
   const t0 = Date.now();
-  const hr = placeHierarchy({ topology, primitives, templates },
-    { batch: BATCH, iters: ITERS, seed: 1,
-      ...(REF === "align" ? { refArea, refHpwl } : {}) });
+  const hr = await placeHierarchy({ topology, primitives, templates },
+    { batch: BATCH, iters: ITERS, seed: 1, ...(runner ? { runner, perConfig } : {}) });
   const dt = (Date.now() - t0) / 1000;
   if (!hr.ok) { fails++; console.log(`  실패 [${hr.module}] ${hr.reason}`); continue; }
   if (hr.order.length > 1)
@@ -62,8 +71,8 @@ for (const ex of fs.existsSync(DES) ? fs.readdirSync(DES).sort() : []) {
   let blockArea = 0;
   for (let i = 0; i < r.w.length; i++) blockArea += r.w[i] * r.h[i];
   const resid = symmetryResidual(r.problem, r.cx, r.cy);
-  console.log(`  블록 ${r.names.length}  변이조합 ${r.totalAssignments}  설정 ${r.configs}  ` +
-              `legalize ${r.tried - r.legalizeFail}/${r.tried}  ${dt.toFixed(1)}s`);
+  console.log(`  블록 ${r.names.length}  변이조합 ${r.totalAssignments}  설정 ${r.configs}  방향뒤집기 ${r.dirFlips ?? 0}  ` +
+              `시작점 ${r.starts} (${r.runner})  legalize ${r.tried - r.legalizeFail}/${r.tried}  ${dt.toFixed(1)}s`);
   console.log(`  면적 ${(r.area / refArea).toFixed(3)}x  HPWL ${(r.hpwl / refHpwl).toFixed(3)}x  ` +
               `겹침 ${(r.overlap / blockArea).toExponential(1)}  대칭잔차 ${resid.toExponential(1)}  ` +
               `bbox ${Math.round(bw)}x${Math.round(bh)}`);
