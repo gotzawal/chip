@@ -14,7 +14,7 @@ ALIGN 과 달라 쓸모가 없다고 봐서, ALIGN 의 C++ 배선 알고리즘�
 |---|---|---|
 | 입력·PnRDB·배치 심기·계층 부기 (1) | `src/route/align/` (JS) | 10 판 20 모듈 필드마다 (`test/aligndb.mjs`) |
 | 전역 배선, 모드 4 (3) | `alignroute/src/gr` + lp_solve C 소스 | 기준 20 회 + 제약 변형 30 회, ALIGN C++ 네이티브 빌드와 무작위 7,000 회 (내부 상태까지) |
-| 상세 배선, 모드 5 (4) | `alignroute/src/dr` (libc++ 18 sort 이식 포함) | 기준 20 회 + 흔든 배치 56 회 + 제약 변형 14 회. C++ 오라클(clang++ + libc++ 18)과 무작위 대조 중 |
+| 상세 배선, 모드 5 (4) | `alignroute/src/dr` (libc++ 18 sort 이식 포함) | 기준 20 회 + 흔든 배치 87 회 + 제약 변형 14 회. ALIGN C++ 을 clang++ + libc++ 18 로 네이티브 빌드한 오라클과 무작위 6,600 회 — 모드 5 차이 없음 (도구 `scripts/route/align-ref/dr/`) |
 | 전원 격자·전원 배선, 모드 2·3 (5) | `alignroute/src/pr` | 기준 20 회 + 막기 시험 16 회 |
 | 한 판 잇기 (6·7) | `src/route/pipeline.mjs` | 5 예제 x 두 배치, 흔든 배치 47 판, 제약 변형 14 판: 모듈마다 최종 도형(차례까지)·GDS·오류 문구·단계 기록 (`test/route.mjs --router=wasm`) |
 

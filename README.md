@@ -368,7 +368,7 @@ high_speed_comparator 를 같은 코드로 조건만 바꿔 재보면 이렇다.
 |---|---|---|
 | 입력 만들기, PnRDB, 배치 심기, 계층 부기 | `src/route/align/` (JS) | 배선기 입력이 필드마다 같다 (`test/aligndb.mjs`, 10 판 20 모듈) |
 | 전역 배선 (RouteWork 4) | `symplace/alignroute/src/gr` (Rust + lp_solve C 소스) | 기록이 같다 — 20 모듈 + 제약 변형 30 회, ALIGN C++ 을 네이티브로 빌드한 것과 무작위 7,000 회 |
-| 상세 배선 (RouteWork 5) | `symplace/alignroute/src/dr` (Rust) | 기록이 같다 — 20 모듈 + 흔든 배치 56 회 + 제약 변형 14 회 |
+| 상세 배선 (RouteWork 5) | `symplace/alignroute/src/dr` (Rust) | 기록이 같다 — 20 모듈 + 흔든 배치 87 회 + 제약 변형 14 회, ALIGN C++ 네이티브 빌드와 무작위 6,600 회 |
 | 전원 격자·전원 배선 (RouteWork 2·3) | `symplace/alignroute/src/pr` (Rust) | 기록이 같다 — 10 판과 일부러 막은 16 판 (`test/alignroute.mjs`) |
 | 도형 합성·DRC/LVS·GDS | `src/route/pipeline.mjs`, `compose.mjs`, `check.mjs`, `gds.mjs` | ALIGN 배선기의 기록을 넣으면 모듈마다 도형(차례까지)·GDS·오류 문구가 같다 (`test/route.mjs`, 10 판 + 흔든 배치 20 판) |
 
