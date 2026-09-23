@@ -4,10 +4,37 @@
  *  따라가되 너무 가늘거나 작아지지 않게 잡는다 — 큰 회로는 줄여 보면 이름이 사라지고, 확대하면
  *  다시 나온다. hitSchematic 이 마우스 아래의 넷·소자를 찾는다 (hover).
  */
-import { fitOf, mapper, drawEmpty } from "../../view.mjs";
+// view.mjs 에서는 **예전부터 있던** 것만 가져온다. 브라우저가 옛 view.mjs 를 캐시에 쥔 채 새 index.html 만
+// 받는 일이 흔한데(보통 새로고침은 부속 파일을 다시 안 받는다), 그때 없는 이름을 가져오면 모듈 그래프
+// 전체가 죽어 페이지가 통째로 빈다 — 예제 목록까지.
+import { fitOf, mapper } from "../../view.mjs";
 
 const MONO = "ui-monospace, Menlo, Consolas, monospace";
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+/** 아직 그릴 것이 없는 패널 — 무엇을 눌러야 하는지, 왜 못 그리는지 적는다 (긴 문구는 줄을 나눈다). */
+function drawEmpty(ctx, panel, pal, lines) {
+  const ls = Array.isArray(lines) ? lines : [lines];
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const font = (i) => `${i === 0 ? 500 : 400} ${i === 0 ? 12 : 11}px ${MONO}`;
+  const rows = [];
+  ls.forEach((t, i) => {
+    ctx.font = font(i);
+    let cur = "";
+    for (const ch of String(t)) {
+      if (cur && ctx.measureText(cur + ch).width > panel.w - 20) { rows.push([cur, i]); cur = ""; }
+      cur += ch;
+    }
+    rows.push([cur, i]);
+  });
+  const cx = panel.x + panel.w / 2, cy = panel.y + panel.h / 2;
+  rows.forEach(([t, i], k) => {
+    ctx.font = font(i); ctx.fillStyle = pal.faint; ctx.globalAlpha = i === 0 ? 1 : 0.8;
+    ctx.fillText(t, cx, cy + (k - (rows.length - 1) / 2) * 16);
+  });
+  ctx.restore();
+}
 
 /** 그린다. opt: { pal, view, box, label, empty, mode: 'schem' | 'group', hover } */
 export function drawSchematic(ctx, panel, lay, opt) {

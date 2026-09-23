@@ -83,6 +83,10 @@ symplace/         소스·검사·도구 — Rust 배선기(alignroute/), node �
   SymmetricBlocks 제약의 거울 쌍은 대칭축 양쪽에 거울로 놓는다. 스택·병렬로 합쳐진 소자는 하나로
   보인다 (`stack 2`, `m=4`). 그림 아래 표가 블록마다 종류·소자·변이 후보(2_primitives 의 크기)·제약을 적는다.
 
+회로도·묶음 모듈(`src/schematic/`)은 페이지가 **따로, 필요할 때** 받는다 — 못 받아도 예제 목록과 배치·배선은
+그대로 돈다. 빌드가 없는 정적 사이트라 브라우저가 옛 모듈을 캐시에 쥔 채 새 `index.html` 만 받는 일이 있는데,
+그때 페이지가 통째로 비지 않게 하려는 것이다 (`test/stale.mjs` 가 그 상황을 만들어 본다).
+
 두 그림은 같은 배열기가 놓는다 (`src/schematic/layout.mjs`). 넷의 높이를 스프링으로 풀어(전원 위, 접지
 아래, 트랜지스터마다 한 단) 세로를 정하고, 직렬로 이어진 소자를 한 열에 세운 뒤 열끼리의 친화도로
 피들러 벡터를 구해 가로 순서를 정한다. 거울 쌍이 있으면 축 양쪽에 거울로 두고, 양쪽에 채널로 닿는
@@ -316,6 +320,7 @@ node symplace/web/placer/test/compose.mjs    # 배선 도형의 격자 검사 ==
 node symplace/web/placer/test/gds.mjs        # GDS == 고정 사례 (바이트)
 node symplace/web/placer/test/schematic.mjs  # 회로도·묶음 배열 — 예제 전부에서 겹침 0, 선이 핀에 닿는가, 거울 쌍 대칭
 node symplace/web/placer/test/views.mjs      # 페이지의 회로도·묶음 보기 (headless Chromium) — 예제 전부 + 올리기
+node symplace/web/placer/test/stale.mjs      # 옛 모듈이 브라우저 캐시에 남은 채 새 판을 새로고침해도 예제 목록이 뜨는가
 node symplace/scripts/route/node/newroute.mjs all   # 예제 전부를 배치하고 페이지와 같은 길로 배선 (DRC/LVS 를 찍는다)
 ```
 

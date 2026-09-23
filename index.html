@@ -440,11 +440,21 @@ async function loadExampleList() {
   return EXAMPLES;
 }
 import { makeView, drawPanel, drawRouted, zoomAt, GROUPS } from "./view.mjs";
-import { parseSpice } from "./src/schematic/spice.mjs";
-import { circuitFromSpice, circuitFromTopology, adoptGroups, supplyHints, describeBlocks } from "./src/schematic/circuit.mjs";
-import { layoutCircuit } from "./src/schematic/layout.mjs";
-import { drawSchematic, hitSchematic } from "./src/schematic/draw.mjs";
 const $ = (id) => document.getElementById(id);
+// 회로도·묶음 모듈(src/schematic/)은 **따로, 필요할 때** 받는다. 못 받아도(빠진 파일, 캐시에 남은 옛 판)
+// 예제 목록과 배치·배선은 그대로 돌아야 한다 — 위의 정적 import 에 끼우면 하나만 죽어도 페이지가 통째로 빈다.
+let schem = null, schemLoadErr = null;
+async function schematicModules() {
+  if (schem || schemLoadErr) return schem;
+  try {
+    const mods = await Promise.all(["spice", "circuit", "layout", "draw"].map((m) => import(`./src/schematic/${m}.mjs`)));
+    schem = Object.assign({}, ...mods);
+  } catch (e) {
+    schemLoadErr = e;
+    console.error("[회로도 모듈을 못 받았습니다]", e);
+  }
+  return schem;
+}
 const cv = $("cv"), ctx = cv.getContext("2d");
 const view = makeView();
 // 보기는 넷이다 — 흐름 순서대로. 회로도(넷리스트 그대로) → 묶음(앞단이 묶은 블록) → 배치 → 배선.
@@ -578,10 +588,12 @@ function redraw() {
       drawRouted(ctx, p, it.geo, { pal, view, on: layersOn, box,
                                    label: it.label, empty: it.empty });
     else if (what === "schem" || what === "group") {
-      const r = drawSchematic(ctx, p, it.lay, { pal, view, box, label: it.label, empty: it.empty,
-                                                mode: what, hover });
-      if (r) lastMap = { m: r.m, lay: it.lay, panel: p };
-      globalThis.__drawn = { key: viewKey(), what, lay: it.lay ?? null };
+      if (schem) {
+        const r = schem.drawSchematic(ctx, p, it.lay, { pal, view, box, label: it.label, empty: it.empty,
+                                                        mode: what, hover });
+        if (r) lastMap = { m: r.m, lay: it.lay, panel: p };
+      } else drawPanel(ctx, p, null, { pal, view, box, empty: it.empty });
+      globalThis.__drawn = { key: viewKey(), what, lay: schem ? (it.lay ?? null) : null };
     } else
       drawPanel(ctx, p, it.data, { pal, view, box, label: it.label,
                                    accent: it.accent, axes: it.axes, empty: it.empty });
@@ -628,9 +640,9 @@ cv.addEventListener("pointerleave", () => { if (hover) { hover = null; $("hint")
 
 /** 회로도·묶음에서 마우스 아래의 넷·소자를 밝히고 아래 줄에 적는다. */
 function hoverAt(e) {
-  if ((what !== "schem" && what !== "group") || !lastMap) return;
+  if ((what !== "schem" && what !== "group") || !lastMap || !schem) return;
   const r = cv.getBoundingClientRect();
-  const h = hitSchematic(lastMap.lay, lastMap.m, e.clientX - r.left, e.clientY - r.top);
+  const h = schem.hitSchematic(lastMap.lay, lastMap.m, e.clientX - r.left, e.clientY - r.top);
   const key = h ? h.kind + ":" + (h.kind === "dev" ? h.id : h.name) : null;
   const prev = hover ? hover.kind + ":" + (hover.kind === "dev" ? hover.id : hover.name) : null;
   if (key === prev) return;
@@ -723,13 +735,21 @@ async function ensureViews(name) {
   if (!name || views.has(name)) return views.get(name);
   const v = { schem: null, group: null, schemErr: null, groupErr: null, top: "", blocks: [] };
   views.set(name, v);
+  const M = await schematicModules();
+  if (!M) {
+    v.groupErr = v.schemErr = "회로도 모듈(src/schematic/)을 못 받았습니다 — " +
+      String(schemLoadErr?.message ?? schemLoadErr).slice(0, 120) + ". 캐시를 비우고 새로고침해 보세요.";
+    showBlocks([]);
+    if ((what === "schem" || what === "group") && viewKey() === name) redraw();
+    return v;
+  }
   let topo = null;
   try {
     const blob = await loadExample(name);
-    topo = circuitFromTopology(blob);
+    topo = M.circuitFromTopology(blob);
     v.top = topo.name;
-    v.group = layoutCircuit(topo);
-    v.blocks = describeBlocks(blob, topo);
+    v.group = M.layoutCircuit(topo);
+    v.blocks = M.describeBlocks(blob, topo);
   } catch (e) {
     v.groupErr = e.message; console.error("[묶음]", e);
   }
@@ -741,13 +761,13 @@ async function ensureViews(name) {
       throw new Error(name === "__upload__"
         ? "앞단 출력만 올렸습니다 — 회로 원문(.sp)이 없어 회로도는 못 그립니다. 묶음 보기는 됩니다."
         : `netlists/${name}.sp 가 없습니다`);
-    const parsed = parseSpice(text);
+    const parsed = M.parseSpice(text);
     const blob = await loadExample(name);
-    const c = circuitFromSpice(parsed, topo?.name ?? null, { hints: supplyHints(blob) });
+    const c = M.circuitFromSpice(parsed, topo?.name ?? null, { hints: M.supplyHints(blob) });
     if (!c.devices.length) throw new Error("넷리스트에서 그릴 소자를 못 찾았습니다");
-    if (topo) adoptGroups(c, topo);
+    if (topo) M.adoptGroups(c, topo);
     if (!v.top) v.top = c.name;
-    v.schem = layoutCircuit(c);
+    v.schem = M.layoutCircuit(c);
   } catch (e) {
     v.schemErr = e.message; if (!/앞단 출력만/.test(e.message)) console.error("[회로도]", e);
   }

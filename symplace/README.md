@@ -100,6 +100,8 @@ node symplace/web/placer/test/gpu.mjs        # GPU runner == CPU (headless Chrom
 node symplace/web/placer/test/page.mjs high_speed_comparator gpu 96 32   # 페이지 통째로 (워커 + WebGPU)
 node symplace/web/placer/test/views.mjs [예제]   # 페이지의 회로도·묶음 보기 — 예제 전부에서 두 보기와 표, hover, 앞단 출력 올리기
                                                 # (SHOT=폴더 를 주면 보기마다 PNG 를 남긴다)
+node symplace/web/placer/test/stale.mjs [옛 ref]  # 옛 판(origin/main)을 캐시에 넣고 새 판을 보통 새로고침 — 예제 목록이 그대로 떠야 한다
+                                                # (새 모듈이 옛 모듈에 없는 이름을 import 하면 페이지가 통째로 비는 함정)
 ```
 
 `fixtures/<예제>.json` 은 배치 문제의 **정답 고정값**이다 — 이 배치기의 첫 구현(파이썬/numpy)이 뽑아 둔
