@@ -2,7 +2,7 @@
  *  5 예제에 없는 경우(한 하위 모듈의 두 모양, Route·DoNotRoute·MultiConnection·NetConst·Boundary 제약 ...)를
  *  시험할 때 쓴다.
  *
- *    node refrun.mjs <예제> <배치.json> <out 뿌리> [--const=<제약.json>]
+ *    node refrun.mjs <예제> <배치.json> <out 뿌리> [--const=<제약.json>] [--verbose]
  *
  *    <out>/data/<예제>.json, <예제>.leaves.json   앞단 결과 (frontworker 의 run — 페이지가 받는 것과 같은 모양)
  *    <out>/tap/<예제>/ours/                        RouteWork 앞뒤 hierNode, drc.json, calls.json (../tap/tap.py), result.json (DRC/LVS)
@@ -43,8 +43,11 @@ log("앞단", top, blob.topology.modules.map((m) => `${m.name}[${m.constraints.m
 const ck = fs.readFileSync(path.resolve(HERE, "../../node/checkref.mjs"), "utf8");
 py.runPython(/const PY = String\.raw`([\s\S]*?)`;/.exec(ck)[1]);
 py.runPython("install_capture()");
-py.setStdout({ batched: () => {} });
-py.setStderr({ batched: () => {} });
+// --verbose: ALIGN 로그를 흘린다 (어느 모듈·단계에서 죽는지 볼 때)
+const quiet = args.includes("--verbose") ? (t) => console.log(t) : () => {};
+py.setStdout({ batched: quiet });
+py.setStderr({ batched: quiet });
+globalThis.routeLog = args.includes("--verbose") ? (t) => console.log(t) : undefined;
 py.runPython(workerPython("PYROUTE"));
 py.runPython(fs.readFileSync(path.resolve(HERE, "../tap/tap.py"), "utf8"));
 py.runPython(fs.readFileSync(path.join(HERE, "instrument.py"), "utf8"));
