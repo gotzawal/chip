@@ -39,6 +39,7 @@ function check(name, got, tol) {
 
 for (const file of fs.readdirSync(FIX).filter((f) => f.endsWith(".json"))) {
   const fx = JSON.parse(fs.readFileSync(path.join(FIX, file), "utf8"));
+  if (!fx.z0) continue;               // 배치 고정값만 — check-*, gds-*, grid.json 은 배선 쪽 고정값이다
   console.log(`\n### ${fx.example}  블록 ${fx.n} 넷 ${fx.n_net} 핀 ${fx.pin_inst.length}`);
 
   // ---------- 1) subspace: 값 대조(A, b) + 성질 검사(N) ----------
