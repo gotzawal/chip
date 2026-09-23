@@ -15,7 +15,7 @@
  *    {type:"error", ...}
  */
 import { readDesign, topIndex, moduleOrder, variantGroups,
-         countAssignments } from "./design.mjs";
+         countAssignments, ignoredConstraints } from "./design.mjs";
 import { baseline, axes } from "./baseline.mjs";
 import { placeHierarchy, symmetryResidual, orderViolations,
          spreadShapes, SUB_VARIANTS } from "./place.mjs";
@@ -36,7 +36,9 @@ export async function runJob(data, post) {
 
     // 변이 조합이 몇 개인지 미리 알려준다 (최상위 기준, 하위 모듈 변이 전)
     const d0 = readDesign({ ...blob, top: order[0] });
-    post({ type: "baseline", base, topName, order,
+    // 배치기가 모르는 제약은 조용히 넘기지 않고 이름을 알린다 (모듈 전부).
+    const ignored = [...new Set(blob.topology.modules.flatMap((m) => ignoredConstraints(m.constraints)))];
+    post({ type: "baseline", base, topName, order, ignored,
                   modules: order.length,
                   leafCombos: countAssignments(variantGroups(d0)),
                   runner: previewOnly ? null : (runner ? "gpu" : "cpu") });

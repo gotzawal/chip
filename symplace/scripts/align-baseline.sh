@@ -23,6 +23,8 @@ SITE=$(cd "$ROOT/.." && pwd)
 source "$ROOT/env.sh" >/dev/null
 e=${1:?예제 이름을 줘라 (예: telescopic_ota)}; shift
 OUT=$ALIGN_WORK/$e
+# 앞단의 2_primitives 는 이것 없이는 실행마다 달라진다 (M2 사각형 두 개의 순서). 브라우저 앞단과 같은 값.
+export PYTHONHASHSEED=0
 
 if [ -z "$(ls "$OUT"/3_pnr/*_0.json 2>/dev/null)" ]; then
   echo "  [1/3] ALIGN 앞단 + 배치 + 배선  -> $OUT  (로그 $OUT/align.log)"
@@ -40,9 +42,11 @@ node "$ROOT/web/placer/pack-example.mjs" "$OUT" "$e" "$@"
 echo "  [3/3] 넷리스트 복사"
 mkdir -p "$SITE/netlists"
 cp "$ALIGN_EXAMPLES/$e/$e.sp" "$SITE/netlists/$e.sp"
-if [ -f "$ALIGN_EXAMPLES/$e/$e.const.json" ]; then
-  cp "$ALIGN_EXAMPLES/$e/$e.const.json" "$SITE/netlists/$e.const.json"
-else
-  echo "  (제약 파일 없음 — $e.const.json)"
-fi
+# 제약 파일은 서브서킷마다 하나씩 있을 수 있다 — 전부 복사한다 (ring_oscillator: ring_oscillator_stage.const.json)
+n=0
+for c in "$ALIGN_EXAMPLES/$e"/*.const.json; do
+  [ -f "$c" ] || continue
+  cp "$c" "$SITE/netlists/$(basename "$c")"; n=$((n + 1))
+done
+[ "$n" -gt 0 ] || echo "  (제약 파일 없음)"
 echo "끝. 확인:  node symplace/web/placer/test/leaves.mjs && node symplace/web/placer/test/place.mjs $e && node symplace/scripts/route/node/newroute.mjs $e"

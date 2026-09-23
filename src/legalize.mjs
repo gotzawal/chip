@@ -146,7 +146,8 @@ export function refineDirections(args, dirs, evaluate, { maxFlips = 6 } = {}) {
 export function legalize({ z0, N, n, w, h, cxRef, cyRef, region,
                            bboxWeight = 0.5, slack = 1.6, dirs = null,
                            forced = null, grid = null, anchors = null,
-                           gridTries = 60 }) {
+                           gridTries = 60, gap = [0, 0] }) {
+  const [gx, gy] = gap;                 // 블록 사이 최소 간격 (design.mjs blockSpacing)
   const P = N.cols;
   const [x0, y0, x1, y1] = region;
   const W = x1 - x0, H = y1 - y0;
@@ -223,10 +224,10 @@ export function legalize({ z0, N, n, w, h, cxRef, cyRef, region,
 
   // 2) 쌍마다 분리 — 방향은 연속해에서 고정
   for (const { i, j, dir } of D) {
-    if (dir === 0)      add((t) => { t(CX[i], +1); t(CX[j], -1); }, -(w[i] + w[j]) / 2);
-    else if (dir === 1) add((t) => { t(CX[j], +1); t(CX[i], -1); }, -(w[i] + w[j]) / 2);
-    else if (dir === 2) add((t) => { t(CY[i], +1); t(CY[j], -1); }, -(h[i] + h[j]) / 2);
-    else                add((t) => { t(CY[j], +1); t(CY[i], -1); }, -(h[i] + h[j]) / 2);
+    if (dir === 0)      add((t) => { t(CX[i], +1); t(CX[j], -1); }, -(w[i] + w[j]) / 2 - gx);
+    else if (dir === 1) add((t) => { t(CX[j], +1); t(CX[i], -1); }, -(w[i] + w[j]) / 2 - gx);
+    else if (dir === 2) add((t) => { t(CY[i], +1); t(CY[j], -1); }, -(h[i] + h[j]) / 2 - gy);
+    else                add((t) => { t(CY[j], +1); t(CY[i], -1); }, -(h[i] + h[j]) / 2 - gy);
   }
 
   // 3) 이동거리 (L1): dx_i >= |X_i - cxRef_i|

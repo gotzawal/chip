@@ -20,7 +20,7 @@
  *  실패율 자체는 진단용으로 같이 돌려준다.
  */
 import { readDesign, variantGroups, flipPlan, moduleOrder,
-         orderDirections } from "./design.mjs";
+         orderDirections, blockSpacing } from "./design.mjs";
 import { multiStartVariants, refineFlips, exactArea, hpwl, scoreOf } from "./solver.mjs";
 import { legalize, exactOverlap, refineDirections } from "./legalize.mjs";
 
@@ -91,6 +91,8 @@ export async function placeDesign(input, {
   // Order 제약이 있으면 그 쌍의 분리 방향을 박는다 (부등식이라 영공간엔 못 넣는다).
   const forced = res.candidates.length
     ? orderDirections(design.constraints, res.candidates[0].problem.names) : null;
+  // 블록 간격 제약 (HorizontalDistance 등) — 분리 부등식에 더한다.
+  const gap = blockSpacing(design.constraints);
   const limit = maxTries > 0 ? maxTries
               : Math.min(res.candidates.length, Math.max(16, Math.ceil(res.configs / 2)));
 
@@ -167,7 +169,7 @@ export async function placeDesign(input, {
     // cascode 28/34 — 전부 INFEASIBLE). 실패한 후보는 그냥 버려지므로
     // "변이를 고른다"가 사실상 살아남은 스무 개 안에서만 일어났다.
     const args = { z0: c.z0, N: c.N, n: c.problem.n, w: c.problem.w,
-                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region, forced };
+                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region, forced, gap };
     let r = legalize(args);
     let usedSlack = null;
     for (const sl of retrySlack) {

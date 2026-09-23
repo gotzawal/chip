@@ -2,3 +2,5 @@
 node_modules/
 symplace/.venv/
 symplace/ALIGN-public/
+LOG/
+__pycache__/

@@ -91,7 +91,8 @@ self.onmessage = async (e) => {
     const p = await boot();
     say("앞단 실행 — 1_topology · 2_primitives", 5);
     const t0 = performance.now();
-    const out = p.globals.get("run")(sp, name, subckt, constraints ?? "");
+    // 제약은 {파일 이름: 내용} (여러 서브서킷) 이거나 예전 모양의 문자열 하나.
+    const out = p.globals.get("run")(sp, name, subckt, JSON.stringify(constraints ?? {}));
     const blob = JSON.parse(out);
     const nInst = (blob.topology.modules.at(-1).instances ?? []).length;
     postMessage({

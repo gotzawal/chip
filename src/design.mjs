@@ -52,6 +52,46 @@ export function powerGroundNets(constraints) {
   return out;
 }
 
+/** 제약 등록 — 배치기가 어느 제약을 어떻게 다루는지 한 곳에 적는다.
+ *
+ *  PLACER   배치기가 직접 처리한다.
+ *  ELSEWHERE 앞단이나 배선기의 것이라 배치기는 볼 일이 없다 (전원·클럭 넷 거르기만 여기서).
+ *            CompactPlacement 는 ALIGN 배치기의 옵션이고 우리 기본 동작(면적·배선 최소화)이 그것이다.
+ *            ChargeFlow 는 ALIGN 도 PnRDB 에 읽기만 하고 배치·배선에 쓰지 않는다.
+ *  그 밖의 것(Boundary, Spread, SameTemplate, PlaceOnGrid, Floorplan, GroupCaps, GuardRing ...)은
+ *  배치기가 **무시한다** — ignoredConstraints 가 그 이름을 돌려주고, 페이지가 그것을 보여준다.
+ */
+export const PLACER_CONSTRAINTS = new Set([
+  "SymmetricBlocks", "Align", "Order", "AspectRatio",
+  "HorizontalDistance", "VerticalDistance", "BlockDistance",
+]);
+export const ELSEWHERE_CONSTRAINTS = new Set([
+  "PowerPorts", "GroundPorts", "ClockPorts",
+  "GroupBlocks", "DoNotUseLib", "DoNotIdentify", "ConfigureCompiler", "Generator",
+  "CompactPlacement", "ChargeFlow",
+  "SymmetricNets", "NetPriority", "NetConst", "PortLocation", "MultiConnection", "ShieldNet", "CritNet",
+]);
+export function ignoredConstraints(constraints) {
+  const out = new Set();
+  for (const c of constraints ?? [])
+    if (!PLACER_CONSTRAINTS.has(c.constraint) && !ELSEWHERE_CONSTRAINTS.has(c.constraint)) out.add(c.constraint);
+  return [...out];
+}
+
+/** 블록 사이의 최소 간격 [가로, 세로] — HorizontalDistance / VerticalDistance / BlockDistance 의
+ *  abs_distance 중 가장 큰 것. legalize 의 분리 부등식에 그만큼을 더한다 (ALIGN 의 bias_*graph).
+ *  지금 예제들은 전부 0 이다. */
+export function blockSpacing(constraints) {
+  let gx = 0, gy = 0;
+  for (const c of constraints ?? []) {
+    const d = Number(c.abs_distance ?? 0);
+    if (!(d > 0)) continue;
+    if (c.constraint === "HorizontalDistance" || c.constraint === "BlockDistance") gx = Math.max(gx, d);
+    if (c.constraint === "VerticalDistance" || c.constraint === "BlockDistance") gy = Math.max(gy, d);
+  }
+  return [gx, gy];
+}
+
 /** concrete 템플릿 JSON 에서 크기와 핀을 뽑는다.
  *
  *  핀은 terminals 중 netType === "pin" 인 것들이다. 같은 넷에 여러 조각이

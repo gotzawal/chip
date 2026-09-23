@@ -747,6 +747,8 @@ function showInfo(b) {
   mkRow(dl, "ALIGN bbox", b.base
     ? `<small>${b.base.bbox[2] - b.base.bbox[0]} × ${b.base.bbox[3] - b.base.bbox[1]}</small>` : "—");
   mkRow(dl, "ALIGN HPWL", b.base ? `<small>${Math.round(b.base.hpwl)}</small>` : "—");
+  if (b.ignored?.length)
+    mkRow(dl, "배치기가 무시한 제약", `<small>${b.ignored.join(" · ")}</small>`, "lose");
 }
 
 /** 변이 표 — 우리가 고른 소자 변이와 ALIGN 의 것. */
@@ -908,10 +910,11 @@ function frontSend(msg, want, fresh) {
     frontWorker.postMessage(msg);
   });
 }
-/** 넷리스트를 앞단에 돌린다. 첫 호출은 Pyodide 스택(약 40MB)을 받느라 오래 걸린다. */
-async function runFront(spText, name, subckt, constText) {
+/** 넷리스트를 앞단에 돌린다. 첫 호출은 Pyodide 스택(약 40MB)을 받느라 오래 걸린다.
+ *  constraints 는 {파일 이름: 내용} — 서브서킷마다 하나씩 있을 수 있다. */
+async function runFront(spText, name, subckt, constraints) {
   // 워커는 다시 쓴다 — Pyodide 부팅(5 초 안팎)을 설계마다 되풀이하지 않는다.
-  return frontSend({ sp: spText, name, subckt, constraints: constText }, "front", false);
+  return frontSend({ sp: spText, name, subckt, constraints }, "front", false);
 }
 
 /** 지금 화면에 있는 설계 이름 (올린 것이든 예제든). */
@@ -928,10 +931,12 @@ async function ingest(fileList) {
     const subckt = topSubckt(text);
     const name = sp.name.replace(/\.(sp|cir)$/i, "");
     uploadName = name;
-    const cf = all.find((f) => /\.const\.json$/i.test(f.name));
-    const constText = cf ? await cf.text() : "";
+    // 제약 파일은 서브서킷마다 하나씩 있을 수 있다 (<서브서킷>.const.json). 이름째 넘긴다.
+    const constraints = {};
+    for (const cf of all.filter((f) => /\.const\.json$/i.test(f.name)))
+      constraints[cf.name.replace(/^.*[\\/]/, "")] = await cf.text();
     setStatus('<span class="dot"></span><span>앞단 준비 — 처음이면 약 40MB 를 받습니다</span>');
-    const r = await runFront(text, name, subckt, constText);
+    const r = await runFront(text, name, subckt, constraints);
     setStatus(`<span>앞단 완료 — 모듈 ${r.modules}, 인스턴스 ${r.instances}, ` +
               `소자 ${r.concrete} 종  (${r.secs.toFixed(1)}s)</span>`);
     return r.blob;
