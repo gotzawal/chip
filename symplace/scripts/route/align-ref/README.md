@@ -11,6 +11,7 @@
 | `power/` | 전원 격자(모드 2)·전원 배선(모드 3)의 파이썬 시제품 (`pg_proto.py`, `pr_proto.py`)과 대조 | 10/10 + M5/M6 도형을 끼워 넣은 3 회, 비아 중복·bbox 까지 같다 |
 | `ilp/` | 전역 배선 ILP 재현(`harness.cpp`), 기준 휠의 lp_solve 로 풀기(`wasm_lp.mjs`), lp_solve 를 clang wasm32-wasi 로 빌드해 대조(`wasi/`) | 합성 ILP 410 개에서 반환값·목적값·변수 전부 비트까지 같다 |
 | `wasm/` | 기준 휠 바이너리 읽기 (import/export, 함수 안의 호출) — NDEBUG, NRVO 확인에 썼다 | — |
+| `dr/` | 상세 배선(RouteWork 5) Rust 이식(`alignroute/src/dr`)의 차분 시험: ALIGN 원본 C++ 을 네이티브로 빌드해 (`build-oracle.sh`, `oracle5.cpp` — libc++, 0 번지 쪽을 0 으로 깔아 wasm 처럼) tap 덤프(`taptest.py`)와 흔든 사례(`fuzz.py`)에서 견주고, 덮개(`cov.py`)와 libc++ `std::sort` 대조(`sortcheck/`) | tap 20/20, tap-vary 87/87, 흔든 사례 6600 개에서 모드 5 차이 없음 (원본이 죽거나 끝나지 않는 곳은 Rust 가 Err), 정렬 7 만 사례 같음 |
 
 ```bash
 cd symplace/scripts/route
@@ -28,6 +29,10 @@ align-ref/ilp/build-native.sh                     # 합성 ILP 생성기 (lp_sol
 DUMP=lps.jsonl ~/.cache/symplace/lpsolve-wasi/native/harness 1 12 400   # 씨앗 1..399, 넷 12 개
 node align-ref/ilp/wasm_lp.mjs lps.jsonl ref.jsonl                 # 기준 휠의 lp_solve 로
 align-ref/ilp/wasi/build.sh && python3 align-ref/ilp/wasi/check.py lps.jsonl ref.jsonl
+(cd ../../alignroute && cargo build --release) && ALIGN_REPO=<ALIGN-public> align-ref/dr/build-oracle.sh
+python3 align-ref/dr/taptest.py [~/.cache/symplace/tap-vary] --rust --oracle   # 모드 5 기록을 m5_out 과
+python3 align-ref/dr/fuzz.py freeze && python3 align-ref/dr/fuzz.py run 6 0 500   # 같지 않은 사례만 찍는다
+python3 align-ref/dr/sortcheck/run.py 1 6                                        # sort.rs 대 libc++ std::sort
 ```
 
 - 네이티브 lp_solve 는 `-DREALXP=__float128` 로 빌드한다. wasm32 의 long double 은 binary128 이라,

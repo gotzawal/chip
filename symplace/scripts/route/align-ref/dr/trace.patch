@@ -1,0 +1,82 @@
+--- a/GcellDetailRouter.cpp
++++ b/GcellDetailRouter.cpp
+@@ -1,6 +1,9 @@
+ #include "GcellDetailRouter.h"
+ 
+ #include "spdlog/spdlog.h"
++#include <cstdio>
++static bool TR() { static int t = getenv("DR_TRACE") ? 1 : 0; return t; }
++
+ 
+ GcellDetailRouter::GcellDetailRouter(){
+ 
+@@ -366,6 +369,7 @@
+ 
+ void GcellDetailRouter::create_detailrouter_new() {
+   auto logger = spdlog::default_logger()->clone("router.GcellDetailRouter.create_detailrouter");
++  if (TR()) {}
+ 
+   // bug:
+   // solved 1. use other SinkDataComp for Set_x_contact and Set_net_contact
+@@ -373,6 +377,11 @@
+   // 3. the solution rm the metal of internal block pins from internal metal is quite different for some cases
+   // 4. for the contact related via inactive, suggest to just inactive the via_active around the box. Around the box.
+   SortPinsOrder();
++  if (TR()) for (unsigned i = 0; i < Nets.size(); i++) {
++    fprintf(stderr, "SORT %u c=%d,%d :", i, Nets[i].center_x, Nets[i].center_y);
++    for (auto &c : Nets[i].connected) fprintf(stderr, " %d/%d/%d", (int)c.type, c.iter, c.iter2);
++    fprintf(stderr, "\n");
++  }
+   std::vector<std::vector<RouterDB::point>> plist;
+   plist.resize(this->layerNo);
+ 
+@@ -446,10 +455,13 @@
+         EraseSourceDestPinContact(temp_source, temp_dest, Set_x);
+ 
+         Grid_Inactive_new(grid, Set_x, gridll, gridur);  // inactive grid on internal metals
++        if (TR()) { fprintf(stderr, "ST inact %u %u:", i, j); for (size_t q = 0; q < grid.vertices_total.size(); q++) if (!grid.vertices_total[q].active) fprintf(stderr, " %zu", q); fprintf(stderr, "\n"); }
+         //grid.CreateGridData_new();
+         std::vector<std::set<RouterDB::point, RouterDB::pointXYComp>> src_dest_plist;
+         // grid.CreateGridData_new();
+         Detailed_router_set_src_dest_new(grid, temp_source, temp_dest, i, sym_gridll, sym_gridur, gridll, gridur, src_dest_plist, Set_net, sym_flag);
++        if (TR()) { fprintf(stderr, "ST srcdest %u %u:", i, j); for (size_t q = 0; q < grid.vertices_total.size(); q++) if (!grid.vertices_total[q].active) fprintf(stderr, " %zu", q); fprintf(stderr, "\n"); }
++        if (TR()) { fprintf(stderr, "SRC %u %u:", i, j); for (auto &s : temp_source) fprintf(stderr, " [%d %d %d %d m%d]", s.coord[0].x, s.coord[0].y, s.coord[1].x, s.coord[1].y, s.metalIdx); fprintf(stderr, "\nDST %u %u:", i, j); for (auto &s : temp_dest) fprintf(stderr, " [%d %d %d %d m%d]", s.coord[0].x, s.coord[0].y, s.coord[1].x, s.coord[1].y, s.metalIdx); fprintf(stderr, "\nSETX %u %u: %zu\n", i, j, Set_x.size()); }
+         AddViaEnclosure(Pset_via, grid, Set_x_contact, Set_net_contact, gridll, gridur, temp_source, temp_dest);
+         AddViaSpacing(Pset_via, grid, gridll, gridur);
+         A_star a_star(grid, Nets[i].shielding);
+@@ -457,6 +469,17 @@
+         // logger->debug("Net name {0}", Nets[i].netName);
+         // bool pathMark = a_star.FindFeasiblePath(grid, this->path_number, 0, 0);
+         bool pathMark = a_star.FindFeasiblePath_sym(grid, this->path_number, 0, 0, symmetry_path);
++        if (TR()) {
++          int act = 0, vu = 0, vd = 0;
++          for (auto &v : grid.vertices_total) { act += v.active; vu += v.via_active_up; vd += v.via_active_down; }
++          fprintf(stderr, "CONN %u %u n=%zu act=%d vu=%d vd=%d ll=%d,%d ur=%d,%d\n  S", i, j, grid.vertices_total.size(), act, vu, vd, gridll.x, gridll.y, gridur.x, gridur.y);
++          for (int s : grid.Source) fprintf(stderr, " %d", s);
++          fprintf(stderr, "\n  D");
++          for (int s : grid.Dest) fprintf(stderr, " %d", s);
++          fprintf(stderr, "\n  P");
++          for (auto &p : a_star.GetPath()) for (int s : p) fprintf(stderr, " %d", s);
++          fprintf(stderr, "\n");
++        }
+         // std::cout<<"performing detailed router on debug 1"<<std::endl;
+ 
+         if (pathMark == 0) {
+@@ -1378,6 +1401,17 @@
+         // logger->debug("Net name {0}", Nets[i].netName);
+         // bool pathMark = a_star.FindFeasiblePath(grid, this->path_number, 0, 0);
+         bool pathMark = a_star.FindFeasiblePath_sym(grid, this->path_number, 0, 0, symmetry_path);
++        if (TR()) {
++          int act = 0, vu = 0, vd = 0;
++          for (auto &v : grid.vertices_total) { act += v.active; vu += v.via_active_up; vd += v.via_active_down; }
++          fprintf(stderr, "CONN %u %u n=%zu act=%d vu=%d vd=%d ll=%d,%d ur=%d,%d\n  S", i, j, grid.vertices_total.size(), act, vu, vd, gridll.x, gridll.y, gridur.x, gridur.y);
++          for (int s : grid.Source) fprintf(stderr, " %d", s);
++          fprintf(stderr, "\n  D");
++          for (int s : grid.Dest) fprintf(stderr, " %d", s);
++          fprintf(stderr, "\n  P");
++          for (auto &p : a_star.GetPath()) for (int s : p) fprintf(stderr, " %d", s);
++          fprintf(stderr, "\n");
++        }
+         // std::cout<<"performing detailed router on debug 1"<<std::endl;
+         /*
+         if(pathMark==0){

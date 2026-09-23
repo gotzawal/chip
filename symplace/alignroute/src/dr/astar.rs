@@ -764,11 +764,9 @@ impl<'a> A_star<'a> {
 /// (작은 번호부터)마다 처음 나온 다음 자리부터 마지막 자리까지를 지운다
 fn rm_cycle_path(Node_Path: &mut [Vec<i32>]) -> Result<(), String> {
     for p in Node_Path.iter_mut() {
-        // compact_path: 빈 경로면 C++ 은 [0] 을 읽는다 (정의되지 않은 동작)
-        if p.is_empty() {
-            return Err(ub("compact_path 가 빈 경로의 [0] 을 읽는다"));
-        }
-        let mut c = vec![p[0]];
+        // compact_path: 빈 경로면 C++ 은 (assert 가 꺼져) 빈 벡터의 [0] 을 읽는다 — 기준(wasm32)은 데이터
+        // 포인터가 null 이고 0 번지가 0 이라 꼭짓점 0 하나짜리 경로가 된다
+        let mut c = vec![p.first().copied().unwrap_or(0)];
         for j in 1..p.len() {
             if p[j] != p[j - 1] {
                 c.push(p[j]);

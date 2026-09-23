@@ -14,7 +14,9 @@
 //!
 //! 결과에 안 닿는 것은 뺐다: 파일 쓰기(실패 때 Grid.txt 등, 비아 간격 로그), 배선 보고(router_report),
 //! 대칭 짝의 사각형 모으기(CreatePlistSym*, 쓰이지 않는다), PrepareGraphVertices·Full_Connected_Vertex 의 결과.
-//! C++ 이 던지는 예외(`.at` 범위 밖)와 정의되지 않은 동작, 끝나지 않는 반복은 Err 로 돌려준다.
+//! C++ 이 던지는 예외(`.at` 범위 밖)와 정의되지 않은 동작, 끝나지 않는 반복은 Err 로 돌려준다. 다만 빈 벡터의
+//! [0] 읽기는 기준(wasm32)에서 데이터 포인터가 null 이고 0 번지 쪽이 늘 0 이라 0 을 읽고 지나가므로 그대로
+//! 따른다 (전역 후보가 없는 대칭 짝의 STs[0], 빈 경로의 compact_path).
 #![allow(non_snake_case, non_camel_case_types)]
 
 mod astar;
@@ -44,10 +46,40 @@ fn tr() -> bool {
     false
 }
 
+/// 자취: SortPinsOrder 뒤 넷마다 중심과 연결 순서 (종류/iter/iter2)
+fn trace_sort(nets: &[Net]) {
+    for (i, n) in nets.iter().enumerate() {
+        let c: Vec<String> = n.connected.iter().map(|c| format!("{}/{}/{}", if c.type_ == NType::BLOCK { 0 } else { 1 }, c.iter, c.iter2)).collect();
+        eprintln!("SORT {i} c={},{} : {}", n.center_x, n.center_y, c.join(" "));
+    }
+}
+
+/// 자취: 꺼진 꼭짓점 번호들
+fn trace_inactive(what: &str, i: usize, j: usize, grid: &Grid) {
+    let l: String = grid.vertices_total.iter().enumerate().filter(|(_, v)| !v.active).map(|(q, _)| format!(" {q}")).collect();
+    eprintln!("{what} {i} {j}:{l}");
+}
+
+/// 자취: 출발·도착 사각형과 Set_x 크기
+fn trace_src_dest(i: usize, j: usize, src: &[Sink], dst: &[Sink], set_x: usize) {
+    let f = |v: &[Sink]| v.iter().map(|s| format!(" [{} {} {} {} m{}]", s.LL.x, s.LL.y, s.UR.x, s.UR.y, s.metalIdx)).collect::<String>();
+    eprintln!("SRC {i} {j}:{}\nDST {i} {j}:{}\nSETX {i} {j}: {set_x}", f(src), f(dst));
+}
+
+/// 자취: A* 뒤 켜진 꼭짓점·비아 수, 출발·도착 꼭짓점, 경로
+fn trace_conn(i: usize, j: usize, grid: &Grid, ll: (i32, i32), ur: (i32, i32), path: &[Vec<i32>]) {
+    let vt = &grid.vertices_total;
+    let act = vt.iter().filter(|v| v.active).count();
+    let vu = vt.iter().filter(|v| v.via_active_up).count();
+    let vd = vt.iter().filter(|v| v.via_active_down).count();
+    let j_ = |v: &[i32]| v.iter().map(|x| format!(" {x}")).collect::<String>();
+    eprintln!("CONN {i} {j} n={} act={act} vu={vu} vd={vd} ll={},{} ur={},{}", vt.len(), ll.0, ll.1, ur.0, ur.1);
+    eprintln!("  S{}\n  D{}\n  P{}", j_(&grid.Source), j_(&grid.Dest), j_(&path.concat()));
+}
+
 /// RouteWork 5: GcellDetailRouter(HierNode, GR, path_number = 1, grid_scale = 1)
 pub fn route(node: &mut HierNode, gr: &GcellGlobalRouter) -> Result<(), String> {
     let mut dr = GcellDetailRouter::new(gr, 1, 1);
-    dr.check_metals()?;
     // calculate_extension_length, printNetsInfo: 결과에 안 닿는다
     dr.create_detailrouter_new()?;
     dr.ReturnHierNode(node)
@@ -106,38 +138,6 @@ impl<'a> GcellDetailRouter<'a> {
             grid_scale,
             layerNo: GR.drc_info.Metal_info.len() as i32,
         }
-    }
-
-    /// 층을 못 찾은 사각형(-1)은 C++ 이 Metal_info[-1] 을 곳곳에서 읽는다 (정의되지 않은 동작) — 먼저 멈춘다
-    fn check_metals(&self) -> Result<(), String> {
-        let nm = self.drc_info.Metal_info.len() as i32;
-        let nv = self.drc_info.Via_info.len() as i32;
-        let ok = |m: i32| m >= 0 && m < nm;
-        let bad = |what: &str, b: &Block| Err(format!("GcellDetailRouter: 블록 {} 의 {what} 층을 모른다 (C++ 은 Metal_info[-1] 을 읽는다)", b.blockName));
-        for b in self.Blocks {
-            for p in &b.pins {
-                if p.pinContacts.iter().any(|c| !ok(c.metal)) {
-                    return bad("핀 접점", b);
-                }
-                if p.pinVias.iter().any(|v| !ok(v.UpperMetalRect.metal) || !ok(v.LowerMetalRect.metal) || v.ViaRect.metal < 0 || v.ViaRect.metal >= nv) {
-                    return bad("핀 비아", b);
-                }
-            }
-            if b.InternalMetal.iter().any(|c| !ok(c.metal)) {
-                return bad("내부 금속", b);
-            }
-            if b.InternalVia.iter().any(|v| !ok(v.UpperMetalRect.metal) || !ok(v.LowerMetalRect.metal) || v.ViaRect.metal < 0 || v.ViaRect.metal >= nv) {
-                return bad("내부 비아", b);
-            }
-        }
-        for p in self.PowerNets {
-            for pin in &p.pins {
-                if pin.pinContacts.iter().any(|c| !ok(c.metal)) {
-                    return Err(format!("GcellDetailRouter: 전원 넷 {} 의 핀 접점 층을 모른다", p.netName));
-                }
-            }
-        }
-        Ok(())
     }
 
     // ------------------------------------------------------------ 핀 순서 (GcellDetailRouter.cpp:300-365)
@@ -367,16 +367,26 @@ impl<'a> GcellDetailRouter<'a> {
         Ok(())
     }
 
+    /// `Nets[k].STs[Nets[k].STindex].path` — 전역 배선이 후보를 못 낸 넷(STs 가 빈 것, STindex 는 기본값 0)은
+    /// 빈 벡터의 [0] 을 읽는다. 기준(wasm32)은 데이터 포인터가 null 이고 0 번지 쪽이 0 이라 빈 경로를 읽고
+    /// 지나간다 — 그대로 빈 경로. 그 밖의 범위 밖은 힙을 읽는다 (정의되지 않은 동작): Err.
+    fn st_path<'n>(net: &'n Net, what: &str) -> Result<&'n [(i32, i32)], String> {
+        if net.STs.is_empty() && net.STindex == 0 {
+            return Ok(&[]);
+        }
+        usize::try_from(net.STindex)
+            .ok()
+            .and_then(|s| net.STs.get(s))
+            .map(|st| st.path.as_slice())
+            .ok_or_else(|| format!("GcellDetailRouter: {what} {} 의 STs[{}] 이 없다 (정의되지 않은 동작)", net.netName, net.STindex))
+    }
+
     /// GcellDetailRouter::Generate_Grid_Net — 전역 경로 + 핀 칸 기둥 + (마지막 넷이 아닌) 대칭 짝의 전역 경로와
     /// 핀 칸으로 격자를 짓는다. 층 범위는 넷의 배선층과 칸 격자 범위의 겹침을 핀 층까지 넓힌 것.
     /// (기준 빌드는 NRVO 로 격자를 복사하지 않아 넷 중심이 A* 에 남는다 — 복사 생성자는 중심을 안 옮긴다.)
     fn Generate_Grid_Net(&self, i: usize) -> Result<Grid<'a>, String> {
         let net = &self.Nets[i];
-        let st = usize::try_from(net.STindex)
-            .ok()
-            .and_then(|s| net.STs.get(s))
-            .ok_or_else(|| format!("GcellDetailRouter: 넷 {} 의 STs[{}] 이 없다 (정의되지 않은 동작)", net.netName, net.STindex))?;
-        let mut global_path = st.path.clone();
+        let mut global_path = Self::st_path(net, "넷")?.to_vec();
         for &t in &net.terminals {
             self.Adding_tiles_for_terminal(t, &mut global_path)?;
         }
@@ -386,11 +396,7 @@ impl<'a> GcellDetailRouter<'a> {
                 .ok()
                 .and_then(|s| self.Nets.get(s))
                 .ok_or_else(|| format!("GcellDetailRouter: 대칭 짝 Nets[{sc}] 이 없다 (정의되지 않은 동작)"))?;
-            let sst = usize::try_from(sn.STindex)
-                .ok()
-                .and_then(|s| sn.STs.get(s))
-                .ok_or_else(|| format!("GcellDetailRouter: 대칭 짝 {} 의 STs[{}] 이 없다 (정의되지 않은 동작)", sn.netName, sn.STindex))?;
-            global_path.extend(sst.path.iter().copied());
+            global_path.extend(Self::st_path(sn, "대칭 짝")?.iter().copied());
             for &t in &sn.terminals {
                 global_path.push((t, t));
             }
@@ -427,8 +433,8 @@ impl<'a> GcellDetailRouter<'a> {
                     .ok()
                     .and_then(|u| self.Terminals.get(u))
                     .ok_or_else(|| format!("std::out_of_range: vector (Terminals.at({}))", c.iter))?;
-                let first = t.termContacts.first().ok_or_else(|| format!("GcellDetailRouter: 단자 {} 에 접점이 없다 (C++ 은 termContacts[0] 을 읽는다)", t.name))?;
-                if first.metal != -1 {
+                // 접점이 없으면 C++ 은 termContacts[0] 을 읽는다 (정의되지 않은 동작) — 무엇을 읽든 돌 접점이 없어 빈 목록
+                if t.termContacts.first().is_some_and(|c| c.metal != -1) {
                     for tc in &t.termContacts {
                         temp_contacts.push(Sink { LL: tc.placedLL, UR: tc.placedUR, metalIdx: tc.metal });
                     }
@@ -474,10 +480,7 @@ impl<'a> GcellDetailRouter<'a> {
     fn create_detailrouter_new(&mut self) -> Result<(), String> {
         self.SortPinsOrder()?;
         if tr() {
-            for (i, n) in self.Nets.iter().enumerate() {
-                let c: Vec<String> = n.connected.iter().map(|c| format!("{}/{}/{}", if c.type_ == NType::BLOCK { 0 } else { 1 }, c.iter, c.iter2)).collect();
-                eprintln!("SORT {i} c={},{} : {}", n.center_x, n.center_y, c.join(" "));
-            }
+            trace_sort(&self.Nets);
         }
         let mut Set_x: BTreeSet<C5> = BTreeSet::new();
         let mut Set_x_contact: BTreeSet<C5> = BTreeSet::new();
@@ -525,6 +528,7 @@ impl<'a> GcellDetailRouter<'a> {
                     Self::Grid_Inactive_One_Layer(&mut grid, h)?;
                 }
                 let mut temp_source: Vec<Sink> = temp_pins[0].clone();
+                #[allow(clippy::needless_range_loop)] // j 는 C++ 처럼 연결 번호 (자취에 찍는다)
                 for j in 1..temp_pins.len() {
                     let temp_dest: Vec<Sink> = temp_pins[j].clone();
                     // 출발·도착 사각형을 장애물에서 뺀다
@@ -533,8 +537,7 @@ impl<'a> GcellDetailRouter<'a> {
                     }
                     self.Grid_Inactive_new(&mut grid, &Set_x)?;
                     if tr() {
-                        let l: String = grid.vertices_total.iter().enumerate().filter(|(_, v)| !v.active).map(|(q, _)| format!(" {q}")).collect();
-                        eprintln!("ST inact {i} {j}:{l}");
+                        trace_inactive("ST inact", i, j, &grid);
                     }
                     let (gridll, gridur) = ((grid.GridLL.x, grid.GridLL.y), (grid.GridUR.x, grid.GridUR.y));
                     // Detailed_router_set_src_dest_new
@@ -543,27 +546,17 @@ impl<'a> GcellDetailRouter<'a> {
                     let src_dest_plist = self.CreatePlistSrc_Dest(&temp_source, &temp_dest)?;
                     grid.SetPointlist(&src_dest_plist, true);
                     grid.setSrcDest(&temp_source, &temp_dest, true)?;
-                    grid.PrepareGraphVertices()?;
+                    grid.PrepareGraphVertices(gridll, gridur)?;
                     if tr() {
-                        let l: String = grid.vertices_total.iter().enumerate().filter(|(_, v)| !v.active).map(|(q, _)| format!(" {q}")).collect();
-                        eprintln!("ST srcdest {i} {j}:{l}");
-                    }
-                    if tr() {
-                        let f = |v: &[Sink]| v.iter().map(|s| format!(" [{} {} {} {} m{}]", s.LL.x, s.LL.y, s.UR.x, s.UR.y, s.metalIdx)).collect::<String>();
-                        eprintln!("SRC {i} {j}:{}\nDST {i} {j}:{}\nSETX {i} {j}: {}", f(&temp_source), f(&temp_dest), Set_x.len());
+                        trace_inactive("ST srcdest", i, j, &grid);
+                        trace_src_dest(i, j, &temp_source, &temp_dest, Set_x.len());
                     }
                     self.AddViaEnclosure(&mut grid, &Set_x_contact, &Set_net_contact, gridll, gridur, &temp_source, &temp_dest)?;
                     self.AddViaSpacing(&Pset_via, &mut grid, gridll, gridur)?;
                     let mut a_star = A_star::new(&grid, self.Nets[i].shielding);
                     let pathMark = a_star.FindFeasiblePath_sym(&mut grid, self.path_number, 0, 0, &symmetry_path)?;
                     if tr() {
-                        let vt = &grid.vertices_total;
-                        let act = vt.iter().filter(|v| v.active).count();
-                        let vu = vt.iter().filter(|v| v.via_active_up).count();
-                        let vd = vt.iter().filter(|v| v.via_active_down).count();
-                        let j_ = |v: &[i32]| v.iter().map(|x| format!(" {x}")).collect::<String>();
-                        eprintln!("CONN {i} {j} n={} act={act} vu={vu} vd={vd} ll={},{} ur={},{}", vt.len(), gridll.0, gridll.1, gridur.0, gridur.1);
-                        eprintln!("  S{}\n  D{}\n  P{}", j_(&grid.Source), j_(&grid.Dest), j_(&a_star.Path.concat()));
+                        trace_conn(i, j, &grid, gridll, gridur, &a_star.Path);
                     }
 
                     let mut physical_path: Vec<Vec<Metal>> = Vec::new();

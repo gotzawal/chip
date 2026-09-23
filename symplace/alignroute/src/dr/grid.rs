@@ -82,8 +82,8 @@ pub struct Grid<'a> {
     pub GridUR: point,
     /// 층마다 (x, y) -> 번호 (C++ std::map 의 insert: 먼저 것이 남는다)
     pub vertices_total_map: Vec<FxMap<(i32, i32), i32>>,
-    /// `map[p]` 가 없는 점에 0 을 넣은 층 (꼭짓점이 하나도 없는 격자에서만 뒤에 닿는다 — PrepareGraphVertices)
-    pub map_inserted: Vec<bool>,
+    /// 꼭짓점이 하나도 없는 격자에서 `map[p]` 가 넣은 점들 (층마다, pointXYComp 순) — PrepareGraphVertices 만 본다
+    pub map_inserted: Vec<BTreeSet<(i32, i32)>>,
     pub lowest_metal: i32,
     pub highest_metal: i32,
     pub grid_scale: i32,
@@ -131,7 +131,7 @@ impl<'a> Grid<'a> {
             GridLL: point::new(i32::MAX, i32::MAX),
             GridUR: point::new(i32::MIN, i32::MIN),
             vertices_total_map: (0..n).map(|_| FxMap::default()).collect(),
-            map_inserted: vec![false; n],
+            map_inserted: vec![BTreeSet::new(); n],
             lowest_metal: Lmetal,
             highest_metal: Hmetal,
             grid_scale,
@@ -141,12 +141,12 @@ impl<'a> Grid<'a> {
         };
         let MI = &drc_info.Metal_info;
         // 3. 층마다 격자 간격
-        for i in 0..n {
-            if MI[i].direct == 0 {
-                g.x_unit[i] = MI[i].grid_unit_x.wrapping_mul(grid_scale);
+        for (i, m) in MI.iter().enumerate().take(n) {
+            if m.direct == 0 {
+                g.x_unit[i] = m.grid_unit_x.wrapping_mul(grid_scale);
                 g.y_min[i] = 1;
-            } else if MI[i].direct == 1 {
-                g.y_unit[i] = MI[i].grid_unit_y.wrapping_mul(grid_scale);
+            } else if m.direct == 1 {
+                g.y_unit[i] = m.grid_unit_y.wrapping_mul(grid_scale);
                 g.x_min[i] = 1;
             }
         }
@@ -431,21 +431,30 @@ impl<'a> Grid<'a> {
             .ok()
             .and_then(|u| self.vertices_total_map.get(u))
             .ok_or_else(|| format!("std::out_of_range: vector (vertices_total_map.at({m}))"))?;
-        let i = match mp.get(&(x, y)) {
-            Some(&i) => i,
-            None => {
-                self.map_inserted[m as usize] = true;
-                0
-            }
-        };
-        if self.vertices_total.is_empty() { Ok(None) } else { Ok(Some(i as usize)) }
+        let i = mp.get(&(x, y)).copied().unwrap_or(0);
+        if self.vertices_total.is_empty() {
+            self.map_inserted[m as usize].insert((x, y));
+            return Ok(None);
+        }
+        Ok(Some(i as usize))
     }
 
-    /// Grid::PrepareGraphVertices — 결과(vertices_graph)는 모드 5 에서 안 읽는다. 꼭짓점이 없는 격자에서
-    /// 지도에 0 이 들어가 있으면 C++ 은 빈 범위를 거꾸로 돈다 (정의되지 않은 동작) — 그때만 멈춘다.
-    pub fn PrepareGraphVertices(&self) -> Result<(), String> {
-        if self.vertices_total.is_empty() && self.map_inserted.iter().any(|&b| b) {
-            return Err("PrepareGraphVertices: 꼭짓점 없는 격자의 지도에 map[p] 가 넣은 0 이 있다 (C++ 은 정의되지 않은 동작)".into());
+    /// Grid::PrepareGraphVertices(LL, UR) — 결과(vertices_graph)는 모드 5 에서 안 읽는다. 꼭짓점이 없는 격자라도
+    /// 지도에 `map[p]` 가 넣은 점이 있으면 [lower_bound(LL), upper_bound(UR)) 를 돈다: 비지 않으면
+    /// `vertices_total.at(0)` 이 던지고, 거꾸로면 정의되지 않은 동작 — 둘 다 Err.
+    pub fn PrepareGraphVertices(&self, LL: (i32, i32), UR: (i32, i32)) -> Result<(), String> {
+        if !self.vertices_total.is_empty() {
+            return Ok(());
+        }
+        for pts in &self.map_inserted {
+            if pts.is_empty() {
+                continue;
+            }
+            let low = pts.range(LL..).next();
+            let high = pts.range((std::ops::Bound::Excluded(UR), std::ops::Bound::Unbounded)).next();
+            if low != high {
+                return Err("PrepareGraphVertices: 꼭짓점 없는 격자의 지도를 돈다 (C++ 은 .at(0) 이 던지거나 정의되지 않은 동작)".into());
+            }
         }
         Ok(())
     }

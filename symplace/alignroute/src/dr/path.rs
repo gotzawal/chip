@@ -226,7 +226,8 @@ impl GcellDetailRouter<'_> {
                     let v = &self.drc_info.Via_model[k as usize];
                     Some((vm_pt(&v.LowerRect, 0)?, vm_pt(&v.LowerRect, 1)?))
                 } else if k == nvm {
-                    let v = &self.drc_info.Via_model[(k - 1) as usize];
+                    // 비아 모형이 하나도 없으면 C++ 은 Via_model[-1] 을 읽는다 (정의되지 않은 동작)
+                    let v = usize::try_from(k - 1).ok().and_then(|u| self.drc_info.Via_model.get(u)).ok_or("GcellDetailRouter: Via_model[-1] 을 읽는다")?;
                     Some((vm_pt(&v.UpperRect, 0)?, vm_pt(&v.UpperRect, 1)?))
                 } else {
                     None

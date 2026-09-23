@@ -9,6 +9,7 @@ use super::GcellDetailRouter;
 use super::grid::{Grid, Sink};
 use super::util::{FxSet, ceil_mul, floor_mul};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound::Excluded;
 
 pub type C5 = (i32, i32, i32, i32, i32);
 pub type P3 = (i32, i32, i32);
@@ -19,6 +20,16 @@ pub type PlistSet = Vec<FxSet<(i32, i32)>>;
 #[inline]
 pub fn c5s(s: &Sink) -> C5 {
     (s.LL.x, s.LL.y, s.metalIdx, s.UR.x, s.UR.y)
+}
+
+/// std::set 을 lower_bound(low) 부터 upper_bound(up) 까지 돌 때, low > up 이고 둘 사이(끝 빼고)에 원소가
+/// 있으면 upper_bound 가 lower_bound 보다 앞이라 C++ 은 end 너머까지 돈다 (정의되지 않은 동작) — Err.
+/// 사이가 비었으면 두 반복자가 같아 아무것도 안 돈다.
+fn reversed_ub<K: Ord>(low: &K, up: &K, mut between: impl FnMut() -> bool, what: &str) -> Result<(), String> {
+    if low > up && between() {
+        return Err(format!("{what}: 창이 거꾸로라 집합을 end 너머까지 돈다 (정의되지 않은 동작)"));
+    }
+    Ok(())
 }
 
 /// 반복이 한 번이라도 돌 때(run) 걸음이 0 이하면 C++ 은 끝나지 않는다
@@ -253,7 +264,7 @@ impl GcellDetailRouter<'_> {
             }
             Ok(())
         };
-        let first = |v: i32, n: i32| if v.wrapping_rem(n) == 0 { (v / n + 1).wrapping_mul(n) } else { ceil_mul(v, n) };
+        let first = |v: i32, n: i32| if v.wrapping_rem(n) == 0 { v.wrapping_div(n).wrapping_add(1).wrapping_mul(n) } else { ceil_mul(v, n) };
         if mi.direct == 0 {
             let cu = mi.grid_unit_x;
             let mut x = ceil_mul(LLx, cu);
@@ -319,11 +330,23 @@ impl GcellDetailRouter<'_> {
         Ok(())
     }
 
-    /// RawRouter::FindsetPlist — 점 하나짜리 집합에서 (x, y, 층) 사전 순 [LL·lowest, UR·highest] 이고
-    /// (y, x, 층) 사전 순으로도 안인 점들
-    fn findset_in(&self, x: i32, y: i32, m: i32, LL: (i32, i32), UR: (i32, i32)) -> bool {
+    /// RawRouter::FindsetPlist — 점 하나짜리 집합에서 (x, y, 층) 사전 순 [LL·lowest, UR·highest] 을 고르고,
+    /// 그중 (y, x, 층) 사전 순으로도 안인 점들. 창이 거꾸로인데 사이에 점이 있으면 Err (reversed_ub).
+    fn FindsetPlist(&self, Set_x: &BTreeSet<P3>, LL: (i32, i32), UR: (i32, i32)) -> Result<PlistSet, String> {
         let (lo, hi) = (self.lowest_metal, self.highest_metal);
-        (LL.0, LL.1, lo) <= (x, y, m) && (x, y, m) <= (UR.0, UR.1, hi) && (LL.1, LL.0, lo) <= (y, x, m) && (y, x, m) <= (UR.1, UR.0, hi)
+        let (low, up) = ((LL.0, LL.1, lo), (UR.0, UR.1, hi));
+        reversed_ub(&low, &up, || Set_x.range((Excluded(up), Excluded(low))).next().is_some(), "FindsetPlist")?;
+        let Set_y: BTreeSet<P3> = if low <= up { Set_x.range(low..=up).map(|&(x, y, m)| (y, x, m)).collect() } else { BTreeSet::new() };
+        let (low, up) = ((LL.1, LL.0, lo), (UR.1, UR.0, hi));
+        reversed_ub(&low, &up, || Set_y.range((Excluded(up), Excluded(low))).next().is_some(), "FindsetPlist")?;
+        let mut out: PlistSet = (0..self.layerNo as usize).map(|_| FxSet::default()).collect();
+        if low <= up {
+            for &(y, x, m) in Set_y.range(low..=up) {
+                // plist[metalIdx] — 점은 plist 의 층 번호에서 왔다
+                out[m as usize].insert((x, y));
+            }
+        }
+        Ok(out)
     }
 
     /// GcellDetailRouter::CreatePlistSrc_Dest (GcellDetailRouter.cpp:3969-4037) — 출발·도착 사각형의 격자점을
@@ -342,64 +365,48 @@ impl GcellDetailRouter<'_> {
         for s in &all {
             self.ConvertRect2GridPoints(&mut plist, s.metalIdx, s.LL.x, s.LL.y, s.UR.x, s.UR.y)?;
         }
-        let mut out: PlistSet = (0..n).map(|_| FxSet::default()).collect();
+        // InsertPlistToSet_x: 점 하나짜리 SinkData 집합 (x, y, 층)
+        let mut Set_x: BTreeSet<P3> = BTreeSet::new();
         for (m, pts) in plist.iter().enumerate() {
             for &(x, y) in pts {
-                if self.findset_in(x, y, m as i32, (llx, lly), (urx, ury)) {
-                    out[m].insert((x, y));
-                }
+                Set_x.insert((x, y, m as i32));
             }
         }
-        Ok(out)
+        self.FindsetPlist(&Set_x, (llx, lly), (urx, ury))
     }
 
     /// CombineTwoSets(set1, set2) 뒤 RawRouter::Findset (RawRouter.cpp:104-138). 첫 걸음(SinkDataComp)은
     /// 왼아래 모서리 (x, y, 층) 로 거르고, 둘째 걸음의 집합(SinkData2Comp: y, x, 층)이 모서리와 층이 같은
     /// 접점을 하나(먼저 온 것 = 오른위가 가장 작은 것)만 남긴다. 모서리가 LL 이고 층이 lowest 인 접점은
     /// C++ 이 키의 coord[1] (범위 밖) 과 견준다 — 들어가는 것으로 둔다 (pr 과 같은 선택).
-    pub(crate) fn Findset(&self, set1: &BTreeSet<C5>, set2: &BTreeSet<C5>, LL: (i32, i32), UR: (i32, i32)) -> Vec<C5> {
+    pub(crate) fn Findset(&self, set1: &BTreeSet<C5>, set2: &BTreeSet<C5>, LL: (i32, i32), UR: (i32, i32)) -> Result<Vec<C5>, String> {
         let (lo, hi) = (self.lowest_metal, self.highest_metal);
+        let key = |c: &C5| (c.0, c.1, c.2);
+        let (low, up) = ((LL.0, LL.1, lo), (UR.0, UR.1, hi));
+        // 두 집합을 합친 SinkDataComp 순서 (같은 원소는 하나)
+        reversed_ub(&low, &up, || set1.union(set2).any(|c| up < key(c) && key(c) < low), "Findset")?;
         let mut Set_y: BTreeMap<P3, C5> = BTreeMap::new();
-        let mut take = |c: &C5| {
-            let k = (c.0, c.1, c.2);
-            if (LL.0, LL.1, lo) <= k && k <= (UR.0, UR.1, hi) {
+        for c in set1.union(set2) {
+            if low <= key(c) && key(c) <= up {
                 Set_y.entry((c.1, c.0, c.2)).or_insert(*c);
             }
-        };
-        // 두 집합을 합친 SinkDataComp 순서로 넣는다 (같은 원소는 하나)
-        let mut a = set1.iter().peekable();
-        let mut b = set2.iter().peekable();
-        loop {
-            let next = match (a.peek(), b.peek()) {
-                (None, None) => break,
-                (Some(_), None) => a.next(),
-                (None, Some(_)) => b.next(),
-                (Some(x), Some(y)) => {
-                    if x < y {
-                        a.next()
-                    } else if y < x {
-                        b.next()
-                    } else {
-                        b.next();
-                        a.next()
-                    }
-                }
-            };
-            take(next.unwrap());
         }
-        let mut out: Vec<C5> = Set_y.into_iter().filter(|(k, _)| (LL.1, LL.0, lo) <= *k && *k <= (UR.1, UR.0, hi)).map(|(_, c)| c).collect();
+        let (low, up) = ((LL.1, LL.0, lo), (UR.1, UR.0, hi));
+        reversed_ub(&low, &up, || Set_y.range((Excluded(up), Excluded(low))).next().is_some(), "Findset")?;
+        let mut out: Vec<C5> = Set_y.into_iter().filter(|(k, _)| low <= *k && *k <= up).map(|(_, c)| c).collect();
         out.sort_unstable();
-        out
+        Ok(out)
     }
 
     /// RawRouter::findviaset — (모형, x, y) 사전 순으로 [(lowest, LL), (highest, UR)]
-    pub(crate) fn findviaset(&self, Pset_via: &BTreeSet<P3>, LL: (i32, i32), UR: (i32, i32)) -> Vec<P3> {
+    pub(crate) fn findviaset(&self, Pset_via: &BTreeSet<P3>, LL: (i32, i32), UR: (i32, i32)) -> Result<Vec<P3>, String> {
         let lo = (self.lowest_metal, LL.0, LL.1);
         let hi = (self.highest_metal, UR.0, UR.1);
+        reversed_ub(&lo, &hi, || Pset_via.range((Excluded(hi), Excluded(lo))).next().is_some(), "findviaset")?;
         if lo > hi {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        Pset_via.range(lo..=hi).copied().collect()
+        Ok(Pset_via.range(lo..=hi).copied().collect())
     }
 
     /// GcellDetailRouter::AddViaEnclosure (GcellDetailRouter.cpp:1704-1988), bidirection = false.
@@ -408,7 +415,7 @@ impl GcellDetailRouter<'_> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn AddViaEnclosure(&self, grid: &mut Grid, Set_x_contact: &BTreeSet<C5>, Set_net_contact: &BTreeSet<C5>, LL: (i32, i32),
                                   UR: (i32, i32), temp_source: &[Sink], temp_dest: &[Sink]) -> Result<(), String> {
-        let Set = self.Findset(Set_net_contact, Set_x_contact, LL, UR);
+        let Set = self.Findset(Set_net_contact, Set_x_contact, LL, UR)?;
         let inside = |v: &[Sink], metal: i32, c: &C5| {
             v.iter().any(|s| s.metalIdx == metal && s.LL.x <= c.0 && s.LL.y <= c.1 && s.UR.x >= c.3 && s.UR.y >= c.4)
         };
@@ -473,12 +480,12 @@ impl GcellDetailRouter<'_> {
         let via = |k: i32| -> Result<&crate::db::ViaInfo, String> {
             usize::try_from(k).ok().and_then(|u| drc.Via_info.get(u)).ok_or_else(|| format!("GcellDetailRouter: Via_info[{k}] 이 없다"))
         };
-        for (vIdx, x, y) in self.findviaset(Pset_via, LL, UR) {
+        for (vIdx, x, y) in self.findviaset(Pset_via, LL, UR)? {
             let vi = via(vIdx)?;
             let (bx0, by0) = (x.wrapping_sub(vi.dist_ss).wrapping_sub(vi.width), y.wrapping_sub(vi.dist_ss_y).wrapping_sub(vi.width_y));
             let (bx1, by1) = (x.wrapping_add(vi.dist_ss).wrapping_add(vi.width), y.wrapping_add(vi.dist_ss_y).wrapping_add(vi.width_y));
             self.InactivateRect2GridPoints_Via(vIdx, bx0, by0, bx1, by1, true, grid)?;
-            self.InactivateRect2GridPoints_Via(vIdx + 1, bx0, by0, bx1, by1, false, grid)?;
+            self.InactivateRect2GridPoints_Via(vIdx.wrapping_add(1), bx0, by0, bx1, by1, false, grid)?;
         }
         let nM = drc.Metal_info.len() as i32;
         let dests = grid.Dest.clone();
@@ -488,7 +495,7 @@ impl GcellDetailRouter<'_> {
                 (v.metal, v.x, v.y)
             };
             let mi = self.mi(metal)?;
-            let pairs: [(i32, i32, i32); 2] = [(mi.upper_via_index, metal, metal + 1), (mi.lower_via_index, metal - 1, metal)];
+            let pairs: [(i32, i32, i32); 2] = [(mi.upper_via_index, metal, metal.wrapping_add(1)), (mi.lower_via_index, metal.wrapping_sub(1), metal)];
             for (k, &(vIdx, lo_m, hi_m)) in pairs.iter().enumerate() {
                 let ok = if k == 0 { vIdx != -1 && metal != nM - 1 } else { vIdx != -1 && metal != 0 };
                 if !ok {
@@ -497,10 +504,10 @@ impl GcellDetailRouter<'_> {
                 let vi = via(vIdx)?;
                 let boxes = if mi.direct == 0 {
                     let s = vi.dist_ss.wrapping_add(vi.width);
-                    [(x.wrapping_sub(s), y - 1, x - 1, y + 1), (x + 1, y - 1, x.wrapping_add(s), y + 1)]
+                    [(x.wrapping_sub(s), y.wrapping_sub(1), x.wrapping_sub(1), y.wrapping_add(1)), (x.wrapping_add(1), y.wrapping_sub(1), x.wrapping_add(s), y.wrapping_add(1))]
                 } else {
                     let s = vi.dist_ss_y.wrapping_add(vi.width_y);
-                    [(x - 1, y + 1, x + 1, y.wrapping_add(s)), (x - 1, y.wrapping_sub(s), x + 1, y - 1)]
+                    [(x.wrapping_sub(1), y.wrapping_add(1), x.wrapping_add(1), y.wrapping_add(s)), (x.wrapping_sub(1), y.wrapping_sub(s), x.wrapping_add(1), y.wrapping_sub(1))]
                 };
                 for (bx0, by0, bx1, by1) in boxes {
                     self.InactivateRect2GridPoints_Via(lo_m, bx0, by0, bx1, by1, true, grid)?;
@@ -517,9 +524,9 @@ impl GcellDetailRouter<'_> {
 fn bound(v: i32, u: i32) -> i32 {
     if v.wrapping_rem(u) == 0 {
         v.wrapping_add(u)
-    } else if (v / u).wrapping_mul(u) < v {
-        (v / u + 1).wrapping_mul(u)
+    } else if v.wrapping_div(u).wrapping_mul(u) < v {
+        v.wrapping_div(u).wrapping_add(1).wrapping_mul(u)
     } else {
-        (v / u).wrapping_mul(u)
+        v.wrapping_div(u).wrapping_mul(u)
     }
 }
