@@ -49,11 +49,12 @@ export async function runJob(data, post) {
       ...(runner ? { runner, perConfig } : {}),
       ...(hpwlWeight ? { hpwlWeight } : {}),
       ...(lamRatio ? { lamRatio } : {}),
-      onProgress: (done, total) => {
+      onProgress: (done, total, cand, phase) => {
         seen++;
-        if (seen % 8 === 0)
-          post({ type: "progress", done, total,
-                        t: (performance.now() - t0) / 1000 });
+        // 후보 하나마다 오는 것은 8 개에 한 번만. GPU 조각(cand 없음)과 legalize 진행은 그대로.
+        if (cand && seen % 8 !== 0) return;
+        post({ type: "progress", done, total, phase: phase ?? "후보",
+                      t: (performance.now() - t0) / 1000 });
       },
       // 설정 하나가 끝날 때마다 그때의 최선을 보낸다. 너무 자주 보내면
       // 메인 스레드가 그리느라 밀리므로 120ms 간격으로 솎는다.
@@ -143,7 +144,8 @@ export async function runJob(data, post) {
       hpwlWeight, lamRatio, medOverlap: top.medOverlap,
       starts: top.starts, rounds: top.rounds, runner: runner ? "gpu" : "cpu",
       perConfig: runner ? perConfig : null,
-      tried: top.tried, legalFail: top.legalizeFail,
+      tried: top.tried, legalFail: top.legalizeFail, gridTried: top.gridTried,
+      phaseSecs: top.secs,
       legalFailBy: top.legalizeFailBy, legalRescued: top.legalizeRescued,
       hpwlBeforeFlip: top.hpwlBeforeFlip,
       subs, subModules,

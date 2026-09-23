@@ -397,7 +397,12 @@ current_mirror_ota          1.000 / 1.000   변이 5/5   bbox 같음   5.1 s  (�
 five_transistor_ota         1.000 / 1.021   변이 3/3   bbox 같음   6.5 s  (전 32 s)
 cascode_current_mirror_ota  1.000 / 1.107   변이 10/11 bbox 같음  20.8 s  (전 65 s)
 high_speed_comparator       1.222 / 1.132   변이 4/10  6080x12936 48.0 s  (전 171 s)
+high_speed_comparator       1.111 / 1.044   변이 4/10  6080x11760 50.9 s  배정 108 전수 (시작점 324), 격자 포함
 ```
+
+그 뒤 고친 것 둘. 배정 상한을 128 (GPU 512) 까지 전수로 — 96 이면 108 개 중 96 개만
+추첨해 288 과 답이 달랐다. 배선 격자(정수 분기)는 후보 전부가 아니라 내보낼 것
+(최선 + 모양별 최선, 최대 24 개)에만 건다 — hsc 의 마지막 단계가 1 분에서 3 초로.
 
 hsc 가 남았다. 하위 모듈 넷의 변이가 ALIGN 과 다르게 올라가 최상위가 한 줄(2352)
 높다. 표본을 늘리면 좋아진다 — 페이지를 headless Chromium(WebGPU, SwiftShader)로

@@ -58,6 +58,7 @@ export async function placeDesign(input, {
   // WebGPU runner (src/gpu/runner.mjs) 와 설정당 시작점 수. 없으면 CPU, 총 batch 개.
   runner = null, perConfig = null,
 } = {}) {
+  const t0 = performance.now();
   const design = input.design ?? readDesign(input);
   if (design.missing?.length)
     return { ok: false, reason: `템플릿을 못 찾은 인스턴스: ${design.missing.join(", ")}`,
@@ -120,6 +121,7 @@ export async function placeDesign(input, {
   for (const c of res.candidates) push(c);
 
   let tried = 0, fail = 0, rescued = 0, best = null;
+  const tSearch = (performance.now() - t0) / 1000;
   // 왜 실패했는지 세어둔다. "legalize 12/96 성공" 만으로는 고칠 데를 못 찾는다 —
   // 방향 조합이 안 맞는 것(INFEASIBLE)과 격자 정수를 못 맞춘 것(GRID_*)은
   // 처방이 다르다.
@@ -128,7 +130,6 @@ export async function placeDesign(input, {
   // **여러 모양**을 내보내기 위해서다 — 하위 모듈은 면적이 같아도 모양이 다르면
   // 위층에서 전혀 다른 레이아웃이 된다. ALIGN 도 하위 모듈을 여러 개 만들어
   // 둔다 (PRIMITIVE_..._PG0_0 ~ _PG0_3).
-  const byShape = new Map();
   /** legalize 결과 하나의 점수 — 반전까지 정한 뒤에 잰다. 반전은 좌표를 안 건드리고
    *  배선길이만 바꾸니 여기서 정해도 늦지 않고, 정하지 않고 재면 내보낼 것과 다른
    *  값으로 고르게 된다. */
@@ -141,22 +142,21 @@ export async function placeDesign(input, {
     return { sc: scoreOf(ea.area, hp, hpwlWeight), r, fr, sx, sy, ea, hp };
   };
   /** 종횡비를 로그 눈금으로 묶는다 (1.25 배 간격). 모양이 비슷하면 한 칸. */
-  const keepShape = (cand) => {
-    const { ea, sc } = cand;
+  const shapeKey = (ea) => {
     const ar = (ea.box[2] - ea.box[0]) / Math.max(1e-9, ea.box[3] - ea.box[1]);
-    const key = Math.round(Math.log(ar) / Math.log(1.25));
-    if (!byShape.has(key) || sc < byShape.get(key).sc) byShape.set(key, cand);
+    return Math.round(Math.log(ar) / Math.log(1.25));
   };
+
+  // --- 1) 격자 없이 legalize — 후보를 줄 세우는 단계 ---
+  //
+  // 격자(정수 분기)는 LP 를 수십 번 다시 푼다. 후보 144 개에 다 걸면 hsc 에서
+  // 마지막 단계가 1 분이 된다. 순위는 격자 없는 LP 로 거의 정해지므로 (격자는
+  // 좌표를 pitch 배수로 몇십 nm 옮길 뿐이다) 먼저 격자 없이 전부 풀어 줄을 세우고,
+  // 격자는 내보낼 것들(최선 + 모양별 최선)에만 건다.
+  const pool = [];
   for (const c of ordered) {
     if (tried >= limit) break;
     tried++;
-    // 앵커: oX = cx - sX*(tx0+tx1)/2 가 pitch 의 배수여야 한다. 우리 템플릿은
-    // bbox 가 [0,0,w,h] 라 (tx0+tx1)/2 = w/2 다. 반전 부호는 무시해도 되는데,
-    // 예제 PDK 의 59 개 템플릿 전부 w/2 와 h/2 가 pitch 의 배수라 sX 를 곱해도
-    // 격자 조건이 같기 때문이다 (아래 gridOff 로 결과를 검증한다).
-    const anchors = grid
-      ? [Array.from(c.problem.w, (v) => v / 2), Array.from(c.problem.h, (v) => v / 2)]
-      : null;
     // legalize 가 INFEASIBLE 이면 **여유 영역을 넓혀 다시 푼다.**
     //
     // 영역 제약은 X_i in [rx0+w/2, rx1-w/2] 라 slack 을 키우면 실행가능
@@ -167,8 +167,7 @@ export async function placeDesign(input, {
     // cascode 28/34 — 전부 INFEASIBLE). 실패한 후보는 그냥 버려지므로
     // "변이를 고른다"가 사실상 살아남은 스무 개 안에서만 일어났다.
     const args = { z0: c.z0, N: c.N, n: c.problem.n, w: c.problem.w,
-                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region,
-                   forced, grid, anchors };
+                   h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region, forced };
     let r = legalize(args);
     let usedSlack = null;
     for (const sl of retrySlack) {
@@ -181,28 +180,64 @@ export async function placeDesign(input, {
       failBy.set(r.status, (failBy.get(r.status) ?? 0) + 1);
       continue;
     }
-    const cand = { ...measure(c, r), c, args: usedSlack ? { ...args, slack: usedSlack } : args };
-    if (!best || cand.sc < best.sc) best = cand;
-    keepShape(cand);
+    pool.push({ ...measure(c, r), c, args: usedSlack ? { ...args, slack: usedSlack } : args });
+    if (onProgress) onProgress(tried, limit, null, "legalize");
   }
+  pool.sort((a, b) => a.sc - b.sc);
 
-  // --- 점수 상위 몇 개는 분리 방향을 뒤집어 본다 ---
+  // --- 2) 점수 상위 몇 개는 분리 방향을 뒤집어 본다 ---
   //
   // 연속해가 나란히 놓은 쌍을 LP 는 못 뒤집는다. 침범량이 비슷했던 쌍부터
   // 방향을 바꿔 다시 풀고 점수가 좋아지면 받는다 (legalize.mjs refineDirections).
   let refined = 0;
-  if (refineTop > 0 && best) {
-    const top = [...new Set([best, ...byShape.values()])].sort((a, b) => a.sc - b.sc).slice(0, refineTop);
+  if (refineTop > 0 && pool.length) {
+    const seenKey = new Set();
+    const top = [];
+    for (const k of pool) {                       // 최선 + 모양별 최선, 점수 순
+      const key = shapeKey(k.ea);
+      if (top.length && seenKey.has(key)) continue;
+      seenKey.add(key); top.push(k);
+      if (top.length >= refineTop) break;
+    }
     for (const k of top) {
       const rr = refineDirections(k.args, k.r.dirs,
         (r) => measure(k.c, r).sc, { maxFlips: refineFlipsMax });
       if (!rr || !rr.flips) continue;
       refined += rr.flips;
-      const cand = { ...measure(k.c, rr.r), c: k.c, args: k.args };
-      if (cand.sc < best.sc) best = cand;
-      keepShape(cand);
+      pool.push({ ...measure(k.c, rr.r), c: k.c, args: k.args });
     }
+    pool.sort((a, b) => a.sc - b.sc);
   }
+
+  // --- 3) 격자 — 내보낼 것들에만 ---
+  //
+  // 앵커: oX = cx - sX*(tx0+tx1)/2 가 pitch 의 배수여야 한다. 우리 템플릿은
+  // bbox 가 [0,0,w,h] 라 (tx0+tx1)/2 = w/2 다. 반전 부호는 무시해도 되는데,
+  // 예제 PDK 의 59 개 템플릿 전부 w/2 와 h/2 가 pitch 의 배수라 sX 를 곱해도
+  // 격자 조건이 같기 때문이다 (아래 gridOff 로 결과를 검증한다).
+  // 모양 칸마다 점수 순으로 첫 성공을 남긴다. 실패하면 그 칸의 다음 후보로.
+  const byShape = new Map();
+  let gridTried = 0;
+  const maxGrid = 24;
+  for (const k of pool) {
+    const key = shapeKey(k.ea);
+    if (byShape.has(key)) continue;
+    let cand = k;
+    if (grid) {
+      if (gridTried >= maxGrid) break;
+      gridTried++;
+      const anchors = [Array.from(k.c.problem.w, (v) => v / 2), Array.from(k.c.problem.h, (v) => v / 2)];
+      const r = legalize({ ...k.args, grid, anchors, dirs: k.r.dirs });
+      if (r.status !== "OPTIMAL") {
+        failBy.set(r.status, (failBy.get(r.status) ?? 0) + 1);
+        continue;
+      }
+      cand = { ...measure(k.c, r), c: k.c, args: k.args };
+    }
+    byShape.set(key, cand);
+    if (!best || cand.sc < best.sc) best = cand;
+  }
+  const tLegal = (performance.now() - t0) / 1000 - tSearch;
 
   if (!best)
     return { ok: false,
@@ -244,7 +279,8 @@ export async function placeDesign(input, {
     grid, gridOff: grid ? gridOffgrid(P, lg.cx, lg.cy, sx, sy, grid) : null,
     assignment: picked.assignment, region: picked.region,
     tried, legalizeFail: fail, legalizeFailBy: Object.fromEntries(failBy),
-    legalizeRescued: rescued, dirFlips: refined,
+    legalizeRescued: rescued, dirFlips: refined, gridTried,
+    secs: { search: tSearch, legalize: tLegal },
     legalScore: best.sc,
     alternatives: alts,
     configs: res.configs, assignments: res.assignments,

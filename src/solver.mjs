@@ -236,7 +236,12 @@ export async function multiStartVariants(design, groups, {
   // 상한을 예산에 묶는다. 64 로 고정해두면 예산을 아무리 올려도 배정은 64 개만
   // 보고, **ALIGN 이 고른 조합이 추첨에 아예 안 들어오는** 일이 생긴다
   // (high_speed_comparator 는 조합이 108 개다 — 64 면 40% 를 못 본다).
-  const cap = maxConfigs ?? Math.max(64, batch);
+  // 상한은 예산과 느슨하게만 묶는다. GPU (perConfig) 면 예산이 설정 수에 비례하므로
+  // 전수를 본다 (512 까지). CPU 도 128 까지는 전수다 — hsc 의 108 개를 96 으로
+  // 추첨하면 ALIGN 이 고른 조합이 빠져 시작점 96 과 288 의 답이 달라졌다
+  // (XCCP 의 하위 모듈 변이). 1 라운드가 설정마다 하나씩은 보므로 배정 108 개면
+  // 시작점 324 개가 하한이 되어 96 보다 12% 더 든다.
+  const cap = maxConfigs ?? (perConfig ? Math.max(512, batch) : Math.max(128, batch));
   let assigns;
   if (total <= cap) {
     assigns = [...enumerateAssignments(groups)];
@@ -326,7 +331,8 @@ export async function multiStartVariants(design, groups, {
   const runBatch = async (ps) => {
     const jobs = ps.map((p) => ({ p: p.index, theta0: initTheta(p.obj, rand) }));
     if (runner) {
-      const rr = await runner.runMany(prep, jobs, { iters, lamGrow, muGrow, lamRatio });
+      const rr = await runner.runMany(prep, jobs, { iters, lamGrow, muGrow, lamRatio,
+        onChunk: onProgress ? (t, T) => onProgress(spent + Math.floor(jobs.length * t / T), budget, null, "adam") : null });
       ps.forEach((p, j) => finish(p, rr[j].theta));
     } else {
       ps.forEach((p, j) => {

@@ -806,6 +806,8 @@ function showResult(r) {
   if (r.medOverlap != null)
     mkRow(dl, "연속 단계 겹침", `${r.medOverlap.toFixed(3)} <small>후보 중앙값 · ` +
       `legalize 전</small>`);
+  if (r.phaseSecs)
+    mkRow(dl, "시간", `${r.phaseSecs.search.toFixed(1)}s <small>탐색 · legalize ${r.phaseSecs.legalize.toFixed(1)}s (최상위)</small>`);
   mkRow(dl, "시작점", `${r.starts ?? "—"} <small>라운드 ${r.rounds ?? 1}` +
     (r.runner === "gpu" ? ` · WebGPU, 설정당 ${r.perConfig}` : r.runner === "cpu" ? " · CPU" : "") + `</small>`);
   {
@@ -1203,7 +1205,7 @@ function handle(m) {
     setStatus(`<span class="dot"></span><span>계산 중 — 변이 조합을 훑는다` +
               (m.runner ? ` <small>(${m.runner === "gpu" ? "WebGPU" : "CPU"})</small>` : "") + `</span>`);
   } else if (m.type === "progress") {
-    setStatus(`<span class="dot"></span><span>${m.done}/${m.total} 후보 · ${m.t.toFixed(0)}s</span>`);
+    setStatus(`<span class="dot"></span><span>${m.done}/${m.total} ${m.phase ?? "후보"} · ${m.t.toFixed(0)}s</span>`);
   } else if (m.type === "frame") {
     // 설정 하나가 끝날 때의 최선. 블록이 재배치되는 과정이 그대로 보인다.
     // phase 는 "설정"(너비) 또는 "심화 k"(깊이) — 예산을 어디에 쓰는 중인지.
