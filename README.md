@@ -443,4 +443,5 @@ node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와
 node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == ALIGN 파이썬 검사기
 node symplace/web/placer/test/compose.mjs    # 도형 합성 == gen_viewer_json
 node symplace/web/placer/test/gds.mjs        # GDS == ALIGN 파이썬 GDS (바이트)
+node symplace/web/placer/test/problem.mjs    # 계층 펼치기 + 배선 문제
 ```

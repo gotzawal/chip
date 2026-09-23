@@ -136,6 +136,8 @@ const touching = (a, b) => !(a[2] < b[0] || b[2] < a[0] || a[3] < b[1] || b[3] <
  * @param {string[]} [o.netsAllowedToBeOpen]  열려도 되는 넷 (DoNotRoute, 하위 모듈의 전원 넷)
  * @param {boolean} [o.postprocess]  최상위면 true — 색 칠하기
  * @param {string[]} [o.subinsts]  캔버스의 subinsts 순서 (단자 SHORT 의 순서만 좌우한다)
+ * @returns 오류 목록들과 정리된 도형 terminals. 후처리를 안 했으면 components 도 준다 —
+ *          terminals 와 같은 길이로, 도형마다 연결 덩이 번호 (건너뛴 층은 -1).
  */
 export function check(terminals, rules, o = {}) {
   const { pdk, layers, skip, layerStack } = rules;
@@ -279,13 +281,18 @@ export function check(terminals, rules, o = {}) {
     if (parts.size > 1) setOpen(nm, { kind: "net", net: nm, parts: [...parts.values()].map((p) => p.map(([l, r]) => [l, r.slice()])) });
 
   // --- generate_rectangles ---
+  // components[k] 는 out[k] 가 속한 연결 덩이 번호 (건너뛴 층은 -1) — 배선 문제가 이을 덩이를 가른다
   let out = terminals.filter((d) => skip.has(d.layer));
+  const components = out.map(() => -1), compOf = new Map();
   for (const [layer, vv] of store)
     for (const sl of vv.values())
       for (const slr of sl.rects) {
-        const t = { layer, netName: slr.root().netName, rect: slr.rect.slice(), netType: slr.isPorted ? "pin" : slr.netType };
+        const root = slr.root();
+        const t = { layer, netName: root.netName, rect: slr.rect.slice(), netType: slr.isPorted ? "pin" : slr.netType };
         if (slr.terminal != null) t.terminal = slr.terminal.slice();
         out.push(t);
+        if (!compOf.has(root)) compOf.set(root, compOf.size);
+        components.push(compOf.get(root));
       }
 
   // --- DRC ---
@@ -416,7 +423,8 @@ export function check(terminals, rules, o = {}) {
     out = next;
   }
 
-  return { shorts, opens, differentWidths, drc, post, warnings, terminals: out };
+  return { shorts, opens, differentWidths, drc, post, warnings, terminals: out,
+           components: o.postprocess ? null : components };
 }
 
 function termRepr(t) {
