@@ -444,4 +444,6 @@ node symplace/web/placer/test/check.mjs      # JS DRC/LVS 검사기 == ALIGN 파
 node symplace/web/placer/test/compose.mjs    # 도형 합성 == gen_viewer_json
 node symplace/web/placer/test/gds.mjs        # GDS == ALIGN 파이썬 GDS (바이트)
 node symplace/web/placer/test/problem.mjs    # 계층 펼치기 + 배선 문제
+node symplace/web/placer/test/route.mjs      # 새 배선 경로: 5 예제 DRC/LVS 0
+node symplace/web/placer/test/routefuzz.mjs  # 배선기가 성공이라 하면 검사기도 0 (합성 배치 수백 개)
 ```

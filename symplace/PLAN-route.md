@@ -30,7 +30,9 @@
 글자 그대로 같다 — 검사기(`src/route/check.mjs`, 116/116 사례), 도형 합성
 (`compose.mjs`, 10 모듈 + 격자 오류 150 문구), GDS (`gds.mjs`, 바이트까지). 배선 문제
 (`problem.mjs`)가 계층을 펼쳐 넷마다 이을 덩이를 낸다 — 소자 단자마다 넷이 ALIGN 과 같다.
-나머지는 4 절의 순서대로.
+**Rust 배선기(`symplace/router` -> `src/route/router.wasm`, gzip 42 KB)가 5 예제를 ALIGN 배치와
+우리 배치 둘 다에서 DRC/LVS 0 으로 배선한다** — JS 검사기와 ALIGN 파이썬 검사기가 같은 판정.
+배선기 자체는 1~11 ms. 남은 것: 대칭 넷을 거울로, 페이지에 꽂기.
 
 ---
 
@@ -283,7 +285,7 @@ index.html
  ├─ routeworker.mjs  (새로)                    배선 — Pyodide 없음
  │    src/route/problem.mjs   설계 + 배치 + 리프 도형 -> 배선 문제
  │                            (펼친 넷리스트, 핀, 장애물, 대칭 넷, 전원 넷)
- │    route/router.wasm       Rust 배선기 (소스 symplace/router), route(json) -> json
+ │    src/route/router.wasm   Rust 배선기 (소스 symplace/router), i32 배열 하나를 주고받는다
  │    src/route/compose.mjs   리프 도형 + 배선 도형 -> 레이어별 사각형
  │    src/route/check.mjs     DRC/LVS (ALIGN cell_fabric 이식)
  │    src/route/gds.mjs       GDS 쓰기
@@ -350,7 +352,24 @@ data/<예제>.leaves.json                         리프 전체 도형 (배선�
     `.python.gds.json` 이 같고, 최상위 `.python.gds` 는 바이트까지 같다. 저장소 고정값은
     검사기 고정 사례를 정리해 쓴 GDS 의 sha256 (`fixtures/gds-*.json`).
 
-**3 단계 — Rust 배선기** (`symplace/router`).
+**3 단계 — Rust 배선기** (`symplace/router`). **평면 설계 DRC 0 까지 끝남.**
+
+- 한 격자: x = 80k (M1/M3 트랙), y = 84k (M2/M4 트랙). 기본 배선층 M2~M4. 모든 리프 금속이
+  표준 폭으로 트랙 위에 있어서(5 예제 전수 확인) 문제가 이산적이다.
+- 검사기는 **같은 트랙 위 도형끼리만** 본다. 그래서 규칙이 트랙마다 1 차원 구간 규칙이 된다:
+  다른 넷은 한 트랙에서 노드 하나를 띄운다(끝단 간격), 토막은 두 노드 이상이어야 비아를 띄운다
+  (그러면 최소 길이까지 늘릴 자리가 이웃 넷 규칙만으로 늘 있다), 비아는 노드 위에만(격자 위
+  비아끼리는 간격을 늘 지킨다). 고정 도형은 노드마다 "쓸 수 있나"로 미리 접는다 (`grid.rs`).
+- 넷마다 A* (상태 = 노드 x 토막 길이 1/2+), 트리에서 가장 가까운 덩이로. 겹치면 PathFinder 식
+  협상 (겹친 노드에 역사 비용, 겹친 넷만 다시). 끝나면 트랙마다 구간으로 펴서 같은 넷 틈 메우기와
+  최소 길이 늘리기 (`legal.rs`). 끝내 못 푼 넷은 걷어내고 "못 이음"으로 알린다 — 합선을 남기지 않는다.
+- 주고받기는 i32 배열 (`model.rs`, JS 쪽 `src/route/router.mjs`). 의존 크레이트 없음.
+- 시험: `test/route.mjs` (5 예제 x 두 배치, DRC/LVS 0, ALIGN 배선과 금속 길이·비아 수 나란히),
+  `test/routefuzz.mjs` (빽빽한 합성 배치 수백 개: 배선기가 성공이라 하면 검사기 오류가 반드시 0 —
+  1200 사례에서 어긋남 0. 성공률 92~94 %, 나머지는 핀이 막혔거나 협상이 못 푼 것으로 정직하게 알린다).
+
+처음 계획 (그대로 둔다):
+
 - 격자: x 는 M1/M3 트랙(80), y 는 M2/M4 트랙(84). 신호는 M1~M4, 필요하면 M5/M6.
 - 장애물: 리프 도형(M1·M2·V1·V2), 다른 넷의 도형과 그 끝단 간격 후광.
 - 핀 접근: 리프 핀(M2) 안의 격자점 중 비아 둘러싸기를 지키는 곳.
@@ -360,8 +379,9 @@ data/<예제>.leaves.json                         리프 전체 도형 (배선�
 - 합격선, 차례로: (a) telescopic 신호 넷 DRC/LVS 0 -> (b) 평면 셋 (current_mirror 는
   리프 고유 4 건만) -> (c) 대칭 넷 거울 배선 -> (d) 전원 넷 -> (e) 계층 둘 DRC/LVS 0 ->
   (f) 배선 길이·비아 수·시간을 ALIGN 과 표로, 페이지 "배선 · 나란히" 로 눈으로.
-- 빌드: `cargo build --release --target wasm32-unknown-unknown`, 산출물 `route/router.wasm` 을
-  커밋한다. 내보내는 함수는 `alloc` · `route` · `out_len` 셋. node 와 브라우저가 같은 파일을 쓴다.
+- 빌드: `symplace/router/build.sh` (`cargo build --release --target wasm32-unknown-unknown`),
+  산출물 `src/route/router.wasm` 을 커밋한다. 내보내는 함수는 `alloc` · `route` · `out_len` 셋.
+  node 와 브라우저가 같은 파일을 쓴다.
 
 **4 단계 — 갈아끼우고 걷어낸다.**
 - `index.html`: `runRoute` 가 routeworker 를 부른다. `ensureFront` 와 앞단-배선 결합이 사라진다.
@@ -413,6 +433,18 @@ node checkref.mjs grid <grid.json>          # 격자 검사 문구 고정값
 node ../../../web/placer/test/check.mjs     # JS 검사기 대조
 node ../../../web/placer/test/compose.mjs   # 도형 합성 대조 (기록이 있으면)
 node ../../../web/placer/test/gds.mjs <route.mjs --dump 폴더...>   # GDS 대조
+```
+
+새 배선 경로 (3 단계):
+
+```bash
+../../../router/build.sh                    # Rust -> src/route/router.wasm
+node newroute.mjs all                       # 5 예제, ALIGN 배치로 배선 + 검사
+node newroute.mjs all --place=ours --fixture=/tmp/judge   # 우리 배치, 최종 도형을 고정 사례로
+node checkref.mjs check /tmp/judge/route-telescopic_ota.json /tmp/judge/route-telescopic_ota.json
+node ../../../web/placer/test/check.mjs /tmp/judge/route-*.json   # ALIGN 파이썬 검사기의 판정과 맞춘다
+node newroute.mjs high_speed_comparator --svg=/tmp/hsc.svg --gds=/tmp/hsc.gds
+node newroute.mjs telescopic_ota --bin=/tmp/t.bin && (cd ../../../router && cargo run --release -- /tmp/t.bin)
 ```
 - 시간은 node 기준이다. 브라우저는 받는 시간이 더해진다.
 

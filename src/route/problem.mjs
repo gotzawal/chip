@@ -110,19 +110,20 @@ function symmetry(flat) {
 }
 
 /**
+ * 펼친 도형 목록 -> 배선 문제. (buildProblem 의 뒷부분 — 시험에서 합성한 도형으로 바로 부를 수 있다)
  * @param {object} o
- * @param {object} o.design, o.leaves, o.placement   flatten 과 같다
- * @param {object} o.pdk        MOCK_PDK
- * @param {number} [o.margin=4] 배치 bbox 밖으로 몇 트랙까지 배선하게 둘지
- * @returns {{problem:object, layout:{terminals, subinsts, bbox}, flat:object, pre:object}}
- *   problem 은 배선기 입력 (JSON 으로 넘긴다). layout 은 검사·GDS 에 쓸 리프 도형 전체.
- *   pre 는 배선 전 검사 결과 (SHORT·DRC 가 있으면 배치나 리프가 틀린 것이다).
+ * @param {Array} o.terminals   리프 도형 전체 (PDK 단위, 넷 이름이 평평한 것)
+ * @param {string[]} [o.subinsts]
+ * @param {number[]} o.bbox     배치 bbox
+ * @param {object} o.pdk
+ * @param {number} [o.margin=4] bbox 밖으로 몇 트랙까지 배선하게 둘지
+ * @param {Set<string>} [o.power]
+ * @param {{pairs:Array, warnings:string[]}} [o.symmetry]
+ * @returns {{problem:object, pre:object}}  pre 는 배선 전 검사 결과
  */
-export function buildProblem({ design, leaves, placement, pdk, margin = 4 }) {
-  const flat = flatten(design, leaves, placement);
-  const comp = composeModule({ blocks: flat.blocks, faMap: flat.faMap, powerNets: flat.power });
+export function problemFromLayout({ terminals, subinsts = [], bbox, pdk, margin = 4, power = new Set(), symmetry: sym = { pairs: [], warnings: [] }, name = "TOP" }) {
   const rules = checkerRules(pdk);
-  const pre = check(comp.terminals, rules, { subinsts: comp.subinsts });
+  const pre = check(terminals, rules, { subinsts });
 
   const L = new Map(pdk.Abstraction.map((x) => [x.Layer, x]));
   const layers = METALS.map((n) => {
@@ -138,10 +139,10 @@ export function buildProblem({ design, leaves, placement, pdk, margin = 4 }) {
 
   // 넷과 연결 덩이
   const netIdx = new Map(), nets = [];
-  const netOf = (name) => {
-    if (name == null) return -1;
-    if (!netIdx.has(name)) { netIdx.set(name, nets.length); nets.push({ name, power: flat.power.has(name), comps: new Set() }); }
-    return netIdx.get(name);
+  const netOf = (nm) => {
+    if (nm == null) return -1;
+    if (!netIdx.has(nm)) { netIdx.set(nm, nets.length); nets.push({ name: nm, power: power.has(nm), comps: new Set() }); }
+    return netIdx.get(nm);
   };
   const shapes = [];
   pre.terminals.forEach((t, k) => {
@@ -151,23 +152,38 @@ export function buildProblem({ design, leaves, placement, pdk, margin = 4 }) {
     shapes.push([t.layer, n, c, t.netType === "pin" ? 1 : 0, ...t.rect]);
   });
 
-  const sym = symmetry(flat);
+  const warnings = sym.warnings.slice();
   const netsOut = nets.map((n) => ({ name: n.name, power: n.power, parts: n.comps.size, sym: -1, axis2: null, dir: null }));
   for (const s of sym.pairs) {
     const a = netIdx.get(s.net1), b = netIdx.get(s.net2);
-    if (a == null || b == null) { sym.warnings.push(`대칭 넷 ${s.net1}/${s.net2} 의 도형이 없다`); continue; }
+    if (a == null || b == null) { warnings.push(`대칭 넷 ${s.net1}/${s.net2} 의 도형이 없다`); continue; }
     Object.assign(netsOut[a], { sym: b, axis2: s.axis2, dir: s.dir });
     Object.assign(netsOut[b], { sym: a, axis2: s.axis2, dir: s.dir });
   }
 
   // 배선 영역: 배치 bbox 를 트랙 단위로 넓힌다
-  const [bx0, by0, bx1, by1] = placement.bbox;
+  const [bx0, by0, bx1, by1] = bbox;
   const px = 80, py = 84;
   const area = [Math.floor(bx0 / px) * px - margin * px, Math.floor(by0 / py) * py - margin * py,
                 Math.ceil(bx1 / px) * px + margin * px, Math.ceil(by1 / py) * py + margin * py];
+  const problem = { format: PROBLEM_FORMAT, name, bbox: bbox.slice(), area, layers, vias, nets: netsOut, shapes, warnings };
+  return { problem, pre };
+}
 
-  const problem = { format: PROBLEM_FORMAT, name: flat.top, bbox: placement.bbox.slice(), area, layers, vias,
-                    nets: netsOut, shapes, warnings: sym.warnings };
+/**
+ * @param {object} o
+ * @param {object} o.design, o.leaves, o.placement   flatten 과 같다
+ * @param {object} o.pdk        MOCK_PDK
+ * @param {number} [o.margin=4] 배치 bbox 밖으로 몇 트랙까지 배선하게 둘지
+ * @returns {{problem:object, layout:{terminals, subinsts, bbox}, flat:object, pre:object}}
+ *   problem 은 배선기 입력 (router.mjs 가 i32 로 싸서 넘긴다). layout 은 검사·GDS 에 쓸 리프 도형 전체.
+ *   pre 는 배선 전 검사 결과 (SHORT·DRC 가 있으면 배치나 리프가 틀린 것이다).
+ */
+export function buildProblem({ design, leaves, placement, pdk, margin = 4 }) {
+  const flat = flatten(design, leaves, placement);
+  const comp = composeModule({ blocks: flat.blocks, faMap: flat.faMap, powerNets: flat.power });
+  const { problem, pre } = problemFromLayout({ terminals: comp.terminals, subinsts: comp.subinsts, bbox: placement.bbox,
+                                               pdk, margin, power: flat.power, symmetry: symmetry(flat), name: flat.top });
   return { problem, layout: { terminals: comp.terminals, subinsts: comp.subinsts, bbox: placement.bbox.slice() }, flat, pre };
 }
 
