@@ -282,6 +282,11 @@
       늘 0 이고 자유도도 줄어든다. 소자 변이 · 거울 반전 · 영역 종횡비까지 스스로
       골라 <b>ALIGN 의 배치 단계를 대신한다</b>.
     </p>
+    <p class="lede">
+      배선은 이 PDK 의 격자에 맞춰 새로 짠 <b>Rust 배선기</b>(wasm, gzip 40 KB 남짓)가 맡고,
+      결과는 ALIGN 의 DRC/LVS 검사기를 그대로 옮긴 것으로 잰다. 파이썬(Pyodide)은
+      <code>.sp</code> 를 올려 앞단을 돌릴 때만 뜬다.
+    </p>
   </header>
 
   <div class="bar">
@@ -317,7 +322,7 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
     </label>
     <button class="run" id="run">배치 실행</button>
     <button class="run" id="routeRun" disabled
-            title="배치한 뒤 ALIGN 배선기(wasm)로 배선한다">배선 실행</button>
+            title="배치한 뒤 이 탭에서 배선한다 — Rust 격자 배선기(wasm), 검사는 ALIGN 과 같은 DRC/LVS">배선 실행</button>
     <label class="drop" id="drop" title="회로 넷리스트(.sp)를 올린다 — 앞단부터 브라우저에서 돌린다">
       <input type="file" id="file" multiple accept=".sp,.cir,.json">
       <span id="dropText">회로 올리기 — .sp 넷리스트 또는 앞단 출력</span>
@@ -846,13 +851,11 @@ function topSubckt(text) {
   return (top ?? defined[defined.length - 1]).toUpperCase();
 }
 
-// 앞단과 배선은 **같은 워커**를 쓴다 — 워커가 다르면 Pyodide 파일시스템도
-// 다르고, 배선은 앞단이 만든 작업 디렉터리를 읽어야 한다. 그래서 워커는
-// 한 번 띄워두고, 오가는 메시지는 기다리는 쪽(frontPend)으로 넘긴다.
+// 앞단 워커 (Pyodide + ALIGN 앞단) 는 .sp 를 올릴 때만 뜬다. 한 번 띄워두고 다시 쓴다
+// (부팅이 5 초 안팎이다). 오가는 메시지는 기다리는 쪽(frontPend)으로 넘긴다.
+// 배선은 이 워커와 무관하다 — routeworker.mjs 가 JS + wasm 으로 한다.
 let frontWorker = null, frontPend = null;
-let lastRouteLog = "";           // 배선 워커가 마지막으로 흘린 줄 (멈춘 자리)
 let uploadName = null;   // 올린 넷리스트 이름 — 산출물 파일 이름에 쓴다
-let frontFor = null;     // 워커 안에 앞단 작업 디렉터리가 있는 설계
 function frontSend(msg, want, fresh) {
   return new Promise((resolve, reject) => {
     if (fresh) { frontWorker?.terminate(); frontWorker = null; frontPend = null; }
@@ -861,10 +864,7 @@ function frontSend(msg, want, fresh) {
       frontWorker.onmessage = (ev) => {
         const m = ev.data;
         if (m.type === "log") {
-          // 배선 중에는 ALIGN 이 모듈마다 로그를 찍는다. 그걸 그대로 흘려
-          // 어디까지 갔는지 보이게 한다 — "작동하다가 멈춘다"를 눈으로 짚는 길.
-          if (m.step === 7) lastRouteLog = m.text;
-          setStatus(`<span class="dot"></span><span>${m.step}/7 ${m.text}</span>`);
+          setStatus(`<span class="dot"></span><span>${m.step}/5 ${m.text}</span>`);
           return;
         }
         const p = frontPend; frontPend = null;
@@ -872,7 +872,7 @@ function frontSend(msg, want, fresh) {
         if (m.type === "error") {
           const e = new Error(m.msg.split("\n")[0]);
           // Pyodide 가 치명적으로 죽으면 그 인스턴스는 못 쓴다 — 버린다.
-          if (m.fatal || /fatal/i.test(m.msg)) { e.fatal = true; frontWorker?.terminate(); frontWorker = null; frontFor = null; }
+          if (m.fatal || /fatal/i.test(m.msg)) { e.fatal = true; frontWorker?.terminate(); frontWorker = null; }
           p.reject(e);
         }
         else if (m.type === p.want) p.resolve(m);
@@ -889,36 +889,13 @@ function frontSend(msg, want, fresh) {
 }
 /** 넷리스트를 앞단에 돌린다. 첫 호출은 Pyodide 스택(약 40MB)을 받느라 오래 걸린다. */
 async function runFront(spText, name, subckt, constText) {
-  frontFor = null;
   // 워커는 다시 쓴다 — Pyodide 부팅(5 초 안팎)을 설계마다 되풀이하지 않는다.
-  // 설계마다 작업 디렉터리가 따로라 섞이지 않고, 한 인스턴스에서 배선을 여러 번
-  // 돌려도 된다 (예전에 두 번째 배선이 죽던 lp_solve BLAS 문제는 워커가 막는다).
-  const r = await frontSend({ sp: spText, name, subckt, constraints: constText },
-                            "front", false);
-  frontFor = name;
-  return r;
+  return frontSend({ sp: spText, name, subckt, constraints: constText }, "front", false);
 }
 
 /** 지금 화면에 있는 설계 이름 (올린 것이든 예제든). */
 const designName = () =>
   $("ex").value === "__upload__" ? uploadName : $("ex").value;
-
-/** 배선하려면 워커 안에 그 설계의 앞단 결과가 있어야 한다. 없으면 만든다. */
-async function ensureFront() {
-  const want = designName();
-  if (!want) throw new Error("설계가 없습니다");
-  if (frontFor === want) return;
-  if ($("ex").value === "__upload__")
-    throw new Error("올린 회로를 다시 올려주세요");
-  setStatus('<span class="dot"></span><span>앞단 준비 — 예제 넷리스트를 돌립니다</span>');
-  const [sp, cn] = await Promise.all(
-    ["sp", "const.json"].map(async (e) => {
-      const r = await fetch(`./netlists/${want}.${e}`);
-      if (!r.ok) throw new Error(`netlists/${want}.${e} → ${r.status}`);
-      return r.text();
-    }));
-  await runFront(sp, want, topSubckt(sp), cn);
-}
 
 async function ingest(fileList) {
   const all = [...fileList];
@@ -1117,7 +1094,7 @@ function showDrc(rec = drcRec()) {
   dl.textContent = ""; box.textContent = "";
   if (!rec) {
     box.innerHTML = '<p style="margin:0;color:var(--muted)">배선 실행을 누르면 ' +
-      '브라우저가 ALIGN 배선기를 돌려 실제 DRC 결과를 여기에 채웁니다.</p>';
+      '이 탭이 배선하고, ALIGN 과 같은 검사기로 잰 DRC/LVS 결과를 여기에 채웁니다.</p>';
     return;
   }
   const d = rec[drcWho];
@@ -1251,16 +1228,64 @@ function startJob(msg) {
   setTimeout(() => fallback("첫 소식이 없습니다"), 6000);
 }
 
-// --- 배선: 앞단과 같은 워커에서 ALIGN 배선기를 돌린다 ---
+// --- 배선: routeworker.mjs (JS + Rust wasm) ---
+//
+// 배선에 드는 것: 설계의 topology, 리프 셀의 전체 도형(예제는 data/<이름>.leaves.json,
+// 올린 .sp 는 앞단이 같이 낸다), 그리고 지금 배치. 파이썬은 안 뜬다.
 //
 // oX 는 transformation 의 원점이다. 화면 좌표(x = cx - w/2)에서 되돌린다:
 //   oX = cx - sX*w/2  =>  sX=+1 이면 x,  sX=-1 이면 x + w
+const leavesCache = new Map();
+async function leavesFor(name, blob) {
+  if (blob.leaves) return blob.leaves;
+  if (name === "__upload__")
+    throw new Error("이 설계에는 리프 셀 도형이 없습니다 — .sp 넷리스트로 올리거나, " +
+                    "리프를 담아 \"예제로 저장\" 한 파일을 올리세요");
+  if (!leavesCache.has(name)) {
+    const r = await fetch(`./data/${name}.leaves.json`);
+    if (!r.ok) throw new Error(`data/${name}.leaves.json → ${r.status}`);
+    leavesCache.set(name, await r.json());
+  }
+  return leavesCache.get(name);
+}
+
+// 워커가 안 서는 브라우저에서는 같은 코드(src/route/pipeline.mjs)를 메인 스레드에서 돌린다.
+// 배선은 수십 ms 라 페이지가 멎는 일도 거의 없다.
+let routeWorker = null;
+async function routeOnMain(msg) {
+  const [{ routeDesign, routeMessage }, { loadRouter }] = await Promise.all(
+    [import("./src/route/pipeline.mjs"), import("./src/route/router.mjs")]);
+  const t0 = performance.now();
+  const r = await fetch("./src/route/router.wasm");
+  if (!r.ok) throw new Error(`src/route/router.wasm → ${r.status}`);
+  const out = routeDesign({ ...msg, router: await loadRouter(await r.arrayBuffer()) });
+  return routeMessage(out, (performance.now() - t0) / 1000);
+}
+function routeSend(msg) {
+  return new Promise((resolve, reject) => {
+    const main = (why) => {
+      console.warn("배선 워커를 못 씁니다 — 메인 스레드로 돌립니다:", why);
+      routeWorker = null;
+      routeOnMain(msg).then(resolve, reject);
+    };
+    try {
+      routeWorker ??= new Worker(new URL("./routeworker.mjs", import.meta.url), { type: "module" });
+    } catch (err) { main(err.message); return; }
+    routeWorker.onmessage = (ev) => {
+      const m = ev.data;
+      if (m.type === "error") { console.error("[배선 원문]\n" + m.msg); reject(new Error(m.msg.split("\n")[0])); }
+      else resolve(m);
+    };
+    routeWorker.onerror = (ev) => { ev.preventDefault?.(); main(ev.message || "워커 오류"); };
+    routeWorker.postMessage(msg);
+  });
+}
+
 async function runRoute() {
   if (!ours || busy) return;
   busy = true;
-  lastRouteLog = "";
   $("routeRun").disabled = true; $("run").disabled = true;
-  setStatus('<span class="dot"></span><span>배선 중 — ALIGN 배선기 (wasm)</span>');
+  setStatus('<span class="dot"></span><span>배선 중 — Rust 배선기 (wasm)</span>');
   const placement = {
     bbox: [0, 0, Math.round(ours.bbox[2] - ours.bbox[0]),
            Math.round(ours.bbox[3] - ours.bbox[1])],
@@ -1273,51 +1298,22 @@ async function runRoute() {
     subModules: ours.subModules ?? [],
   };
   try {
-    let m;
-    for (let attempt = 0; ; attempt++) {
-      try {
-        await ensureFront();
-        setStatus('<span class="dot"></span><span>배선 중 — ALIGN 배선기 (wasm)</span>');
-        m = await frontSend({ cmd: "route", placement }, "route", false);
-        break;
-      } catch (e) {
-        // 파이썬 인스턴스가 죽었으면 워커를 새로 띄우고 한 번만 다시 해본다.
-        if (!e.fatal || attempt) throw e;
-        setStatus('<span class="dot"></span><span>워커를 다시 띄웁니다</span>');
-      }
-    }
-    if (m.where) lastRouteLog = m.where;
-    if (!m.ok) {
-      console.error("[배선 원문]\n" + m.error);   // 파이썬 역추적은 콘솔에 남긴다
-      const ls = (m.error || "").split("\n").filter((l) => l.trim());
-      throw new Error((ls[ls.length - 1] || "알 수 없는 오류").slice(0, 200));
-    }
+    const name = $("ex").value;
+    const blob = await loadExample(name);
+    const leaves = await leavesFor(name, blob);
+    const m = await routeSend({ design: { topology: blob.topology }, leaves, placement });
     showRouted(m);
-    setStatus(`<span>배선 완료 — DRC/LVS ${m.nerrors}건, ` +
-              `GDS ${(m.gds?.[0]?.bytes ?? 0) / 1024 | 0}K  (${m.secs.toFixed(1)}s)</span>`);
+    const st = m.stats;
+    setStatus(`<span>배선 완료 — DRC/LVS ${m.nerrors}건, 넷 ${st.nets}` +
+              (st.failed.length ? `, <b>못 이은 넷 ${st.failed.length}</b> (${st.failed.join(", ")})` : "") +
+              (st.pairs ? `, 대칭 쌍 ${st.pairs} 중 거울 그대로 ${st.mirrored}` : "") +
+              `, GDS ${(m.gds.byteLength / 1024) | 0}K  (${(m.secs * 1000).toFixed(0)} ms)</span>`);
   } catch (err) {
-    // 축소 wasm 배선기는 계층 설계에서 **두 번째 모듈**을 돌 때 멈춘다
-    // (null function — 함수 포인터가 비어 있다). 어디까지 갔는지는 워커가
-    // 흘려준 로그(lastRouteLog)에 남아 있으므로 그걸 같이 보여준다.
-    // 여기서 없는 파일(미리 만들어둔 GDS)을 가리키지 않는다 — 이 페이지는
-    // 이 자리에서 만든 것만 내놓는다.
     const msg = err.message || "";
-    // 셋을 갈라서 말한다. 예전에는 /worker|module/ 하나로 묶어놔서,
-    // Pyodide 를 **못 받은** 것("dynamically imported module")까지
-    // "이 브라우저는 모듈 워커를 못 씁니다" 로 나갔다.
-    const net = /failed to fetch|networkerror|dynamically imported|ERR_|load.*pyodide/i.test(msg);
-    const noWorker = !net && /worker/i.test(msg) && !/null function/i.test(msg);
-    const wasm = /null function|fatal|memory access/i.test(msg);
-    const at = lastRouteLog ? ` (마지막 로그: ${lastRouteLog})` : "";
+    const net = /failed to fetch|networkerror|→ \d+/i.test(msg);
     setStatus(`<span style="color:var(--copper)">배선 실패 — ` +
-      (net ? "배선 스택(Pyodide, 약 40MB)을 못 받았습니다 — 네트워크를 확인하세요. " +
-             "배치는 이 페이지 안에서 끝나므로 배치 결과는 그대로 받을 수 있습니다."
-       : noWorker ? "이 브라우저에서는 배선 워커가 서지 않습니다 (모듈 워커가 필요합니다)."
-       : wasm ? "브라우저 배선기(wasm)가 이 설계에서 죽었습니다" + at +
-                ". 워커를 새로 띄워 한 번 더 돌렸는데도 같은 자리에서 죽었습니다 — " +
-                "콘솔의 원문을 확인해야 합니다."
-       : msg + at) + "</span>");
-    console.error("[배선 실패]", msg, "\n마지막 로그:", lastRouteLog);
+      (net ? "배선기나 리프 도형을 못 받았습니다 (" + msg + ")" : msg) + "</span>");
+    console.error("[배선 실패]", err);
   } finally {
     busy = false; $("run").disabled = false; $("routeRun").disabled = false;
   }
@@ -1326,10 +1322,9 @@ async function runRoute() {
 /** 브라우저가 방금 낸 배선 결과를 그림·DRC 표·다운로드에 꽂는다. */
 function showRouted(m) {
   const errs = (m.errors ?? []).map((t) => ({ text: t, file: "" }));
-  const g = m.gds?.[0];
   liveRec = {
     errors: errs, nerrors: m.nerrors ?? errs.length,
-    gdsBytes: g?.bytes ?? 0, gdsName: g?.name ?? "",
+    gdsBytes: m.gds?.byteLength ?? 0, gdsName: m.gdsName ?? "",
     rects: m.geo?.terminals?.length ?? 0,
   };
   // **ALIGN 기준선을 지우지 않는다.** 예전에는 routed 를 우리 것으로 통째
@@ -1345,12 +1340,9 @@ function showRouted(m) {
 function routeDownloads(m) {
   clearDownloads("");
   const nm = designName() || "design";
-  if (m.gdsB64) {
-    const bin = atob(m.gdsB64), u = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-    addDownload(new Blob([u], { type: "application/octet-stream" }),
+  if (m.gds)
+    addDownload(new Blob([m.gds], { type: "application/octet-stream" }),
                 nm + ".gds", "GDS (KLayout)");
-  }
   addDownload(new Blob([JSON.stringify(placementJson(), null, 1)],
                        { type: "application/json" }),
               nm + ".place.json", "배치 (좌표·변이·반전)");

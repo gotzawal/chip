@@ -33,7 +33,9 @@
 **Rust 배선기(`symplace/router` -> `src/route/router.wasm`, gzip 42 KB)가 5 예제를 ALIGN 배치와
 우리 배치 둘 다에서 DRC/LVS 0 으로 배선한다** — JS 검사기와 ALIGN 파이썬 검사기가 같은 판정.
 배선기 자체는 1~11 ms. 대칭 넷 쌍은 거울 경로가 되면 그대로, 안 되면 거울 노드를 권하는 A* 로
-(배선 길이 차가 ALIGN 과 비슷하다). 남은 것: 페이지에 꽂기.
+(배선 길이 차가 ALIGN 과 비슷하다). **페이지에 꽂았다** (4 단계): 배선 버튼은 `routeworker.mjs`
+(JS + wasm) 로 돌고 Pyodide 를 안 받는다 — 브라우저에서 telescopic 배치 7 s, 배선·검사·GDS 37 ms,
+DRC/LVS 0. 앞단 워커는 PnR 휠 없이 `.sp` 를 올릴 때만 뜬다. 계획한 것은 다 끝났다.
 
 ---
 
@@ -394,12 +396,22 @@ data/<예제>.leaves.json                         리프 전체 도형 (배선�
   산출물 `src/route/router.wasm` 을 커밋한다. 내보내는 함수는 `alloc` · `route` · `out_len` 셋.
   node 와 브라우저가 같은 파일을 쓴다.
 
-**4 단계 — 갈아끼우고 걷어낸다.**
-- `index.html`: `runRoute` 가 routeworker 를 부른다. `ensureFront` 와 앞단-배선 결합이 사라진다.
-  앞단 출력 JSON 을 올린 경우도 리프 도형이 있으면 배선된다.
-- `frontworker.mjs`: PYROUTE 와 PnR 휠 적재를 지운다. PYROUTE 는 하네스로 옮겨 ALIGN 기준
-  경로로 남긴다 (대조용).
-- 지운다: `py/pnr/`, `scripts/wasm/` 의 휠 경로. README 의 구성·실측 표를 갱신한다.
+**4 단계 — 갈아끼우고 걷어낸다. 끝남.**
+- `src/route/pipeline.mjs`: 배선 한 판 (문제 -> 배선기 -> 검사 -> GDS). 배선 워커
+  (`routeworker.mjs`), 워커가 안 서는 브라우저의 메인 스레드, node 시험(`test/route.mjs`)이 같은
+  것을 부른다.
+- `index.html`: `runRoute` 가 routeworker 를 부른다. `ensureFront` 와 앞단-배선 결합이 사라졌다.
+  리프 도형은 예제면 `data/<예제>.leaves.json`, 올린 `.sp` 면 앞단이 낸 것을 쓴다. 앞단 출력
+  JSON 을 올린 경우도 리프 도형이 있으면 배선된다 (없으면 그렇다고 말한다).
+- `frontworker.mjs`: PYROUTE, PnR 휠 적재, BLAS 우회를 지웠다. 앞단은 `align/PnR.py` 스텁으로
+  충분하다 (node 에서 휠이 있을 때와 5 예제 출력이 바이트까지 같음을 확인). 받는 것이 약 40 ->
+  39 MB, 그나마 `.sp` 를 올릴 때만.
+- PYROUTE 는 하네스로 옮겼다 (`symplace/scripts/route/node/pyroute.py`), PnR 휠은
+  `symplace/scripts/wasm/pnr/` 로 (그 빌드 스크립트 `stage-pnr.sh` 가 쓰는 자리) — ALIGN 기준
+  경로로 남긴다 (`route.mjs`, `checkref.mjs`). 페이지는 둘 다 안 받는다.
+- 브라우저 확인 (headless Chromium): 예제 배치 -> 배선이 끝까지 가고, 받는 파일에 Pyodide 가
+  없다. `.sp` 올리기는 이 환경에서 CDN(jsdelivr)이 막혀 브라우저로는 못 돌렸다 — 같은 앞단
+  파이썬을 node 에서 휠 없이 돌려 확인했다.
 
 ### 4.4 위험
 

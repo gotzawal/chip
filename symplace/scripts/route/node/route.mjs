@@ -1,14 +1,16 @@
-/** 브라우저 배선 경로를 node 에서 그대로 재현한다 — 앞단 + 배선.
+/** ALIGN 배선 경로를 node 에서 끝까지 — 앞단 + ALIGN 배선기 (비교 기준).
  *
- *  frontworker.mjs 의 파이썬 원문(FRONT, PYROUTE)을 **그 파일에서 그대로 읽어** 돌린다.
- *  그래서 이 스크립트가 재는 것은 페이지가 지금 실제로 하는 일이다. 달라지는 것은
- *  적재 경로 하나 — CDN 대신 setup.sh 가 받아둔 npm 꾸러미와 휠을 쓴다 (align.mjs).
+ *  페이지는 이제 이 경로를 안 쓴다 (배선은 src/route/ 의 JS + Rust wasm — newroute.mjs).
+ *  이 스크립트는 같은 배치를 ALIGN 의 C++ 배선기(축소 PnR 휠)로 배선해 기준값을 낸다.
+ *  앞단은 frontworker.mjs 의 FRONT 원문을 그 파일에서 그대로 읽고, 배선은 pyroute.py
+ *  (예전에 페이지 워커에 있던 PYROUTE) 를 쓴다. 적재는 align.mjs (CDN 대신 setup.sh 가
+ *  받아둔 npm 꾸러미와 휠).
  *
  *    node route.mjs <예제> [--place=<place.json>] [옵션]
  *
  *    --place=파일   배선할 배치 (기본: place.mjs 가 쓴 ~/.cache/symplace/place-<예제>.json)
- *    --twice        같은 인스턴스에서 배선을 두 번 (페이지에서 배치를 다시 풀고 배선을 또 누른 경우)
- *    --no-blasfix   워커의 lp_solve BLAS 우회책을 끈다 — 예전의 "두 번째 LP 에서 죽음" 재현용
+ *    --twice        같은 인스턴스에서 배선을 두 번 (예전 페이지에서 배치를 다시 풀고 배선을 또 누른 경우)
+ *    --no-blasfix   lp_solve BLAS 우회책을 끈다 — 예전의 "두 번째 LP 에서 죽음" 재현용
  *    --prof         배선 단계 안의 시간을 단계별로 찍는다 (prof.py)
  *    --dump=<폴더>  Pyodide 안의 작업 디렉터리(/work/<예제>)를 꺼내 둔다
  *    --blob=<파일>  앞단이 페이지에 돌려주는 한 덩이(topology, primitives, templates, leaves)를 쓴다
@@ -76,7 +78,7 @@ function dumpWork(dst) {
 }
 if (flag("no-route")) { if (opt("dump")) dumpWork(opt("dump")); process.exit(0); }
 
-// --- 배선 (frontworker.mjs 의 cmd === "route" 와 같다) ---
+// --- 배선 (예전 페이지 워커의 cmd === "route" 와 같다) ---
 const placement = JSON.parse(fs.readFileSync(placeFile, "utf8"));
 let where = "", quiet = 0;
 globalThis.routeLog = (t) => {

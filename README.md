@@ -57,16 +57,19 @@ python3 -m http.server 8791
 ```
 index.html        페이지
 worker.mjs        배치를 워커에서 돌리는 얇은 껍데기
-frontworker.mjs   앞단과 배선 — Pyodide 안에서 ALIGN 을 그대로 돌린다
+routeworker.mjs   배선을 워커에서 — src/route/pipeline.mjs (파이썬 없음)
+frontworker.mjs   앞단 — .sp 를 올릴 때만. Pyodide 안에서 ALIGN 앞단을 그대로 돌린다
 view.mjs          캔버스 — 확대/이동, 패널, 배선 레이어
 src/job.mjs       배치 한 판 (워커에서도, 메인 스레드에서도 같은 코드가 돈다)
 src/baseline.mjs  ALIGN 기준선 뽑기 — 첫 화면이 워커 없이 뜨는 이유
 src/*.mjs         배치기 본체 (의존성 없는 ES 모듈)
+src/route/        배선 — 문제 만들기, Rust 배선기(router.wasm), DRC/LVS, 도형 합성, GDS
 data/*.json       예제 5 개의 ALIGN 앞단 출력 (미리 만들어둬 첫 화면이 빠르다)
-netlists/*.sp     예제 5 개의 원본 회로 — 배선 버튼이 이걸로 앞단을 다시 돌린다
+data/*.leaves.json  예제의 리프 셀 전체 도형 — 배선할 때만 받는다
+netlists/*.sp     예제 5 개의 원본 회로 (앞단을 다시 돌려 예제를 만들 때)
 routed/*.align.json  네이티브 ALIGN 이 낸 배선 기하 (비교용 기준선)
-py/               Pyodide 스택 (원본 약 40 MB, 첫 방문에만 받는다)
-symplace/         소스 — 파이썬 배치기, 검사, 빌드 스크립트, ALIGN 패치
+py/               앞단용 Pyodide 스택 (원본 약 39 MB, .sp 를 처음 올릴 때만 받는다)
+symplace/         소스 — 파이썬 배치기, Rust 배선기(router/), 검사, 빌드 스크립트, ALIGN 패치
 ```
 
 ## 쓰는 법
@@ -74,8 +77,9 @@ symplace/         소스 — 파이썬 배치기, 검사, 빌드 스크립트, A
 1. **예제를 고르거나** `.sp` 넷리스트를 올린다.
 2. **배치 실행** — 변이·반전·영역·격자를 JS 배치기가 직접 고른다.
    끝나면 배치 JSON 을 바로 받을 수 있다.
-3. **배선 실행** — 브라우저가 ALIGN 배선기(wasm)를 돌려 GDS 와 DRC 를 낸다.
-   결과는 `배선` 보기에 그려지고, 아래 내려받기 칸이 그 자리에서 채워진다.
+3. **배선 실행** — 이 탭이 배선하고 (Rust 격자 배선기, wasm, 수십 ms), ALIGN 의 검사기를
+   옮긴 것으로 DRC/LVS 를 재고, GDS 를 쓴다. 결과는 `배선` 보기에 그려지고, 아래
+   내려받기 칸이 그 자리에서 채워진다.
 
 그림은 두 갈래로 고른다 — **무엇을**(배치 / 배선) 과 **누구를**(나란히 / 우리 /
 ALIGN). 기본은 `배치 · 나란히` 다. 왼쪽이 ALIGN, 오른쪽이 우리고, 두 패널은
@@ -89,8 +93,9 @@ ALIGN). 기본은 `배치 · 나란히` 다. 왼쪽이 ALIGN, 오른쪽이 우�
 아니다). 그때는 나란히 놓고 견주기 좋도록 **보기만** 뒤집어 그리고 이름표에 `↕` 를
 붙인다. 좌표와 산출물은 안 건드린다.
 
-배선 버튼은 그 설계의 앞단 결과가 워커 안에 있어야 돈다. 예제를 골랐다면
-버튼이 알아서 `netlists/<예제>.sp` 로 앞단을 한 번 돌린 뒤 배선한다.
+배선에는 리프 셀의 전체 도형이 든다. 예제는 `data/<예제>.leaves.json` 을 그때 받고
+(41~219 KB), 올린 `.sp` 는 앞단이 같이 낸다. 파이썬은 안 뜬다 — 예제를 고르고 배치·배선하는
+데는 Pyodide 를 받지 않는다.
 
 ## 회로 올리기
 
@@ -101,11 +106,12 @@ ALIGN). 기본은 `배치 · 나란히` 다. 왼쪽이 ALIGN, 오른쪽이 우�
 .sp 넷리스트
   -> 앞단  1_topology + 2_primitives   Pyodide 에서 0.7 ~ 9 s
   -> 배치  변이·반전·영역·격자          JS 에서 9 ~ 180 s
-  -> 배선  전역·상세·전원              Pyodide + wasm 에서 4 ~ 13 s (C++ 알고리즘은 1 ~ 4.5 s)
+  -> 배선  신호·전원·대칭 넷            Rust wasm 에서 1 ~ 11 ms (검사·GDS 까지 수십 ms)
   -> GDS + DRC/LVS
 ```
 
-ALIGN 앞단 출력을 직접 올려도 된다 (그때는 배치까지만 된다).
+ALIGN 앞단 출력을 직접 올려도 된다 (그때는 배치까지만 된다 — 리프 전체 도형이 없어서다.
+"예제로 저장" 으로 받은 파일은 리프를 담고 있어 배선까지 된다).
 
 ```
 1_topology/<top>.verilog.json      인스턴스 -> abstract 템플릿, fa_map, 제약
@@ -136,8 +142,8 @@ ALIGN 기준선(`place`)은 안 들어간다 — 브라우저 앞단은 배치�
 그 예제는 **왼쪽 패널이 빈 채로** 돌고, 오른쪽에 우리 배치만 나온다.
 면적/HPWL 의 "ALIGN 대비" 칸도 비고, 나머지(겹침·대칭 잔차·격자)는 그대로 나온다.
 
-저장한 파일에는 리프 셀의 전체 도형(`leaves`)도 들어 있다 — 새 배선기(Rust, 만드는 중)는
-이것만 있으면 앞단을 다시 돌리지 않고 배선한다.
+저장한 파일에는 리프 셀의 전체 도형(`leaves`)도 들어 있다 — 배선기는 이것만 있으면
+앞단을 다시 돌리지 않고 배선한다.
 
 ### 2. 네이티브 ALIGN 이 있으면 (기준선까지)
 
@@ -161,9 +167,8 @@ node symplace/web/placer/pack-example.mjs      "$ALIGN_WORK/my_ota" my_ota --lab
 
 ### 3. 배선 버튼까지 되게 하려면
 
-`netlists/<이름>.sp` (제약이 있으면 `<이름>.const.json` 도) 를 같이 넣는다.
-배선 버튼은 앞단 결과가 워커 안에 있어야 도는데, 예제를 고른 경우 이 파일로
-앞단을 한 번 돌린 뒤 배선한다.
+`data/<이름>.leaves.json` 이 있어야 한다 — `pack-example.mjs` 가 같이 쓴다 (브라우저에서
+"예제로 저장" 한 한 파일이면 그 안에 들어 있다). `netlists/<이름>.sp` 는 배선에 안 쓴다.
 
 ALIGN 자신의 배선을 비교로 깔고 싶으면 `routed/<이름>.align.json` 과
 `routed/index.json` 의 한 줄이 더 필요하다 (`symplace/scripts/route/stage-routed.sh`
@@ -350,68 +355,42 @@ high_speed_comparator 를 같은 코드로 조건만 바꿔 재보면 이렇다.
 
 ## 브라우저 배선 — 실측
 
-배치도 배선도 **5/5** 가 브라우저 경로로 끝까지 간다. 아래는 워커 코드를 node 에서
-그대로 돌려 잰 값이다 (`symplace/scripts/route/node/`, 받는 시간 제외). 같은 배치를
-한 세션에서 두 번 연속 배선해도 결과가 같다.
+배선은 **파이썬 없이** 돈다. 새로 짠 Rust 격자 배선기(`symplace/router` -> `src/route/router.wasm`,
+gzip 42 KB)가 배선하고, ALIGN 의 DRC/LVS 검사기(`cell_fabric`)를 JS 로 옮긴 것으로 잰다.
+예제 다섯 개 모두, ALIGN 의 배치로도 우리 배치로도 **DRC/LVS 0** 이다 (`test/route.mjs`).
 
-| 예제 | 배선 | GDS | DRC/LVS | ALIGN 자신 (`routed/`) |
+| 예제 | 배선기 | 배선이 더한 금속 (우리) | 비아 | ALIGN 배선기, 같은 배치 (M5/M6 전원 격자 포함) |
 |---|---|---|---|---|
-| telescopic_ota | 4.9 s | 80K | **0** | 0 |
-| current_mirror_ota | 4.1 s | 79K | 4 | 4 (같은 DIFFERENT WIDTH) |
-| five_transistor_ota | 4.1 s | 86K | **0** | 0 |
-| cascode_current_mirror_ota | 12.9 s | 194K | 1 | 6 |
-| high_speed_comparator | 7.5 s | 173K | **0** | 0 |
+| telescopic_ota | 1 ms | 16.4 µm | 16 | 57.4 µm, 비아 38 |
+| current_mirror_ota | 2 ms | 14.2 µm | 17 | 56.3 µm, 비아 34 |
+| five_transistor_ota | 1 ms | 2.9 µm | 6 | 49.6 µm, 비아 24 |
+| cascode_current_mirror_ota | 3 ms | 53.3 µm | 40 | 184.1 µm, 비아 102 |
+| high_speed_comparator | 5 ms | 52.4 µm | 49 | 167.7 µm, 비아 108 |
 
-계층 설계 둘은 **계층 그대로** 넘긴다. ALIGN 의 `bottom_up` 배선기가 하위 모듈부터
-하나씩 돈다. 한때 하위 모듈을 최상위로 펼쳐 넘겼는데 (두 번째 모듈에서 죽던 것을 피하려고),
-원인이 모듈 수가 아니었으므로 되돌렸다. 펼치면 블록을 가리키는 제약
-(`SymmetricBlocks`, `Order`, `Align`)을 버려야 했다 (hsc 13 개 중 5 개).
+(우리 배치, node. 금속은 배선 뒤와 배선 전을 검사기로 합친 도형의 차 — 두 배선기를 같은 잣대로 쟀다.)
+브라우저에서 배선 버튼 한 번은 리프 도형과 배선기를 받는 시간을 빼면 수십 ms 다 — telescopic 은
+배선·검사·GDS 까지 37 ms.
 
-### "두 번째에서 죽는다" 의 원인 — lp_solve 의 BLAS 적재
+**심판을 먼저 맞췄다.** 배선기를 짜기 전에 ALIGN 의 검사기·도형 합성·GDS 쓰기를 JS 로 옮기고
+파이썬과 글자·바이트 단위로 대조했다: 검사기는 5 예제 10 모듈과 일부러 망가뜨린 106 사례
+(`test/check.mjs`), 도형 합성은 10 모듈 + 격자 오류 문구 150 개 (`test/compose.mjs`), GDS 는
+`.python.gds` 와 바이트까지 (`test/gds.mjs`). 새 배선 결과 10 개도 ALIGN 의 파이썬 검사기에
+그대로 넣어 같은 판정(0)을 받았다.
 
-전역 배선의 LP 를 푸는 lp_solve 는 LP 를 만들 때마다(`make_lp`) `dlopen("libmyBLAS.so")`
-로 외부 BLAS 를 찾는다. Emscripten 은 적재에 실패한 라이브러리 이름을 지우지 않고
-남겨 두어서, **두 번째** dlopen 이 "이미 적재됨" 으로 성공하고 dlsym 은 전부 NULL 을
-준다. lp_solve 는 그때 BLAS 함수 포인터를 NULL 로 둔 채 넘어가고, 다음 LP 의
-`idamax()` 에서 `null function or function signature mismatch` 로 죽는다.
+**배선기** (`symplace/router`, 의존 크레이트 없음). 검사기는 같은 트랙 위 도형끼리만 보므로
+규칙이 트랙마다 1 차원 구간 규칙이 된다 — 다른 넷은 한 트랙에서 노드 하나를 띄우고, 토막은 두
+노드 이상이어야 비아를 띄우고, 비아는 격자 노드 위에만. 넷마다 A*, 겹치면 PathFinder 식 협상,
+끝나면 트랙마다 펴서 끝단 간격 메우기와 최소 길이 늘리기. 끝내 못 푼 넷은 합선으로 남기지 않고
+걷어내 "못 이은 넷" 으로 알린다. 대칭 넷 쌍은 거울 경로가 되면 그대로, 안 되면 거울을 권하는
+A* 로 (배선 길이 차는 ALIGN 과 비슷하다). 빽빽한 합성 배치 1,200 개에서 "성공" 이라고 한 것은
+전부 검사기도 0 이었다 (`test/routefuzz.mjs`).
 
-LP 는 배선하는 모듈마다 하나라서, 계층 설계의 **두 번째 모듈**과 같은 세션의
-**두 번째 배선**에서 죽었다. 평면 설계 셋이 첫 배선만 살던 이유도 이것이다.
-워커가 그 이름을 영영 적재되지 않은 것으로 보이게 막는다 (`frontworker.mjs` 의
-`boot()`). 짚은 과정과 근거(역어셈블, GOT·HEAP 을 직접 읽은 값)는
-`symplace/PLAN-route.md` 2 절에 있다.
-
-배선 중에는 ALIGN 의 로그(`bottom up routing for <모듈>`)와 C++ 쪽 표준출력을 워커가
-그대로 흘려준다. 실패하면 마지막 줄을 같이 띄운다.
-
-### 여기까지 오면서 뚫은 것
-
-1. `FileNotFoundError: __cap_map__.json` — `3_pnr:prep` 을 안 돌렸다. 붙였다.
-2. `PnR.PnRdatabase 는 아직 브라우저에 없다` — 앞단용 스텁이
-   `align/align/PnR.py` 에 있어 휠로 설치한 진짜 확장을 가렸다
-   (`build_pnr_model.py` 가 `from .. import PnR` 로 상대 임포트한다).
-   별칭으로 바꾸니 `PnR.cpython-312-wasm32-emscripten.so` 가 잡힌다.
-3. `AttributeError: Placer_Router_Cap_Ifc` — 축소 바인딩에서 뺀 것이다
-   (배선에 안 쓰여서). 커패시터 없는 설계는 건너뛰게 했다.
-4. `memory access out of bounds` — 덤프의 최상위 `parameters` 에 전원/접지
-   포트가 남아 있었다. C++ 배치기가 넷 없는 단자로 읽고
-   (`terminal 8 is dangling`) `SeqPair` 색인을 벗어났다. 네이티브에서는
-   조용히 넘어가지만 wasm 은 즉사한다. 이제 덤프를 `1_topology` 가 아니라
-   **`3_pnr/inputs/<TOP>.verilog.json`** 에서 만든다 — prep 이
-   `manipulate_hierarchy` 로 전원핀을 걷어내 써둔, 배선 단계가 기대하는 그것이다.
-5. 두 번째 배선·두 번째 모듈에서 `null function` — 처음엔 앞 회차가 남긴 `3_pnr`
-   탓으로 읽고 매번 prep 부터 다시 돌게 했는데, 그걸로는 안 고쳐졌다 (node 에서
-   재현했다). 원인은 위의 lp_solve BLAS 적재였다.
-
-메모리: 브라우저 경로의 wasm 힙은 594 MB (평면) ~ 1,074 MB (cascode) 까지 오른다.
-네이티브에서 잰 C++ 배선기 본체는 72 MB 다 — 나머지는 파이썬 쪽 중간물이다.
-
-### 다음 — 배선에서 파이썬을 뺀다
-
-지금 배선 버튼 하나에 Pyodide 와 libz3 (원본 약 40 MB) 를 받고, 예제라도 앞단을
-다시 돌리고, ALIGN 의 파이썬 흐름을 통째로 탄다. 그중 C++ 배선 알고리즘은
-1~4.5 초뿐이다. 배선기를 **Rust 로 새로** 짜서 wasm 하나로 돌리고, DRC/LVS 검사와
-GDS 쓰기는 JS 로 옮기는 중이다. 계획과 합격선은 `symplace/PLAN-route.md`.
+**전에는** 배선 버튼 하나에 Pyodide · libz3 · ALIGN 파이썬 흐름 · C++ 배선기 wasm (원본 약 40 MB)
+을 받고, 예제라도 앞단을 다시 돌려 4~13 초가 걸렸다. 두 번째 배선이나 계층 설계의 두 번째
+모듈에서 `null function` 으로 죽던 것은 lp_solve 가 외부 BLAS 를 `dlopen` 하다가 Emscripten
+의 적재 기록에 걸린 것이었다 (JS 한 줄로 막았다 — `symplace/PLAN-route.md` 2 절). 그 경로는
+이제 페이지에 없고, 비교 기준으로 node 하네스에 남아 있다 (`symplace/scripts/route/node/`:
+`route.mjs` 가 ALIGN 배선, `newroute.mjs` 가 새 배선). 과정과 근거는 `symplace/PLAN-route.md`.
 
 ## 소스
 

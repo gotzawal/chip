@@ -1,7 +1,7 @@
 /** ALIGN 의 파이썬 DRC/LVS 검사기(cell_fabric)를 기준값으로 뽑는다 — JS 검사기(src/route/check.mjs) 대조용.
  *
  *    node checkref.mjs capture <예제> [--place=파일]
- *        지금 배선 경로(frontworker 의 PYROUTE)로 배선하면서, 모듈마다 검사기의
+ *        ALIGN 배선 경로(pyroute.py — 예전 페이지 경로)로 배선하면서, 모듈마다 검사기의
  *        입력(도형 전체)과 출력(SHORT·OPEN·DIFFERENT WIDTH·DRC·후처리 오류, 정리된 도형)과
  *        블록 변환을 기록한다 -> ~/.cache/symplace/check/<예제>.json
  *

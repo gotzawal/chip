@@ -1,4 +1,5 @@
-/** 새 배선 경로 전체 — 배선 문제 -> Rust 배선기(src/route/router.wasm) -> 도형 합성 -> DRC/LVS.
+/** 새 배선 경로 전체 (src/route/pipeline.mjs — 페이지의 배선 워커가 부르는 것) —
+ *  배선 문제 -> Rust 배선기(src/route/router.wasm) -> 도형 합성 -> DRC/LVS -> GDS.
  *
  *  예제마다 ALIGN 배치(늘 있다)와 캐시의 우리 배치(있으면)로 배선하고:
  *    - 못 이은 넷이 없다
@@ -14,17 +15,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { check, checkerRules, errorLines } from "../../../../src/route/check.mjs";
-import { metalGrids, offGrid } from "../../../../src/route/compose.mjs";
-import { readLeaves } from "../../../../src/route/leaves.mjs";
 import { MOCK_PDK } from "../../../../src/route/pdk.mjs";
-import { buildProblem, placementFromAlign } from "../../../../src/route/problem.mjs";
+import { routeDesign } from "../../../../src/route/pipeline.mjs";
+import { placementFromAlign } from "../../../../src/route/problem.mjs";
 import { loadRouter } from "../../../../src/route/router.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const CACHE = process.env.SYMPLACE_CACHE ?? path.join(process.env.HOME ?? "", ".cache/symplace");
 const J = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
-const rules = checkerRules(MOCK_PDK), grids = metalGrids(MOCK_PDK);
 const router = await loadRouter(fs.readFileSync(path.join(ROOT, "src/route/router.wasm")));
 const DIR = Object.fromEntries(MOCK_PDK.Abstraction.filter((l) => /^M\d+$/.test(l.Layer)).map((l) => [l.Layer, l.Direction.toLowerCase()]));
 
@@ -55,24 +53,23 @@ for (const { name: ex } of rows) {
   const lp = path.join(ROOT, "data", ex + ".leaves.json");
   if (!fs.existsSync(lp)) continue;
   const design = J(path.join(ROOT, "data", ex + ".json"));
-  const leaves = readLeaves(J(lp));
+  const leaves = J(lp);
   const runs = [["ALIGN", design.place && placementFromAlign(design.place)]];
   const pf = path.join(CACHE, `place-${ex}.json`);
   if (fs.existsSync(pf)) runs.push(["우리", J(pf)]);
   for (const [tag, placement] of runs) {
     if (!placement) continue;
-    const t0 = performance.now();
-    const { problem, layout, pre } = buildProblem({ design, leaves, placement, pdk: MOCK_PDK });
-    const r = router.route(problem);
-    const wires = r.wires.map((w) => ({ netName: w.netName, netType: "drawing", layer: w.layer, rect: w.rect }));
-    const res = check([...layout.terminals, ...wires], rules, { subinsts: layout.subinsts, postprocess: true });
-    const ms = performance.now() - t0;
-    const grid = wires.flatMap((w) => offGrid(w, grids, "route"));
-    const wide = res.differentWidths.filter((w) => /^(M|V)\d/.test(w.layer));
+    // 페이지와 같은 길 (src/route/pipeline.mjs — 배선 워커가 부르는 것)
+    const out = routeDesign({ design, leaves, placement, router });
+    const { problem, pre, wires, result: res, stats: st } = out;
+    const r = { ms: st.routerMs, pairs: st.pairs, mirrored: st.mirrored };
+    // 소자층(리프 안)의 DIFFERENT WIDTH 는 ALIGN 결과에도 똑같이 있다 — 빼고 센다
+    const lines = out.errors.filter((l) => !/^DIFFERENT WIDTH \('Rectangles on layer (?!M\d|V\d)/.test(l));
     const errs = [];
-    if (r.failed.length) errs.push(`못 이은 넷: ${r.failed.join(", ")}`);
-    const lines = errorLines({ ...res, differentWidths: wide }, grid);
+    if (st.failed.length) errs.push(`못 이은 넷: ${st.failed.join(", ")}`);
     if (lines.length) errs.push(`${lines.length} 오류: ${lines.slice(0, 4).join("\n      ")}`);
+    const gdsOk = out.gds.length > 1000 && out.gds[2] === 0 && out.gds[3] === 2;   // HEADER 레코드
+    if (!gdsOk) errs.push("GDS 가 이상하다");
     // 대칭 넷 쌍: 배선 금속 길이가 얼마나 같은가 (정합의 잣대), 거울 그대로인 쌍 수
     const wl = (name) => wires.filter((w) => w.netName === name && DIR[w.layer])
       .reduce((a, w) => a + (DIR[w.layer] === "v" ? w.rect[3] - w.rect[1] : w.rect[2] - w.rect[0]), 0);
@@ -80,7 +77,8 @@ for (const { name: ex } of rows) {
       .map(([x]) => { const a = wl(x.name), b = wl(problem.nets[x.sym].name); return Math.abs(a - b) / Math.max(a, b, 1); });
     const symText = r.pairs ? `  대칭 ${r.mirrored}/${r.pairs} 거울, 길이 차 최대 ${(100 * Math.max(0, ...bal)).toFixed(0)}%` : "";
     console.log(`${ex.padEnd(28)} ${tag.padEnd(5)} 넷 ${String(problem.nets.filter((x) => x.parts > 1).length).padStart(2)}` +
-                `  ${added(res.terminals, pre.terminals)}${symText}  배선기 ${r.ms.toFixed(0)}ms  ${errs.length ? "틀림" : "OK"}`);
+                `  ${added(res.terminals, pre.terminals)}${symText}  배선기 ${r.ms.toFixed(0)}ms` +
+                `  GDS ${(out.gds.length / 1024).toFixed(0)}K  ${errs.length ? "틀림" : "OK"}`);
     if (tag === "우리") {
       const cf = path.join(CACHE, "check", ex + ".json");
       if (fs.existsSync(cf)) {

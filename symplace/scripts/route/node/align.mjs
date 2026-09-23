@@ -1,8 +1,9 @@
-/** node 에서 Pyodide + ALIGN 을 frontworker.mjs 의 boot() 와 같은 순서로 올린다.
+/** node 에서 Pyodide + ALIGN 을 올린다 — 앞단(frontworker.mjs 의 boot 와 같은 순서)과, 비교 기준인
+ *  ALIGN 배선 경로(축소 PnR 휠 + pyroute.py).
  *
- *  route.mjs (배선 경로 재현)와 checkref.mjs (파이썬 검사기 기준값)가 같이 쓴다.
- *  적재 경로만 다르다 — CDN 대신 setup.sh 가 받아둔 npm 꾸러미와 휠.
- *  워커의 boot() 를 고치면 여기도 고친다.
+ *  route.mjs (ALIGN 배선), checkref.mjs (파이썬 검사기 기준값) 가 같이 쓴다.
+ *  페이지와 다른 점: CDN 대신 setup.sh 가 받아둔 npm 꾸러미와 휠, 그리고 pnr: true 면
+ *  페이지가 이제 안 싣는 PnR 휠(symplace/scripts/wasm/pnr/)을 싣는다.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -17,8 +18,10 @@ export const WORK_CACHE = process.env.SYMPLACE_CACHE ?? path.join(process.env.HO
 // node 의 Buffer 는 공용 ArrayBuffer 의 일부일 수 있다. Pyodide 에는 제 것으로 넘긴다.
 const rd = (f) => new Uint8Array(fs.readFileSync(f));
 
-/** frontworker.mjs 안의 파이썬 원문 (FRONT, PYROUTE) 을 그 파일에서 그대로 읽는다. */
+/** 파이썬 원문. FRONT 는 frontworker.mjs 에서 그대로 읽고 (페이지와 같은 앞단),
+ *  PYROUTE 는 ALIGN 배선 경로 pyroute.py (예전에 페이지에 있던 것 — 이제 하네스에만 있다). */
 export function workerPython(name) {
+  if (name === "PYROUTE") return fs.readFileSync(path.join(HERE, "pyroute.py"), "utf8");
   const fw = fs.readFileSync(path.join(ROOT, "frontworker.mjs"), "utf8");
   const m = new RegExp("const " + name + " = String\\.raw`([\\s\\S]*?)`;").exec(fw);
   if (!m) throw new Error("frontworker.mjs 에서 " + name + " 를 못 찾았다");
@@ -27,11 +30,12 @@ export function workerPython(name) {
 
 /**
  * @param {object} o
- * @param {boolean} [o.blasfix=true]  워커의 lp_solve BLAS 우회 (끄면 예전의 두 번째 LP 에서 죽음이 재현된다)
+ * @param {boolean} [o.blasfix=true]  lp_solve BLAS 우회 (끄면 예전의 두 번째 LP 에서 죽음이 재현된다)
+ * @param {boolean} [o.pnr=true]      ALIGN 배선기(PnR 휠)를 싣는다. false 면 페이지의 앞단과 같다
  * @param {(msg:string)=>void} [o.log]
  * @returns {Promise<{py:any, M:any, blasOpens:()=>number}>}
  */
-export async function bootAlign({ blasfix = true, log = () => {} } = {}) {
+export async function bootAlign({ blasfix = true, pnr = true, log = () => {} } = {}) {
   if (!fs.existsSync(path.join(CACHE, "package/pyodide.mjs"))) {
     console.error(`Pyodide 가 없다: ${CACHE}\n  symplace/scripts/route/node/setup.sh 를 먼저 돌려라.`);
     process.exit(2);
@@ -53,16 +57,20 @@ export async function bootAlign({ blasfix = true, log = () => {} } = {}) {
   py.runPython("import sys, os; sys.path.insert(0,'/zpy'); os.environ['Z3_LIBRARY_PATH']='/z3lib'");
   log("libz3");
 
-  const whl = fs.readFileSync(path.join(ROOT, "py/pnr/list.txt"), "utf8").trim().split(/\s+/)[0];
-  py.unpackArchive(rd(path.join(ROOT, "py/pnr", whl)), "zip", { extractDir: site });
-  // micropip 이 하는 일과 같다: 확장 모듈은 지역(local) 범위로 미리 적재한다
-  await py._api.loadDynlib(site + "/PnR.cpython-312-wasm32-emscripten.so", false);
-  log("PnR 휠");
+  if (pnr) {
+    const dir = path.join(ROOT, "symplace/scripts/wasm/pnr");
+    const whl = fs.readFileSync(path.join(dir, "list.txt"), "utf8").trim().split(/\s+/)[0];
+    py.unpackArchive(rd(path.join(dir, whl)), "zip", { extractDir: site });
+    // micropip 이 하는 일과 같다: 확장 모듈은 지역(local) 범위로 미리 적재한다
+    await py._api.loadDynlib(site + "/PnR.cpython-312-wasm32-emscripten.so", false);
+    log("PnR 휠");
+  }
 
   py.FS.mkdirTree("/align");
   py.unpackArchive(rd(path.join(ROOT, "py/front/align-front.zip")), "zip", { extractDir: "/align" });
   py.runPython("import sys; sys.path.insert(0,'/align'); sys.path.append('/align/shims')");
-  py.runPython(String.raw`import sys
+  if (pnr)
+    py.runPython(String.raw`import sys
 open('/align/align/PnR.py', 'w').write(
     'import sys\n'
     'import PnR as _real\n'
@@ -70,12 +78,12 @@ open('/align/align/PnR.py', 'w').write(
 for m in ('PnR', 'align.PnR'):
     sys.modules.pop(m, None)`);
   py.runPython("import browser_stubs; browser_stubs.install()");
-  py.runPython("import align, z3, PnR");
-  log("import align · z3 · PnR");
+  py.runPython(pnr ? "import align, z3, PnR" : "import align, z3");
+  log(pnr ? "import align · z3 · PnR" : "import align · z3 (PnR 없이 — 앞단만)");
 
-  // lp_solve BLAS 우회 — 워커 boot() 와 같다 (symplace/PLAN-route.md 2 절).
+  // lp_solve BLAS 우회 (symplace/PLAN-route.md 2 절) — 예전 페이지 워커가 하던 것.
   let opens = 0;
-  if (blasfix) {
+  if (pnr && blasfix) {
     Object.defineProperty(M.LDSO.loadedLibsByName, "libmyBLAS.so", {
       get() { return undefined; }, set() { opens++; }, configurable: true });
   }
