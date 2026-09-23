@@ -5,12 +5,13 @@
  *    node refrun.mjs <예제> <배치.json> <out 뿌리> [--const=<제약.json>]
  *
  *    <out>/data/<예제>.json, <예제>.leaves.json   앞단 결과 (frontworker 의 run — 페이지가 받는 것과 같은 모양)
- *    <out>/tap/<예제>/ours/                        RouteWork 앞뒤 hierNode, drc.json, calls.json (../tap/tap.py)
- *    <out>/aligndb/<예제>/ours/                    PnRDB 단계 덤프와 inputs_* (instrument.py)
+ *    <out>/tap/<예제>/ours/                        RouteWork 앞뒤 hierNode, drc.json, calls.json (../tap/tap.py), result.json (DRC/LVS)
+ *    <out>/aligndb/<예제>/ours/                    PnRDB 단계 덤프와 inputs_* (instrument.py), align_<모듈>_<j>.json·.python.gds.json
  *    <out>/check/<예제>.json                       검사기 입력 기록 (../../node/checkref.mjs 의 capture)
  *    <out>/place-<예제>.json                       쓴 배치
  *
  *  대조:  SYMPLACE_CACHE=<out> node symplace/web/placer/test/aligndb.mjs --ex=<예제> --tag=ours --data=<out>/data
+ *         node symplace/web/placer/test/route.mjs --root=<out> [--router=wasm]
  *  --const 가 없으면 netlists/<예제>.const.json 을 쓴다.
  */
 import fs from "node:fs";
@@ -60,6 +61,9 @@ const copyDir = (from, to, keep = () => true, prefix = "") => {
 copyDir("/work/tap", tapOut);
 copyDir("/work/_hn", dbOut);
 copyDir(`/work/${ex}/3_pnr/inputs`, dbOut, (n) => /(\.pnr\.const\.json|\.lef|\.map|verilog\.json)$/.test(n), "inputs_");
+// ALIGN 이 낸 것: 모듈마다 <모듈>_<j>.json (검사기 출력), .python.gds.json, 오류 문구 (test/route.mjs 가 견준다)
+copyDir(`/work/${ex}/3_pnr`, dbOut, (n) => /\.json$/.test(n) && !n.startsWith("__"), "align_");
+fs.writeFileSync(path.join(tapOut, "result.json"), JSON.stringify({ ok: r.ok, nerrors: r.nerrors, errors: r.errors, error: r.error }, null, 1));
 fs.writeFileSync(path.join(ckOut, ex + ".json"),
                  JSON.stringify({ example: ex, top, placement: JSON.parse(placementText), cases: JSON.parse(py.runPython("captured()")) }));
 fs.writeFileSync(path.join(OUT, `place-${ex}.json`), placementText);

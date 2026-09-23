@@ -9,12 +9,15 @@
  *  배선기: --router=tap (기본) 은 ALIGN 이 낸 기록(탭 덤프)을 그대로 돌려주는 가짜다 — 배선기 밖의 모든 것
  *  (입력, 계층, 도형 모으기, 검사, GDS)을 본다. --router=wasm 은 src/route/alignroute.wasm (Rust 이식) 으로 끝까지.
  *
- *    node symplace/web/placer/test/route.mjs [--ex=예제] [--tag=ours|align|<설정>] [--router=tap|wasm] [--tap=<뿌리>] [-v]
+ *    node symplace/web/placer/test/route.mjs [--ex=예제] [--tag=ours|align|<설정>] [--router=tap|wasm]
+ *                                            [--tap=<뿌리> | --root=<뿌리>] [-v]
  *
  *  기준: ~/.cache/symplace/tap/<예제>/<ours|align>/ (align-ref/tap/runall.mjs — calls.json, m*_out, result.json),
  *        ~/.cache/symplace/aligndb/<예제>/<ours|align>/align_*.json (align-ref/db/dumphn.mjs).
  *  --tap=~/.cache/symplace/tap-vary 는 흔든 배치 (align-ref/tap/vary.mjs): 배치는 그 폴더의 placement.json 이고
  *  최종 도형 기준(aligndb)이 없어 오류 문구와 단계 기록만 견준다.
+ *  --root=<뿌리> 는 align-ref/db/refrun.mjs 가 한 뿌리에 모은 경우 (제약을 바꾼 앞단 등): <뿌리>/data 의 예제,
+ *  <뿌리>/place-<예제>.json, <뿌리>/tap, <뿌리>/aligndb.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -34,8 +37,11 @@ const verbose = args.includes("-v");
 const J = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 const home = (p) => p.replace(/^~(?=\/|$)/, process.env.HOME ?? "");
 
-const TAP = path.resolve(home(opt("tap", path.join(CACHE, "tap"))));
-const DB = TAP === path.join(CACHE, "tap") ? path.join(CACHE, "aligndb") : null;
+const RROOT = opt("root") ? path.resolve(home(opt("root"))) : null;
+const TAP = RROOT ? path.join(RROOT, "tap") : path.resolve(home(opt("tap", path.join(CACHE, "tap"))));
+const DB = RROOT ? path.join(RROOT, "aligndb") : TAP === path.join(CACHE, "tap") ? path.join(CACHE, "aligndb") : null;
+const DATA = RROOT ? path.join(RROOT, "data") : path.join(ROOT, "data");
+const PLACE = RROOT ?? CACHE;
 const useWasm = opt("router", "tap") === "wasm";
 const wasm = useWasm ? await loadAlignRouter(fs.readFileSync(path.join(ROOT, "src/route/alignroute.wasm"))) : null;
 
@@ -90,20 +96,20 @@ function diffTerms(mine, ref) {
 }
 const noTime = (g) => { const c = structuredClone(g); for (const l of c.bgnlib) { l.time = null; for (const s of l.bgnstr) s.time = null; } return c; };
 
-const index = J(path.join(ROOT, "data/index.json")).map((x) => (typeof x === "string" ? x : x.name));
+const index = RROOT ? fs.readdirSync(TAP).sort() : J(path.join(ROOT, "data/index.json")).map((x) => (typeof x === "string" ? x : x.name));
 let bad = 0, runs = 0;
 for (const ex of index) {
   if (opt("ex") && opt("ex") !== ex) continue;
   const exDir = path.join(TAP, ex);
-  if (!fs.existsSync(exDir) || !fs.existsSync(path.join(ROOT, "data", ex + ".leaves.json"))) continue;
-  const design = J(path.join(ROOT, "data", ex + ".json"));
-  const leaves = J(path.join(ROOT, "data", ex + ".leaves.json"));
+  if (!fs.existsSync(exDir) || !fs.existsSync(path.join(DATA, ex + ".leaves.json"))) continue;
+  const design = J(path.join(DATA, ex + ".json"));
+  const leaves = J(path.join(DATA, ex + ".leaves.json"));
   for (const tag of fs.readdirSync(exDir).sort()) {
     if (opt("tag") && opt("tag") !== tag) continue;
     const dir = path.join(exDir, tag);
     if (!fs.existsSync(path.join(dir, "calls.json"))) continue;
     const pf = fs.existsSync(path.join(dir, "placement.json")) ? path.join(dir, "placement.json")
-      : tag === "ours" ? path.join(CACHE, `place-${ex}.json`) : null;
+      : tag === "ours" ? path.join(PLACE, `place-${ex}.json`) : null;
     const placement = pf ? (fs.existsSync(pf) ? J(pf) : null) : tag === "align" ? placementFromAlign(design.place) : null;
     const head = `${ex.padEnd(27)} ${tag.padEnd(16)}`;
     if (!placement) { console.log(`${head} (배치가 없다)`); continue; }
