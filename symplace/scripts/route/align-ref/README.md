@@ -6,7 +6,7 @@
 
 | 폴더 | 무엇 | 대조 결과 (2026-09-23) |
 |---|---|---|
-| `tap/` | `RouteWork` 앞뒤로 hierNode·Drc_info 를 JSON 으로 뜬다 (`runall.mjs`, `tap.py`) | 5 예제 x (ALIGN 배치, 우리 배치) = 10 회, 106 MB |
+| `tap/` | `RouteWork` 앞뒤로 hierNode·Drc_info 를 JSON 으로 뜬다 (`runall.mjs`, `tap.py`). `vary.mjs` 는 배치기 설정을 바꾼 배치로 더 모은다 (`~/.cache/symplace/tap-vary/`) | 5 예제 x (ALIGN 배치, 우리 배치) = 10 회, 106 MB |
 | `db/` | ALIGN 이 배선기에 넘기는 DB 를 단계마다 뜨고(`dumphn.mjs`, `instrument.py`), 파이썬으로 다시 짓는다 (`drc_info.py`, `build_db.py`, `place_inject.py`, `checkin.py`, `wires.py`) | 5 예제 10 모듈에서 배선기 입력이 필드마다 같다. 도형 합성용 wires 도 순서까지 같다 |
 | `power/` | 전원 격자(모드 2)·전원 배선(모드 3)의 파이썬 시제품 (`pg_proto.py`, `pr_proto.py`)과 대조 | 10/10 + M5/M6 도형을 끼워 넣은 3 회, 비아 중복·bbox 까지 같다 |
 | `ilp/` | 전역 배선 ILP 재현(`harness.cpp`), 기준 휠의 lp_solve 로 풀기(`wasm_lp.mjs`), lp_solve 를 clang wasm32-wasi 로 빌드해 대조(`wasi/`) | 합성 ILP 410 개에서 반환값·목적값·변수 전부 비트까지 같다 |
