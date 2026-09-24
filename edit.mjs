@@ -15,6 +15,8 @@
  */
 import { rebuild, centers, dragTheta, pinRows, dragRows, overlapping, settle, toRects, chooseFlips, flipGroup,
          flipFreedom, variantChoices, withVariant, measure } from "./src/edit/place.mjs";
+import { buildGraph, range, slide, toNode, worldShapes, cloneGraph, segRect, netLength } from "./src/edit/wires.mjs";
+import { compactNet, compactAll } from "./src/edit/compact.mjs";
 
 const MONO = "ui-monospace, Menlo, Consolas, monospace";
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
@@ -36,8 +38,13 @@ export function createEditor(host) {
     dirty: false, edits: 0, err: null,
     compact: 0.5, both: false, ranking: null, busy: false,
   };
-  // ---------------------------------------------------------------- 배선 편집 상태 (R1~R3 에서 채운다)
-  const rt = { wires: null, net: null, seg: null, frozen: new Set(), hist: [], fut: [], err: null };
+  // ---------------------------------------------------------------- 배선 편집 상태
+  const rt = {
+    model: null, graphs: new Map(),          // 넷 모델 (워커의 wires, PnRDB 단위) 과 넷마다의 조각 그래프
+    net: null, seg: null, range: null,       // 고른 넷·조각과 그 조각의 범위
+    frozen: new Set(),                       // 사용자가 고정한 넷 (편집한 넷은 저절로)
+    hist: [], fut: [], drag: null, busy: false, expect: false, baseErrors: null, nerr: null, err: null,
+  };
 
   const state = () => host.state();
   const what = () => state().what;
@@ -440,7 +447,28 @@ export function createEditor(host) {
     ctx.restore();
   }
 
-  // ---------------------------------------------------------------- 배선: 넷 고르기 (조각 편집은 R1~R3)
+  // ---------------------------------------------------------------- 배선: 넷·조각 고르기, 옮기기, 재검사, 고정, 재배선
+  //
+  // 넷 모델(rt.model — 배선 워커가 낸 wires, PnRDB 단위)과 넷마다의 조각 그래프(rt.graphs) 위에서 한다. 조각을 옮기면
+  // 그 넷의 경로를 되펴(toNode) 워커에 재검사를 보내고, 돌아온 결과로 페이지(geo·DRC·GDS)와 모델을 바꾼다. 편집한
+  // 넷은 고정된다 — 다시 배선할 때 그대로 둔다. 이력은 넷마다의 경로 전후로 남겨 재검사로 되돌린다.
+  const S2 = (v) => v / 2;                       // PnRDB -> PDK (그리기)
+  const pathOf = (net) => { const q = rt.model.nets.find((z) => z.name === net); return { net, path_metal: q.path_metal, path_via: q.path_via }; };
+  const allPaths = () => rt.model.nets.filter((q) => q.path_metal.length).map((q) => pathOf(q.name));
+
+  /** 배선 결과가 왔다 — 페이지의 새 판이거나(이력을 비운다) 편집기가 보낸 재검사·재배선의 답이다(expect) */
+  function routedNow(m) {
+    const own = rt.expect; rt.expect = false;
+    const keep = rt.net;
+    rt.model = m?.wires ?? null;
+    rt.graphs = new Map((rt.model?.nets ?? []).map((q) => [q.name, buildGraph(q)]));
+    if (!own) { rt.frozen = new Set(m?.frozen ?? []); rt.hist = []; rt.fut = []; rt.baseErrors = m?.nerrors ?? null; }
+    rt.nerr = m?.nerrors ?? null;
+    rt.net = keep && rt.graphs.has(keep) ? keep : null;
+    rt.seg = null; rt.range = null; rt.drag = null; rt.err = null;
+    render();
+  }
+
   function hitNet(x, y) {
     const geo = state().routed;
     if (!geo?.terminals) return null;
@@ -454,26 +482,224 @@ export function createEditor(host) {
     }
     return best?.netName ?? null;
   }
+  /** 고른 넷의 조각 — 화면 3 px 여유로 */
+  function hitSeg(net, x, y) {
+    const g = rt.graphs.get(net);
+    if (!g) return null;
+    const tol = 3 / (mapNow?.m.S ?? 1);
+    let best = null, bestA = Infinity;
+    for (const q of g.segs) {
+      const r = segRect(q).map(S2);
+      if (x < r[0] - tol || x > r[2] + tol || y < r[1] - tol || y > r[3] + tol) continue;
+      const a = (r[2] - r[0]) * (r[3] - r[1]);
+      if (a < bestA) { bestA = a; best = q; }
+    }
+    return best;
+  }
+  function rangeOf(net, seg) {
+    const g = rt.graphs.get(net);
+    return range(g, seg, worldShapes(rt.model, rt.graphs, net), rt.model.bbox);
+  }
+
   function routeDown(e, px, py) {
     const p = toLayout(px, py);
-    if (!p) return false;
-    const nm = hitNet(p.x, p.y);
-    rt.drag = { x0: px, y0: py, net: nm };
-    return false;                                  // 이동은 그대로 (끌면 이동, 안 끌면 고르기)
+    if (!p || !rt.model || rt.busy) return false;
+    const seg = rt.net ? hitSeg(rt.net, p.x, p.y) : null;
+    if (seg) {
+      rt.seg = seg;
+      rt.range = rangeOf(rt.net, seg);
+      if (rt.range.locked) { rt.drag = { kind: "locked", x0: px, y0: py }; hintRoute(); render(); host.redraw(); return true; }
+      const g = cloneGraph(rt.graphs.get(rt.net));
+      rt.drag = { kind: "slide", net: rt.net, g, s: g.segs[seg.id], r: rt.range, t0: seg.t, x0: px, y0: py, moved: false };
+      hintRoute(); render(); host.redraw();
+      return true;
+    }
+    rt.drag = { kind: "empty", x0: px, y0: py, net: hitNet(p.x, p.y) };
+    return false;                                  // 빈 자리(또는 다른 넷)면 이동 — 안 끌면 고르기 (routeUp)
+  }
+  function routeMove(e, px, py) {
+    const d = rt.drag;
+    if (!d || d.kind !== "slide") {
+      const p = toLayout(px, py);
+      const nm = p ? hitNet(p.x, p.y) : null;
+      const el = document.getElementById("hint");
+      if (el && !rt.seg) el.textContent = nm ? `넷 ${nm}` + (rt.frozen.has(nm) ? " · 고정" : "") : "";
+      return false;
+    }
+    const p = toLayout(px, py);
+    if (!p) return true;
+    const want = 2 * (d.s.dir === "v" ? p.x : p.y);          // PnRDB
+    let t = d.s.t, best = Infinity;
+    for (const c of d.r.tracks) { const q = Math.abs(c - want); if (q < best) { best = q; t = c; } }
+    if (t !== d.s.t) { slide(d.g, d.s, t); d.moved = t !== d.t0; hintRoute(); host.redraw(); }
+    return true;
   }
   function routeUp(e, px, py) {
     const d = rt.drag; rt.drag = null;
-    if (!d || Math.hypot(px - d.x0, py - d.y0) >= 3) return false;
-    rt.net = d.net === rt.net ? null : d.net;
-    render(); host.redraw();
+    if (!d) return false;
+    if (d.kind === "empty") {
+      if (Math.hypot(px - d.x0, py - d.y0) < 3) {
+        const next = d.net ?? null;
+        if (next !== rt.net) { rt.net = next; rt.seg = null; rt.range = null; render(); host.redraw(); }
+        else if (!next) { rt.seg = null; render(); host.redraw(); }
+      }
+      return false;
+    }
+    if (d.kind === "locked") return true;
+    if (d.moved) commitSlide(d.net, d.g);
+    else { render(); host.redraw(); }
     return true;
   }
-  function routeMove(e, px, py) {
-    const p = toLayout(px, py);
-    const nm = p ? hitNet(p.x, p.y) : null;
+  function hintRoute() {
     const el = document.getElementById("hint");
-    if (el) el.textContent = nm ? `넷 ${nm}` : "";
-    return false;
+    if (!el) return;
+    if (rt.drag?.kind === "slide") {
+      const d = rt.drag;
+      el.textContent = `${d.s.layer} ${S2(d.t0)} -> ${S2(d.s.t)} · 트랙 ${d.r.tracks.length} 개 [${S2(d.r.lo).toFixed(0)}, ${S2(d.r.hi).toFixed(0)}]`;
+    } else if (rt.seg && rt.range) {
+      el.textContent = `${rt.net} ${rt.seg.layer} 트랙 ${S2(rt.seg.t)} · ` + (rt.range.locked ? `잠김: ${rt.range.why}` : `옮길 트랙 ${rt.range.tracks.length} 개`);
+    }
+  }
+
+  /** 편집한 경로들을 워커에 보내 재검사(또는 재배선)하고, 답을 페이지와 모델에 꽂고, 이력을 남긴다 */
+  async function sendEdits(edits, { before, msg = null, label = "재검사", frozenBefore = new Set(rt.frozen), acceptIf = null } = {}) {
+    if (rt.busy || !rt.model) return;
+    rt.busy = true; render();
+    try {
+      host.setStatus(`<span class="dot"></span><span>${esc(label)} 중…</span>`);
+      const m = await host.routeSend(msg ?? { kind: "recheck", edits });
+      rt.expect = true;
+      host.applyRouted(m);                               // -> editor.routed(m) -> routedNow
+      const names = msg ? m.wires.nets.map((q) => q.name) : edits.map((e) => e.net);
+      const after = names.map((nm) => { const q = m.wires.nets.find((z) => z.name === nm); return { net: nm, path_metal: q.path_metal, path_via: q.path_via }; });
+      rt.hist.push({ before, after, frozenBefore, frozenAfter: new Set(rt.frozen) });
+      if (rt.hist.length > 40) rt.hist.shift();
+      rt.fut = [];
+      host.refreshDownloads?.();
+      const d = rt.baseErrors == null ? "" : ` (배선기 결과 대비 ${m.nerrors - rt.baseErrors >= 0 ? "+" : ""}${m.nerrors - rt.baseErrors})`;
+      // 받아들일 조건이 있고 못 미치면 (정돈이 오류를 늘렸다) 바로 되돌린다
+      if (acceptIf && !acceptIf(m)) {
+        const en = rt.hist.pop();
+        rt.busy = false;
+        await replay(en, "undo");
+        host.setStatus(`<span style="color:var(--copper)">${esc(label)} — 오류가 늘어(${m.nerrors} 건) 되돌렸습니다</span>`);
+        return;
+      }
+      host.setStatus(`<span>${esc(label)} — DRC/LVS ${m.nerrors} 건${d} · ${m.secs.toFixed(2)} s</span>`);
+    } catch (e) {
+      rt.err = e.message;
+      host.setStatus(`<span style="color:var(--copper)">${esc(label)} 실패 — ${esc(e.message)}</span>`);
+      console.error("[배선 편집]", e);
+    } finally { rt.busy = false; render(); host.redraw(); }
+  }
+  async function replay(entry, dir) {
+    const edits = dir === "undo" ? entry.before : entry.after;
+    rt.busy = true; render();
+    try {
+      const m = await host.routeSend({ kind: "recheck", edits });
+      rt.expect = true;
+      host.applyRouted(m);
+      rt.frozen = new Set(dir === "undo" ? entry.frozenBefore : entry.frozenAfter);
+      host.refreshDownloads?.();
+      host.setStatus(`<span>${dir === "undo" ? "되돌림" : "다시 실행"} — DRC/LVS ${m.nerrors} 건</span>`);
+    } catch (e) { host.setStatus(`<span style="color:var(--copper)">되돌리기 실패 — ${esc(e.message)}</span>`); }
+    finally { rt.busy = false; render(); host.redraw(); }
+  }
+  function routeUndo() { if (!rt.hist.length || rt.busy) return; const en = rt.hist.pop(); rt.fut.push(en); replay(en, "undo"); }
+  function routeRedo() { if (!rt.fut.length || rt.busy) return; const en = rt.fut.pop(); rt.hist.push(en); replay(en, "redo"); }
+
+  function commitSlide(net, g) {
+    const before = [pathOf(net)], frozenBefore = new Set(rt.frozen);
+    rt.graphs.set(net, g);
+    rt.frozen.add(net);
+    sendEdits([{ net, ...toNode(g) }], { before, frozenBefore, label: "조각 옮기고 재검사" });
+  }
+  /** 정돈 — 위상은 그대로, 조각마다 범위 안에서 길이가 가장 짧아지는 트랙으로 (src/edit/compact.mjs).
+   *  오류가 늘면 되돌린다. */
+  function compact(all) {
+    if (!rt.model || rt.busy) return;
+    const nets = all ? [...rt.graphs.keys()] : rt.net ? [rt.net] : [];
+    if (!nets.length) return;
+    const r = all ? compactAll(rt.model, rt.graphs) : compactNet(rt.model, rt.graphs, rt.net);
+    const changed = r.nets.filter((q) => q.moves > 0);
+    if (!changed.length) { host.setStatus(`<span>정돈 — ${all ? "전부" : rt.net} 이미 짧습니다</span>`); return; }
+    const before = changed.map((q) => pathOf(q.net)), frozenBefore = new Set(rt.frozen);
+    for (const q of changed) { rt.graphs.set(q.net, q.g); rt.frozen.add(q.net); }
+    const errsBefore = rt.nerr;
+    sendEdits(changed.map((q) => ({ net: q.net, ...toNode(q.g) })),
+              { before, frozenBefore, label: `정돈 (${all ? changed.length + " 넷" : rt.net}, 길이 ${fmt(S2(r.before))} -> ${fmt(S2(r.after))})`,
+                acceptIf: errsBefore == null ? null : (m) => m.nerrors <= errsBefore });
+  }
+  /** 고른 조각을 한 트랙 옮긴다 (화살표) */
+  function nudgeSeg(sign) {
+    if (!rt.net || !rt.seg || rt.busy) return;
+    const r = rangeOf(rt.net, rt.seg);
+    rt.range = r;
+    if (r.locked) { hintRoute(); return; }
+    const i = r.tracks.indexOf(rt.seg.t), t = r.tracks[i + sign];
+    if (t === undefined) return;
+    const g = cloneGraph(rt.graphs.get(rt.net));
+    slide(g, g.segs[rt.seg.id], t);
+    const id = rt.seg.id;
+    commitSlide(rt.net, g);
+    rt.seg = g.segs[id];
+  }
+  function toggleFrozen() {
+    if (!rt.net) return;
+    if (rt.frozen.has(rt.net)) rt.frozen.delete(rt.net); else rt.frozen.add(rt.net);
+    render();
+  }
+  /** 이 넷만 다시 배선 — 나머지 넷은 지금 경로 그대로 고정 */
+  function rerouteNet() {
+    if (!rt.net || rt.busy) return;
+    const frozen = allPaths().filter((q) => q.net !== rt.net);
+    sendEdits(null, { before: allPaths(), msg: { kind: "reroute", frozen }, label: `${rt.net} 만 다시 배선` });
+  }
+  /** 고정 넷은 그대로, 나머지 다시 배선 */
+  function rerouteOthers() {
+    if (rt.busy) return;
+    const frozen = allPaths().filter((q) => rt.frozen.has(q.net));
+    sendEdits(null, { before: allPaths(), msg: { kind: "reroute", frozen }, label: `고정 ${frozen.length} 넷 빼고 다시 배선` });
+  }
+  /** 이 넷을 배선기가 낸 경로로 */
+  function restoreNet() {
+    if (!rt.net || rt.busy) return;
+    const before = [pathOf(rt.net)], frozenBefore = new Set(rt.frozen);
+    rt.frozen.delete(rt.net);
+    sendEdits([{ net: rt.net, restore: true }], { before, frozenBefore, label: `${rt.net} 원래 배선으로` });
+  }
+
+  function drawRoute(ctx, panel, m) {
+    if (!rt.model) return;
+    const pal = state().pal;
+    const g = rt.drag?.kind === "slide" ? rt.drag.g : rt.net ? rt.graphs.get(rt.net) : null;
+    if (!g) return;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(panel.x, panel.y, panel.w, panel.h); ctx.clip();
+    if (rt.drag?.kind === "slide") {
+      // 허용 띠와 트랙 눈금
+      const d = rt.drag, v = d.s.dir === "v", lo = S2(d.r.lo), hi = S2(d.r.hi);
+      ctx.fillStyle = pal.axis; ctx.globalAlpha = 0.1;
+      if (v) ctx.fillRect(m.X(lo), m.Y(S2(d.s.hi)) - 8, Math.max(2, (hi - lo) * m.S), S2(d.s.hi - d.s.lo) * m.S + 16);
+      else ctx.fillRect(m.X(S2(d.s.lo)) - 8, m.Y(hi), S2(d.s.hi - d.s.lo) * m.S + 16, Math.max(2, (hi - lo) * m.S));
+      ctx.globalAlpha = 0.5; ctx.strokeStyle = pal.axis; ctx.lineWidth = 1;
+      for (const t of d.r.tracks) {
+        ctx.beginPath();
+        if (v) { ctx.moveTo(m.X(S2(t)), m.Y(S2(d.s.hi)) - 8); ctx.lineTo(m.X(S2(t)), m.Y(S2(d.s.hi))); }
+        else { ctx.moveTo(m.X(S2(d.s.lo)) - 8, m.Y(S2(t))); ctx.lineTo(m.X(S2(d.s.lo)), m.Y(S2(t))); }
+        ctx.stroke();
+      }
+    }
+    for (const q of g.segs) {
+      const r = segRect(q).map(S2), sel = rt.seg && q.id === rt.seg.id;
+      const x = m.X(r[0]), y = m.Y(r[3]), w = Math.max(1, (r[2] - r[0]) * m.S), h = Math.max(1, (r[3] - r[1]) * m.S);
+      if (rt.drag?.kind === "slide") { ctx.fillStyle = pal.ours; ctx.globalAlpha = 0.35; ctx.fillRect(x, y, w, h); }
+      ctx.globalAlpha = 0.9; ctx.strokeStyle = sel ? pal.ours : pal.axis; ctx.lineWidth = sel ? 2.5 : 1.2;
+      ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+    }
+    ctx.globalAlpha = 0.9; ctx.fillStyle = pal.axis;
+    for (const jv of g.vias) ctx.fillRect(m.X(S2(jv.x)) - 3, m.Y(S2(jv.y)) - 3, 6, 6);
+    ctx.restore();
   }
 
   // ---------------------------------------------------------------- 카드
@@ -529,10 +755,24 @@ export function createEditor(host) {
   }
   function routeCard() {
     const geo = state().routed;
-    if (!geo) return '<p style="margin:0;color:var(--muted)">Routing 을 실행하면 넷을 고를 수 있습니다.</p>';
+    if (!geo || !rt.model) return '<p style="margin:0;color:var(--muted)">Routing 을 실행하면 넷을 고르고 조각을 옮길 수 있습니다.</p>';
     const rows = [];
-    rows.push(`<div class="editrow"><span class="lab">넷</span><span>${rt.net ? `<b>${esc(rt.net)}</b> · 도형 ${geo.terminals.filter((t) => t.netName === rt.net).length}` : '<span style="color:var(--muted)">도형을 클릭하면 그 넷만 밝게 보입니다</span>'}</span></div>`);
-    rows.push(`<div class="editrow help"><span class="lab">다음</span><span style="color:var(--muted)">조각 옮기기·재검사·넷 고정·재배선은 다음 단계에서 붙습니다 (symplace/PLAN-edit.md R1~R4).</span></div>`);
+    const busy = rt.busy ? " disabled" : "";
+    const n = rt.net ? rt.model.nets.find((q) => q.name === rt.net) : null, g = rt.net ? rt.graphs.get(rt.net) : null;
+    if (n && g) {
+      rows.push(`<div class="editrow"><span class="lab">넷</span><span><b>${esc(n.name)}</b>${n.port ? " · 포트" : ""} · 핀 ${n.pins.length} · 조각 ${g.segs.length} · 비아 ${g.vias.length} · 길이 ${fmt(S2(netLength(g)))}${rt.frozen.has(n.name) ? ' · <b style="color:var(--copper)">고정</b>' : ""}</span></div>`);
+      if (rt.seg) {
+        const r = rt.range ?? rangeOf(rt.net, rt.seg);
+        rows.push(`<div class="editrow"><span class="lab">조각</span><span>${esc(rt.seg.layer)} 트랙 ${fmt(S2(rt.seg.t))} · 스팬 ${fmt(S2(rt.seg.lo))}~${fmt(S2(rt.seg.hi))} · 비아 ${rt.seg.joints.length}${rt.seg.pins.length ? " · 핀 위" : ""}<br><small style="color:var(--muted)">${r.locked ? "못 옮긴다: " + esc(r.why) : `옮길 트랙 ${r.tracks.length} 개 [${fmt(S2(r.lo))}, ${fmt(S2(r.hi))}] — 끌거나 화살표`}${r.why && !r.locked ? " · " + esc(r.why) : ""}</small></span></div>`);
+      } else rows.push(`<div class="editrow"><span class="lab">조각</span><span style="color:var(--muted)">이 넷의 조각을 클릭하면 옮길 수 있는 범위가 보입니다 (층의 수직 방향으로만)</span></div>`);
+      rows.push(`<div class="editrow"><span class="lab">이 넷</span><span><button data-act="rfreeze"${busy} title="고정한 넷은 다시 배선할 때 그대로 둔다 (F)">${rt.frozen.has(n.name) ? "고정 해제" : "고정"}</button> <button data-act="rnet"${busy} title="나머지 넷은 지금 경로 그대로 두고 이 넷만 배선기에 다시 맡긴다 (R)">이 넷만 다시 배선</button> <button data-act="rcompact"${busy} title="위상(조각·비아·핀 접속)은 그대로 두고 조각을 범위 안에서 미끄러뜨려 길이를 줄인다. 오류가 늘면 되돌린다 (C)">정돈</button> <button data-act="rrestore"${busy} title="배선기가 낸 경로로 되돌린다">원래 배선으로</button></span></div>`);
+    } else {
+      rows.push(`<div class="editrow"><span class="lab">넷</span><span style="color:var(--muted)">도형을 클릭하면 그 넷만 밝게 보이고, 다시 그 넷의 조각을 클릭해 끌면 옆 트랙으로 옮깁니다.</span></div>`);
+    }
+    rows.push(`<div class="editrow"><span class="lab">전체</span><span><button data-act="rothers"${busy} title="고정한 넷(편집한 넷)은 그대로 두고 나머지를 배선기가 다시 배선한다">고정 넷 빼고 다시 배선</button> <button data-act="rcompactall"${busy} title="넷 전부를 차례로 정돈한다 — 위상은 그대로, 오류가 늘면 되돌린다 (Shift+C)">정돈 (전부)</button> <span style="color:var(--muted)">고정 ${rt.frozen.size ? [...rt.frozen].map(esc).join(" ") : "없음"}</span></span></div>`);
+    rows.push(`<div class="editrow"><span class="lab">이력</span><span><button data-act="rundo"${rt.hist.length && !rt.busy ? "" : " disabled"} title="Z">되돌리기</button> <button data-act="rredo"${rt.fut.length && !rt.busy ? "" : " disabled"} title="Y">다시 실행</button>` +
+              (rt.baseErrors != null ? ` <small style="color:var(--muted)">DRC/LVS ${rt.nerr ?? "?"} 건 · 배선기 결과 ${rt.baseErrors} 건</small>` : "") + `</span></div>`);
+    rows.push(`<div class="editrow help"><span class="lab">키</span><span style="color:var(--muted)">화살표 한 트랙 · F 고정 · R 이 넷만 다시 배선 · C 정돈 (Shift+C 전부) · Z/Y 되돌리기 · Esc 고르기 해제</span></div>`);
     return rows.join("");
   }
   card?.addEventListener("click", (e) => {
@@ -551,6 +791,14 @@ export function createEditor(host) {
     else if (act === "revert") revert();
     else if (act === "unpin") unpin(b.dataset.name);
     else if (act === "apply") { const r = pl.ranking?.[Number(b.dataset.k)]; if (r?.out) { pushHistory(); applyOut(r.out); } }
+    else if (act === "rfreeze") toggleFrozen();
+    else if (act === "rnet") rerouteNet();
+    else if (act === "rrestore") restoreNet();
+    else if (act === "rothers") rerouteOthers();
+    else if (act === "rcompact") compact(false);
+    else if (act === "rcompactall") compact(true);
+    else if (act === "rundo") routeUndo();
+    else if (act === "rredo") routeRedo();
   });
   card?.addEventListener("change", (e) => {
     const t = e.target;
@@ -568,8 +816,19 @@ export function createEditor(host) {
     const tag = e.target?.tagName;
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
     if (what() !== "place") {
-      if (e.key === "Escape") { rt.net = null; render(); host.redraw(); return true; }
-      return false;
+      const k = e.key;
+      if (k === "Escape") { if (rt.seg) rt.seg = null; else rt.net = null; rt.range = null; render(); host.redraw(); }
+      else if (k === "ArrowLeft" || k === "ArrowDown") { if (rt.seg && ((rt.seg.dir === "v") === (k === "ArrowLeft"))) nudgeSeg(-1); else return false; }
+      else if (k === "ArrowRight" || k === "ArrowUp") { if (rt.seg && ((rt.seg.dir === "v") === (k === "ArrowRight"))) nudgeSeg(+1); else return false; }
+      else if (k === "f" || k === "F") toggleFrozen();
+      else if (k === "r" || k === "R") rerouteNet();
+      else if (k === "c" || k === "C") compact(e.shiftKey);
+      else if ((k === "z" || k === "Z") && (e.ctrlKey || e.metaKey) && e.shiftKey) routeRedo();
+      else if (k === "z" || k === "Z") routeUndo();
+      else if (k === "y" || k === "Y") routeRedo();
+      else return false;
+      e.preventDefault();
+      return true;
     }
     const k = e.key, ctrl = e.ctrlKey || e.metaKey;
     const [gx, gy] = pl.model?.grid ?? [80, 84];
@@ -607,7 +866,7 @@ export function createEditor(host) {
     focus: () => (mode && what() === "route" && rt.net ? new Set([rt.net]) : null),
     fixedVariants,
     placed: (done) => { pl.orig = done; placedKeepPins(done); },
-    routed: (m) => { rt.wires = m?.wires ?? null; rt.net = null; render(); },
+    routed: (m) => routedNow(m),
     isDirty: () => pl.dirty,
     onPointerDown(e, px, py) {
       if (!this.active) return false;
@@ -625,6 +884,7 @@ export function createEditor(host) {
     draw(ctx, panel, m) {
       if (!mode) return;
       if (what() === "place") drawPlace(ctx, panel, m);
+      else if (what() === "route") drawRoute(ctx, panel, m);
     },
     state: { pl, rt },      // 검사(test/edit-page.mjs)가 들여다본다
     /** 검사용: 블록의 화면 좌표(캔버스 CSS px)와 지금 변환 */
@@ -639,6 +899,22 @@ export function createEditor(host) {
         const a = pl.live?.axes.find((q) => q.k === k), m = mapNow?.m, bb = state().ours?.bbox;
         if (!a || !m || !bb) return null;
         return { x: a.vert ? m.X(a.at) : m.X(bb[2]) - 8, y: a.vert ? m.Y(bb[3]) + 8 : m.Y(a.at) };
+      },
+      /** 검사용: 넷마다 조각의 화면 좌표와 옮길 범위 */
+      segmentsPx(net = null) {
+        const m = mapNow?.m;
+        if (!m || !rt.model) return [];
+        const out = [];
+        for (const [name, g] of rt.graphs) {
+          if (net && name !== net) continue;
+          const world = worldShapes(rt.model, rt.graphs, name);
+          for (const q of g.segs) {
+            const r = segRect(q).map(S2), rg = range(g, q, world, rt.model.bbox);
+            out.push({ net: name, id: q.id, layer: q.layer, dir: q.dir, t: q.t, cx: m.X((r[0] + r[2]) / 2), cy: m.Y((r[1] + r[3]) / 2),
+                       w: (r[2] - r[0]) * m.S, h: (r[3] - r[1]) * m.S, S: m.S, locked: rg.locked, tracks: rg.tracks, why: rg.why });
+          }
+        }
+        return out;
       },
     },
   };

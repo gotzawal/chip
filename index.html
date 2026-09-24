@@ -817,6 +817,10 @@ const editHost = {
     if (what === "route") redraw();
   },
   placeRetry: (msg) => editSend(msg),
+  /** 편집기의 재검사·재배선 — 배선 워커(세션을 쥔 것)로. 답은 applyRouted 로 꽂는다 (보기는 그대로) */
+  routeSend: (msg) => routeSend(msg),
+  applyRouted: (m) => applyRouted(m, { view: false }),
+  refreshDownloads: () => { if (lastRouted) routeDownloads(lastRouted); },
   onModeChange: (on) => { $("editCard").hidden = !on; },
 };
 // 편집 워커 — 위상 유지 변이 다시 고르기 (배정 x LP, 수 초). 워커가 안 서면 같은 코드를 메인 스레드에서.
@@ -1461,14 +1465,29 @@ async function leavesFor(name, blob) {
 }
 
 // 워커가 안 서는 브라우저에서는 같은 코드(src/route/pipeline.mjs)를 메인 스레드에서 돌린다.
-let routeWorker = null;
+// 편집기의 재검사·재배선(kind)을 받으려면 여기서도 마지막 판의 세션을 쥔다 — routeworker.mjs 와 같다.
+let routeWorker = null, mainSession = null, mainRouter = null, lastRouted = null;
 async function routeOnMain(msg) {
-  const [{ routeDesign, routeMessage }, { loadAlignRouter }] = await Promise.all(
+  const [{ routeSession, sessionOutput, recheck, routeMessage }, { loadAlignRouter }] = await Promise.all(
     [import("./src/route/pipeline.mjs"), import("./src/route/alignroute.mjs")]);
   const t0 = performance.now();
-  const r = await fetch("./src/route/alignroute.wasm");
-  if (!r.ok) throw new Error(`src/route/alignroute.wasm → ${r.status}`);
-  const out = await routeDesign({ ...msg, router: await loadAlignRouter(await r.arrayBuffer()), say: routeSay });
+  let out;
+  if (msg.kind === "recheck") {
+    if (!mainSession) throw new Error("배선 세션이 없습니다 — Routing 실행을 먼저 하세요");
+    out = recheck(mainSession, msg.edits ?? []);
+  } else {
+    if (!mainRouter) {
+      const r = await fetch("./src/route/alignroute.wasm");
+      if (!r.ok) throw new Error(`src/route/alignroute.wasm → ${r.status}`);
+      mainRouter = await loadAlignRouter(await r.arrayBuffer());
+    }
+    if (msg.kind === "reroute") {
+      if (!mainSession) throw new Error("배선 세션이 없습니다 — Routing 실행을 먼저 하세요");
+      mainSession = await routeSession({ design: mainSession.design, leaves: mainSession.lv, placement: mainSession.placement,
+                                         router: mainRouter, say: routeSay, frozen: msg.frozen ?? [] });
+    } else mainSession = await routeSession({ ...msg, router: mainRouter, say: routeSay });
+    out = sessionOutput(mainSession);
+  }
   return routeMessage(out, (performance.now() - t0) / 1000);
 }
 const routeSay = (text) =>
@@ -1544,8 +1563,9 @@ function routePlacement() {
   };
 }
 
-/** 브라우저가 방금 낸 배선 결과를 그림·DRC 표·다운로드에 꽂는다. */
-function showRouted(m) {
+/** 브라우저가 방금 낸 배선 결과를 그림·DRC 표·다운로드에 꽂는다. view 면 배선 보기로 옮겨 보인다
+ *  (편집기의 재검사·재배선은 보기를 그대로 둔다). */
+function applyRouted(m, { view = true } = {}) {
   const errs = (m.errors ?? []).map((t) => ({ text: t, file: "" }));
   liveRec = {
     errors: errs, nerrors: m.nerrors ?? errs.length,
@@ -1554,23 +1574,27 @@ function showRouted(m) {
   };
   routed = m.geo ?? null;
   routeFail = null;
+  lastRouted = m;
   editor?.routed(m);
   routeDownloads(m);
-  setView("route");
+  if (view) setView("route");
   showDrc();
-  showCanvas();
+  if (view) showCanvas(); else redraw();
 }
+const showRouted = (m) => applyRouted(m, { view: true });
 
 /** 방금 만든 배선 산출물을 Blob 링크로 건다 (서버에 없는 파일이다). */
 function routeDownloads(m) {
   clearDownloads("");
-  const nm = designName() || "design";
+  // 손으로 고친 배선(고정 넷이 있거나 편집 이력이 있으면)의 산출물은 -wires 로 가른다 — 배선기가 낸 그대로가 아니다
+  const rt = editor?.state?.rt;
+  const nm = (designName() || "design") + editedSuffix() + (rt && (rt.frozen.size || rt.hist.length) ? "-wires" : "");
   if (m.gds)
     addDownload(new Blob([m.gds], { type: "application/octet-stream" }),
                 nm + ".gds", "GDS (KLayout)");
   addDownload(new Blob([JSON.stringify(placementJson(), null, 1)],
                        { type: "application/json" }),
-              nm + editedSuffix() + ".place.json", "Placement (좌표·변이·반전)");
+              (designName() || "design") + editedSuffix() + ".place.json", "Placement (좌표·변이·반전)");
   if (m.geo)
     addDownload(new Blob([JSON.stringify(m.geo)], { type: "application/json" }),
                 nm + ".routed.json", "Routing 기하 (레이어별)");

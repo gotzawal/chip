@@ -6,6 +6,9 @@
  *    이 배치의 배선 결과는 지워진다. F 로 반전, Z 로 되돌리기, 카드에서 변이를 고르면 고정되고
  *    다음 Placement 실행이 그 변이를 쓴다. "위상 유지 최적화" 가 순위를 보인다.
  *
+ *    그 다음 배선하고 배선 편집 모드에서 넷·조각을 골라 한 트랙 끌면 재검사가 돌고 그 넷이 고정되며, Z/Y 로
+ *    되돌리고, "이 넷만 다시 배선" 이 나머지를 고정한 채 배선기를 돌린다.
+ *
  *  실행:  node symplace/web/placer/test/edit-page.mjs [예제=current_mirror_ota] [시작점=48]
  */
 import path from "node:path";
@@ -153,6 +156,73 @@ try {
   await page.click('#modeSeg button[data-mode="view"]');
   await page.waitForTimeout(100);
   ok(await page.$eval("#editCard", (e) => e.hidden), "편집 카드가 안 닫힌다");
+
+  // ---------------------------------------------------------------- 배선 편집
+  await page.click("#routeRun");
+  await page.waitForFunction(() => /Routing 완료|Routing 실패/.test(document.querySelector("#status").textContent), null, { timeout: 180000 });
+  const rs0 = (await page.textContent("#status")).trim();
+  console.log(`배선: ${rs0}`);
+  ok(/Routing 완료/.test(rs0), "배선이 실패했다");
+  ok(await page.evaluate(() => globalThis.__page.what === "route"), "배선 보기로 안 옮겨졌다");
+  await page.click('#modeSeg button[data-mode="edit"]');
+  await page.waitForTimeout(200);
+  ok(await page.evaluate(() => globalThis.__page.editor.active), "배선 보기에서 편집기가 안 켜졌다");
+  const segs = await page.evaluate(() => globalThis.__page.editor.probe.segmentsPx());
+  const mov = segs.filter((q) => !q.locked && q.tracks.length > 1);
+  console.log(`  조각 ${segs.length} 개, 옮길 수 있는 것 ${mov.length} 개`);
+  const box2 = await page.$eval("#cv", (c) => { const r = c.getBoundingClientRect(); return { x: r.left, y: r.top }; });
+  if (mov.length) {
+    const sg = mov[0];
+    await page.mouse.click(box2.x + sg.cx, box2.y + sg.cy);
+    await page.waitForTimeout(150);
+    ok(await page.evaluate((n) => globalThis.__page.editor.state.rt.net === n, sg.net), `넷 ${sg.net} 이 안 골라졌다`);
+    const i = sg.tracks.indexOf(sg.t), t2 = sg.tracks[i + 1] ?? sg.tracks[i - 1];
+    const dpx = ((t2 - sg.t) / 2) * sg.S;                 // PnRDB -> PDK -> px
+    await page.mouse.move(box2.x + sg.cx, box2.y + sg.cy);
+    await page.mouse.down();
+    for (const f of [0.5, 1]) {
+      if (sg.dir === "v") await page.mouse.move(box2.x + sg.cx + dpx * f, box2.y + sg.cy, { steps: 4 });
+      else await page.mouse.move(box2.x + sg.cx, box2.y + sg.cy - dpx * f, { steps: 4 });
+    }
+    await page.mouse.up();
+    await page.waitForFunction(() => !globalThis.__page.editor.state.rt.busy && globalThis.__page.editor.state.rt.hist.length > 0, null, { timeout: 60000 });
+    const has = (t) => page.evaluate(([n, layer, t]) => globalThis.__page.editor.state.rt.graphs.get(n).segs.some((q) => q.layer === layer && q.t === t), [sg.net, sg.layer, t]);
+    const after = await page.evaluate(() => { const rt = globalThis.__page.editor.state.rt; return { frozen: [...rt.frozen], hist: rt.hist.length, status: document.querySelector("#status").textContent.trim() }; });
+    console.log(`  조각 ${sg.net} ${sg.layer} ${sg.t / 2} -> ${t2 / 2} · 고정 ${after.frozen.join(" ")} · ${after.status}`);
+    ok(await has(t2), "조각이 목표 트랙으로 안 갔다");
+    ok(after.frozen.includes(sg.net), "편집한 넷이 고정되지 않았다");
+    ok(/재검사 — DRC\/LVS \d+ 건/.test(after.status), "재검사 상태가 없다");
+    ok(await page.$eval("#dlBar", (e) => /-wires\.gds/.test([...e.querySelectorAll("a")].map((a) => a.download).join(" "))), "내려받기 이름에 -wires 가 없다");
+    await page.keyboard.press("z");
+    await page.waitForFunction(() => !globalThis.__page.editor.state.rt.busy && globalThis.__page.editor.state.rt.fut.length > 0, null, { timeout: 60000 });
+    const undone = await page.evaluate(() => [...globalThis.__page.editor.state.rt.frozen]);
+    ok(await has(sg.t), "되돌렸는데 조각이 제자리가 아니다");
+    ok(!undone.includes(sg.net), "되돌렸는데 고정이 남았다");
+    await page.keyboard.press("y");
+    await page.waitForFunction(() => !globalThis.__page.editor.state.rt.busy && globalThis.__page.editor.state.rt.fut.length === 0, null, { timeout: 60000 });
+    ok(await has(t2), "다시 실행이 안 됐다");
+    await page.click('#editBody button[data-act="rnet"]');
+    await page.waitForFunction(() => !globalThis.__page.editor.state.rt.busy && /다시 배선 —|실패/.test(document.querySelector("#status").textContent), null, { timeout: 180000 });
+    const rr = await page.evaluate(() => ({ status: document.querySelector("#status").textContent.trim(), hist: globalThis.__page.editor.state.rt.hist.length }));
+    console.log(`  이 넷만 다시 배선: ${rr.status} · 이력 ${rr.hist}`);
+    ok(/다시 배선 —/.test(rr.status), "재배선이 실패했다");
+    ok(rr.hist === 2, `이력이 ${rr.hist} 이다`);
+    // --- 정돈 (C: 이 넷, Shift+C: 전부) — 위상 그대로, 오류가 늘지 않는다 ---
+    const keys = (n) => page.evaluate((n) => { const rt = globalThis.__page.editor.state.rt; const g = rt.graphs.get(n); return { key: g.segs.map((q) => q.layer + q.dir + q.lo + ":" + q.hi).length + "/" + g.vias.length, nerr: rt.nerr, hist: rt.hist.length }; }, n);
+    const k0 = await keys(sg.net);
+    await page.keyboard.press("c");
+    await page.waitForFunction(() => !globalThis.__page.editor.state.rt.busy && /정돈/.test(document.querySelector("#status").textContent), null, { timeout: 60000 });
+    const c1 = await page.evaluate(() => document.querySelector("#status").textContent.trim());
+    const k1 = await keys(sg.net);
+    console.log(`  정돈: ${c1} · 오류 ${k0.nerr} -> ${k1.nerr} · 이력 ${k0.hist} -> ${k1.hist}`);
+    ok(k1.key === k0.key, "정돈이 조각·비아 수를 바꿨다");
+    ok(k1.nerr <= k0.nerr, `정돈 뒤 오류가 늘었다 ${k0.nerr} -> ${k1.nerr}`);
+    await page.keyboard.press("Shift+C");
+    await page.waitForFunction(() => !globalThis.__page.editor.state.rt.busy && /정돈/.test(document.querySelector("#status").textContent), null, { timeout: 60000 });
+    const c2 = await page.evaluate(() => ({ status: document.querySelector("#status").textContent.trim(), nerr: globalThis.__page.editor.state.rt.nerr }));
+    console.log(`  정돈 (전부): ${c2.status} · 오류 ${c2.nerr}`);
+    ok(c2.nerr <= k1.nerr, `전부 정돈 뒤 오류가 늘었다 ${k1.nerr} -> ${c2.nerr}`);
+  } else console.log("  옮길 수 있는 조각이 없다 — 옮기기는 건너뛴다");
 } finally {
   await browser.close();
   srv.close();
