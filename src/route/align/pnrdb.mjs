@@ -397,7 +397,7 @@ const stem = (s) => {
   return s.substring(start, dot >= 0 ? dot : s.length);
 };
 
-/** MergeLEFMapData — 리프 블록은 gds 파일마다 변이 하나 (LEF 도형, 크기, 핀을 이름으로) */
+/** MergeLEFMapData — 리프 블록은 gds 파일마다 variant 하나 (LEF 도형, 크기, 핀을 이름으로) */
 function mergeLefMapData(node, gdsData2, lefData) {
   for (const bc of node.Blocks) {
     const atn = bc.instance[0].master;

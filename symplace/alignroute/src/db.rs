@@ -128,7 +128,7 @@ pub struct Terminal {
     pub termContacts: Vec<Contact>,
 }
 
-/// PnRDB::block — 블록의 한 변이 (배선기는 selectedInstance 만 본다)
+/// PnRDB::block — 블록의 한 variant (배선기는 selectedInstance 만 본다)
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Block {

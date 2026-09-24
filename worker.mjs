@@ -5,6 +5,8 @@
  *  두었다 — 모듈 워커가 서지 않는 브라우저에서는 index.html 이 같은 함수를
  *  직접 부른다.
  */
-import { runJob } from "./src/job.mjs";
+import { runJob, runEdit } from "./src/job.mjs";
 
-self.onmessage = (e) => runJob(e.data, (m) => postMessage(m));
+// kind 가 "retry" 면 편집(위상 유지 variant 다시 고르기), 아니면 배치 한 판 — 지금 그대로.
+self.onmessage = (e) => (e.data?.kind === "retry" ? runEdit(e.data, (m) => postMessage(m))
+                                                  : runJob(e.data, (m) => postMessage(m)));

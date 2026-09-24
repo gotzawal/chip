@@ -1,10 +1,10 @@
 /** 앞단 출력에서 만든 문제가, 고정값(fixtures/<예제>.json)의 문제와 같은가.
  *
- *  이게 변이 선택의 근거가 되는 검사다. 고정값은 변이가 이미 정해진 배치 문제(블록 크기·핀·넷)다.
- *  design.mjs 는 그 앞 단계(2_primitives)에서 읽어 변이를 고르지 않고 남긴다 — 그러려면 먼저
- *  "같은 변이를 고르면 같은 문제가 나온다"가 성립해야 한다.
+ *  이게 variant 선택의 근거가 되는 검사다. 고정값은 variant 가 이미 정해진 배치 문제(블록 크기·핀·넷)다.
+ *  design.mjs 는 그 앞 단계(2_primitives)에서 읽어 variant 를 고르지 않고 남긴다 — 그러려면 먼저
+ *  "같은 variant 를 고르면 같은 문제가 나온다"가 성립해야 한다.
  *
- *  그래서 고정값의 블록 크기와 같은 변이를 배정해 놓고 고정값과 맞대 본다.
+ *  그래서 고정값의 블록 크기와 같은 variant 를 배정해 놓고 고정값과 맞대 본다.
  *  블록 순서와 핀 순서는 자료구조 순회 순서라 의미가 없으므로 이름으로 맞춘다.
  */
 import fs from "node:fs";
@@ -27,7 +27,7 @@ for (const ex of exampleNames()) {
   const { topology, design } = loadDesign(ex);
   const groups = variantGroups(design);
 
-  console.log("  인스턴스 %d, 변이 그룹 %d, 조합 %d",
+  console.log("  인스턴스 %d, variant 그룹 %d, 조합 %d",
               design.instances.length, groups.length, countAssignments(groups));
   for (const g of groups)
     console.log("    [%s] %s -> %d : %s",
@@ -42,7 +42,7 @@ for (const ex of exampleNames()) {
     continue;
   }
 
-  // --- 고정값의 블록 크기와 같은 변이를 배정으로 되찾는다 ---
+  // --- 고정값의 블록 크기와 같은 variant 를 배정으로 되찾는다 ---
   const fp = path.join(FIX, ex + ".json");
   if (!fs.existsSync(fp)) { console.log("  (고정값 없음 — 배정 생성만 본다)"); }
   const fx = fs.existsSync(fp) ? J(fp) : null;
@@ -54,10 +54,10 @@ for (const ex of exampleNames()) {
       const t = design.info.get(c);
       return t && Math.abs(t.w - want[0]) < 1e-9 && Math.abs(t.h - want[1]) < 1e-9;
     }) : -1;
-    if (want) ok(k >= 0, `${nm}: 고정값 크기 ${want.join("x")} 의 변이가 후보에 없다`);
+    if (want) ok(k >= 0, `${nm}: 고정값 크기 ${want.join("x")} 의 variant 가 후보에 없다`);
     return Math.max(0, k);
   });
-  console.log("  고정값의 변이 = 배정 [%s]  (%s)", assign.join(","),
+  console.log("  고정값의 variant = 배정 [%s]  (%s)", assign.join(","),
               groups.map((g, i) => g.choices[assign[i]]).join(" "));
 
   const prob = buildProblem(design, groups, assign);

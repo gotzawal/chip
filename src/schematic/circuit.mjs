@@ -677,7 +677,7 @@ export function adoptGroups(sp, topo) {
 }
 
 // ---------------------------------------------------------------- 표에 쓸 것
-/** 최상위 모듈의 블록 하나하나: 이름 · 종류 · 소자 · 변이 후보 · 제약. */
+/** 최상위 모듈의 블록 하나하나: 이름 · 종류 · 소자 · variant 후보 · 제약. */
 export function describeBlocks(blob, circuit) {
   const topo = blob?.topology ?? {};
   const topMod = topModule(topo);

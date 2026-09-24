@@ -356,7 +356,7 @@ impl GcellGlobalRouter {
         }
         // R_Constraints / C_Constraints: db::HierNode 에 없다 (예제에서 늘 비어 있다)
 
-        // 블록 (selectedInstance 의 변이)
+        // 블록 (selectedInstance 의 variant)
         for b in &node.Blocks {
             let slcNumber = b.selectedInstance;
             let inst = usize::try_from(slcNumber)

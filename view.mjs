@@ -191,7 +191,8 @@ const GROUP_OF = new Map(LAYERS.map((l) => [l.key, l.group]));
 
 /** 배선된 기하를 그린다. on 은 켜진 묶음의 Set. */
 export function drawRouted(ctx, panel, geo, opt) {
-  const { pal, view, on, label, box = null, empty = null } = opt;
+  // focus: 넷 이름의 Set — 주면 그 넷의 도형만 제 색으로, 나머지는 흐리게 (편집기가 넷을 골랐을 때)
+  const { pal, view, on, label, box = null, empty = null, focus = null } = opt;
   ctx.save();
   ctx.beginPath();
   ctx.rect(panel.x, panel.y, panel.w, panel.h);
@@ -201,7 +202,7 @@ export function drawRouted(ctx, panel, geo, opt) {
   if (!geo?.terminals?.length) {
     if (empty) drawEmpty(ctx, panel, pal, empty);
     ctx.restore();
-    return;
+    return null;
   }
 
   const fit = fitOf(box ?? geo.bbox, panel);
@@ -222,7 +223,8 @@ export function drawRouted(ctx, panel, geo, opt) {
       const w = Math.max(0.6, (r[2] - r[0]) * m.S);
       const h = Math.max(0.6, (r[3] - r[1]) * m.S);
       ctx.fillStyle = c;
-      ctx.globalAlpha = g === "well" ? 0.16 : g === "device" ? 0.42 : 0.8;
+      const a = g === "well" ? 0.16 : g === "device" ? 0.42 : 0.8;
+      ctx.globalAlpha = focus && !(t.netName && focus.has(t.netName)) ? a * 0.15 : a;
       ctx.fillRect(x, y, w, h);
       drawn++;
     }
@@ -240,4 +242,5 @@ export function drawRouted(ctx, panel, geo, opt) {
     ctx.fillText(`${label} · ${drawn}/${geo.terminals.length}`, panel.x + 10, panel.y + 8);
   }
   ctx.restore();
+  return { fit, m };
 }

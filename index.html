@@ -169,6 +169,17 @@
     margin: 0; padding: 11px 14px 9px; border-bottom: 1px solid var(--hair);
   }
   .card > .body { padding: 14px; }
+  .cols > div > .card + .card { margin-top: 16px; }
+  /* 접는 카드 — 제목을 클릭하면 접힌다. 편집 모드에서는 편집 카드 말고 전부 접힌 채 시작한다 */
+  .card.fold > h2 { cursor: pointer; user-select: none; position: relative; padding-right: 30px; }
+  .card.fold > h2::after {
+    content: ""; position: absolute; right: 15px; top: 11px; width: 6px; height: 6px;
+    border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint);
+    transform: rotate(45deg); transition: transform 0.12s;
+  }
+  .card.fold.collapsed > h2 { border-bottom: none; }
+  .card.fold.collapsed > h2::after { transform: rotate(-45deg); top: 13px; }
+  .card.fold.collapsed > :not(h2) { display: none; }
 
   canvas {
     display: block; width: 100%; background: var(--sunk);
@@ -245,6 +256,17 @@
   .sw.mod { background: transparent; border: 1px dashed var(--faint); }
   .sw.rail { width: 14px; height: 0; border: 0; border-top: 2px solid var(--copper); border-radius: 0; }
   .hint { color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
+  /* --- 편집 (edit.mjs 가 카드를 채운다) --- */
+  canvas.editing { cursor: default; }
+  .editrow { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--hair); font-size: 12.5px; line-height: 1.5; }
+  .editrow:first-child { border-top: 0; padding-top: 0; }
+  .editrow > .lab { flex: 0 0 60px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--faint); padding-top: 4px; }
+  .editrow > span:last-child { flex: 1 1 auto; min-width: 0; }
+  .editrow button, .editrow select { font-size: 12px; padding: 4px 8px; }
+  .editrow button.run { padding: 5px 12px; }
+  .editrow table.rank { width: auto; font-size: 11px; }
+  .editrow table.rank th, .editrow table.rank td { padding: 3px 8px; }
+  .editrow.help { color: var(--faint); font-size: 11.5px; }
   td.dim small, td small { color: var(--faint); }
 
   /* --- 지표 --- */
@@ -333,7 +355,7 @@ data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 �
       <summary title="시작점 예산과 저울 둘, WebGPU 의 설정당 시작점. 기본값으로도 된다">상세 placement 설정</summary>
       <div class="advrow">
         <label class="field"
-               title="총 시작점 예산. 설정(변이 배정 x 영역 후보) 수가 하한이라,
+               title="총 시작점 예산. 설정(variant 배정 x 영역 후보) 수가 하한이라,
 설정이 많은 계층 설계에서는 주로 **넓이**로 쓰인다 — 배정을 몇 개까지 훑을지가
 같이 늘어난다. 남는 예산은 점수 상위 설정에 라운드로 더 준다."><span>시작점</span>
           <select id="batch">
@@ -351,7 +373,7 @@ HPWL 은 핀 경계 사각형으로 잰다 (ALIGN 의 HPWL_extend). 다음 place
         </label>
         <label class="field" id="gpuField" hidden
                title="WebGPU 가 있으면 연속 단계(Adam)를 GPU 에서 돈다. 그때 시작점은 총 예산이
-아니라 설정(변이 배정 x 영역)마다 이만큼이다. 시작점 96 짜리 CPU 예산은 설정당
+아니라 설정(variant 배정 x 영역)마다 이만큼이다. 시작점 96 짜리 CPU 예산은 설정당
 1~4 개였다 — 배정 하나의 점수가 표본 서너 개로 정해져 순위가 잡음 안에 있었다.">
           <span>GPU 시작점/설정</span>
           <select id="perConfig">
@@ -373,7 +395,7 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
     </details>
   </div>
 
-  <div class="cols">
+  <div class="cols" id="cols">
     <div>
       <div class="card">
         <h2 class="withbar">
@@ -384,6 +406,11 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
               <button data-what="group" aria-pressed="false">Primitives</button>
               <button data-what="place" aria-pressed="true">Placement</button>
               <button data-what="route" aria-pressed="false">Routing</button>
+            </span>
+            <span class="seg" id="modeSeg" hidden style="margin-left:6px"
+                  title="편집: 블록을 끌어 옮기고 뒤집고 variant 를 바꾼다 — 편집이 없으면 배치기·배선기가 낸 그대로다">
+              <button data-mode="view" aria-pressed="true">보기</button>
+              <button data-mode="edit" aria-pressed="false" disabled>편집</button>
             </span>
           </span>
         </h2>
@@ -401,33 +428,38 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
           <span style="color:var(--faint)">휠 확대 · 끌어 이동 · 더블클릭 초기화</span>
         </div>
       </div>
-      <div class="card" style="margin-top:16px">
-        <h2>소자 변이 — 고른 것</h2>
+      <div class="card fold collapsed" id="variantCard">
+        <h2>소자 variant — 고른 것</h2>
         <div class="tw"><table>
-          <thead><tr><th>인스턴스</th><th>변이</th><th>크기</th><th>반전</th></tr></thead>
+          <thead><tr><th>인스턴스</th><th>variant</th><th>크기</th><th>반전</th></tr></thead>
           <tbody id="vt"><tr><td colspan="4" class="dim">Placement 를 실행하면 채워집니다</td></tr></tbody>
         </table></div>
       </div>
-      <div class="card" style="margin-top:16px" id="blockCard">
+      <div class="card fold collapsed" id="blockCard">
         <h2 title="앞단(1_topology)이 넷리스트의 소자를 묶어 만든 블록 — placer 는 이 블록을 놓는다.
-변이 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들어 둔 것이다.">Primitives — 앞단이 만든 블록 (placement 이전)</h2>
+variant 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들어 둔 것이다.">Primitives — 앞단이 만든 블록 (placement 이전)</h2>
         <div class="tw"><table>
-          <thead><tr><th>블록</th><th>종류</th><th>소자</th><th>변이 후보</th><th>제약</th></tr></thead>
+          <thead><tr><th>블록</th><th>종류</th><th>소자</th><th>variant 후보</th><th>제약</th></tr></thead>
           <tbody id="bt"><tr><td colspan="5" class="dim">회로를 고르면 채워집니다</td></tr></tbody>
         </table></div>
       </div>
     </div>
 
     <div>
-      <div class="card">
+      <div class="card fold collapsed" id="resultCard">
         <h2>결과</h2>
         <dl class="metrics" id="metrics"></dl>
       </div>
-      <div class="card" style="margin-top:16px">
+      <div class="card" id="editCard" hidden>
+        <h2 title="배치를 손으로 고친다. 끌기는 제약을 따라 움직이고(거울 쌍은 거울로, 축 위 블록은 축을 따라), 정리는 사용자가
+정한 위상(쌍의 상대 위치)을 그대로 둔 채 겹침을 없애고 격자에 앉힌다. 편집이 없으면 지금 그대로다.">편집</h2>
+        <div class="body" id="editBody"></div>
+      </div>
+      <div class="card fold collapsed" id="infoCard">
         <h2>설계</h2>
         <div class="body"><dl class="metrics" id="info" style="margin:-14px"></dl></div>
       </div>
-      <div class="card" id="drcCard" style="margin-top:16px">
+      <div class="card fold collapsed" id="drcCard">
         <h2>Routing · GDS · DRC</h2>
         <dl class="metrics" id="drcMetrics"></dl>
         <div class="body" id="drcErrs" style="border-top:1px solid var(--hair)"></div>
@@ -435,7 +467,7 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
           <div class="dl" id="dlBar"></div>
         </div>
       </div>
-      <div class="card" id="subCard" hidden style="margin-top:16px">
+      <div class="card fold collapsed" id="subCard" hidden>
         <h2>하위 모듈이 올린 모양</h2>
         <div class="tw"><table>
           <thead><tr><th>모듈</th><th>쓴 것</th><th>올린 후보</th></tr></thead>
@@ -503,7 +535,8 @@ const layersOn = new Set(["metal", "via", "device"]);   // 웰은 기본 꺼짐
 const views = new Map();     // 설계 이름 -> { schem, group, schemErr, groupErr }
 const spTexts = new Map();   // 올린 .sp 원문 (예제는 netlists/<이름>.sp 를 받는다)
 let hover = null;            // 회로도에서 가리킨 넷·소자
-let lastMap = null;          // 마지막으로 그린 회로도의 화면 변환 (hover 에 쓴다)
+let lastMap = null;          // 마지막으로 그린 보기의 화면 변환 (hover 와 편집기가 쓴다)
+let editor = null;           // 편집기 (edit.mjs) — 따로, 필요할 때 받는다. 못 받아도 보기·배치·배선은 그대로
 globalThis.__views = views;  // 검사(test/views.mjs)가 들여다본다
 /** 회로도·묶음의 열쇠 — 고른 예제 이름이거나 "__upload__" (designName() 은 파일 이름이라 다르다). */
 const viewKey = () => $("ex").value;
@@ -530,7 +563,8 @@ let ours = null;                // 우리 배치 (이번 세션에서 푼 것)
 let worker = null, busy = false;
 
 /** 지금 그릴 것 — **이번 세션에서 푼 것만** 그린다. 저장소에는 입력만 있고, 결과는 전부 이 자리에서 만든다. */
-const oursNow = () => frame ?? ours;
+// 편집 중이면 편집기가 theta 에서 낸 좌표를 그린다 (정리 전의 겹친 상태 그대로). 아니면 지금과 같다.
+const oursNow = () => editor?.liveData?.() ?? frame ?? ours;
 
 // ---------------------------------------------------------------- 그리기
 //
@@ -584,8 +618,12 @@ function layout() {
   const box = frameBox(items);
   const ar = (box[3] - box[1]) / (box[2] - box[0]);      // 세로/가로
 
-  // 높이: 내용 비율대로 잡되 창 높이를 넘기지 않는다.
-  const cap = Math.max(360, Math.min(820, Math.round(window.innerHeight * 0.78)));
+  // 높이: 내용 비율대로 잡되 창 높이를 넘기지 않는다. Placement·Routing 은 캔버스가 카드 폭을 다 쓰고 그림이
+  // 좌우를 꽉 채우게 높이가 비율대로 따라간다 — 창 높이의 1.4 배까지. 그보다 세로로 긴 설계(telescopic_ota 는
+  // 1440 x 12768)는 그 높이 안에 다 보이게 맞춘다 (좌우가 남는다 — 휠로 확대해 본다).
+  const fillWide = what === "place" || what === "route";
+  const cap = fillWide ? Math.max(700, Math.round(window.innerHeight * 1.4))
+                       : Math.max(360, Math.min(820, Math.round(window.innerHeight * 0.78)));
   const pad = 24;                                  // fitOf 가 두는 여백
   const gap = n > 1 ? 1 : 0;
   const per = (full - gap) / n;
@@ -596,7 +634,7 @@ function layout() {
   // 패널 폭: 내용이 세로로 길어 높이가 잘렸으면 필요한 만큼만 쓰고 가운데로 모은다.
   const floor = n === 1 ? 260 : 160;               // 너무 좁으면 끌어 옮길 자리가 없다
   const want = Math.min(per, Math.max(floor, ((H - pad * 2) / Math.max(ar, 1e-3)) * 1.1 + pad * 2));
-  const W = Math.round(Math.min(full, want * n + gap));
+  const W = fillWide ? full : Math.round(Math.min(full, want * n + gap));
   const panels = [];
   for (let k = 0; k < n; k++)
     panels.push({ x: k * ((W - gap) / n + gap), y: 0, w: (W - gap) / n, h: H });
@@ -620,19 +658,22 @@ function redraw() {
   lastMap = null;
   items.forEach((it, k) => {
     const p = panels[k];
-    if (what === "route")
-      drawRouted(ctx, p, it.geo, { pal, view, on: layersOn, box,
-                                   label: it.label, empty: it.empty });
-    else if (what === "schem" || what === "group") {
+    if (what === "route") {
+      const r = drawRouted(ctx, p, it.geo, { pal, view, on: layersOn, box,
+                                             label: it.label, empty: it.empty, focus: editor?.focus?.() ?? null });
+      if (r) { lastMap = { m: r.m, panel: p, what }; editor?.setMap(lastMap); editor?.draw(ctx, p, r.m); }
+    } else if (what === "schem" || what === "group") {
       if (schem) {
         const r = schem.drawSchematic(ctx, p, it.lay, { pal, view, box, label: it.label, empty: it.empty,
                                                         mode: what, hover });
         if (r) lastMap = { m: r.m, lay: it.lay, panel: p };
       } else drawPanel(ctx, p, null, { pal, view, box, empty: it.empty });
       globalThis.__drawn = { key: viewKey(), what, lay: schem ? (it.lay ?? null) : null };
-    } else
-      drawPanel(ctx, p, it.data, { pal, view, box, label: it.label,
-                                   accent: it.accent, axes: it.axes, empty: it.empty });
+    } else {
+      const r = drawPanel(ctx, p, it.data, { pal, view, box, label: it.label,
+                                             accent: it.accent, axes: it.axes, empty: it.empty });
+      if (r) { lastMap = { m: r.m, panel: p, what }; editor?.setMap(lastMap); editor?.draw(ctx, p, r.m); }
+    }
     const b = (it.data ?? it.geo)?.bbox;
     if (b && (it.key === "ours" || !shownBbox)) shownBbox = b;
     if (k) {
@@ -659,19 +700,27 @@ cv.addEventListener("wheel", (e) => {
 }, { passive: false });
 
 let drag = null;
+const canvasXY = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
 cv.addEventListener("pointerdown", (e) => {
+  // 편집 모드면 편집기가 먼저 본다 — 블록·축 핸들을 잡으면 끌기, 빈 자리면 이동 (아래)
+  if (editor?.active && editor.onPointerDown(e, ...canvasXY(e))) { cv.setPointerCapture(e.pointerId); return; }
   drag = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
   cv.setPointerCapture(e.pointerId); cv.classList.add("dragging");
 });
 cv.addEventListener("pointermove", (e) => {
+  if (editor?.active && editor.onPointerMove(e, ...canvasXY(e))) return;
   if (!drag) { hoverAt(e); return; }
   view.tx = drag.tx + (e.clientX - drag.x);
   view.ty = drag.ty + (e.clientY - drag.y);
   redraw();
 });
-const endDrag = () => { drag = null; cv.classList.remove("dragging"); };
+const endDrag = (e) => {
+  if (e && editor?.active) editor.onPointerUp(e, ...canvasXY(e));
+  drag = null; cv.classList.remove("dragging");
+};
 cv.addEventListener("pointerup", endDrag);
 cv.addEventListener("pointercancel", endDrag);
+window.addEventListener("keydown", (e) => { if (editor?.onKey?.(e)) e.preventDefault(); });
 cv.addEventListener("pointerleave", () => { if (hover) { hover = null; $("hint").textContent = ""; redraw(); } });
 
 /** 회로도·묶음에서 마우스 아래의 넷·소자를 밝히고 아래 줄에 적는다. */
@@ -744,11 +793,101 @@ function setView(nextWhat) {
   for (const k of document.querySelectorAll(".cap .key"))
     k.hidden = !(k.dataset.for ?? "").split(" ").includes(what);
   hover = null; $("hint").textContent = "";
+  $("modeSeg").hidden = !(what === "place" || what === "route");
+  editor?.viewChanged();
   if (what === "schem" || what === "group") ensureViews(viewKey());
   resetView();
 }
 for (const btn of $("whatSeg").querySelectorAll("button"))
   btn.addEventListener("click", () => setView(btn.dataset.what));
+
+// ---------------------------------------------------------------- 편집
+//
+// 편집기(edit.mjs)는 회로도 모듈처럼 **따로, 필요할 때** 받는다 — 못 받아도 페이지는 그대로다.
+// 편집이 없으면 아무것도 바꾸지 않는다: 배치기·배선기가 낸 것을 그대로 그리고 내려받는다.
+// 편집기가 배치를 고치면 setOurs 로 새 배치를 꽂고, 그 배치의 배선은 무효가 된다 (다시 실행해야 한다).
+let editMode = false;
+function setMode(m) {
+  editMode = m === "edit" && !!editor;
+  for (const b of $("modeSeg").querySelectorAll("button"))
+    b.setAttribute("aria-pressed", String((b.dataset.mode === "edit") === editMode));
+  cv.classList.toggle("editing", editMode);
+  editor?.setMode(editMode);
+}
+for (const btn of $("modeSeg").querySelectorAll("button")) btn.addEventListener("click", () => setMode(btn.dataset.mode));
+const editHost = {
+  cv, ctx, card: $("editBody"), cardWrap: $("editCard"),
+  state: () => ({ what, ours, routed, pal, view, busy }),
+  design: () => blobs.get($("ex").value),
+  // setStatus 는 아래에서 const 로 정해진다 — 여기서는 미루어 부른다 (정의 전 참조가 안 되게)
+  redraw: () => redraw(), setStatus: (h) => setStatus(h),
+  /** 편집기가 고친 배치 — 지표·내려받기를 그 배치로 */
+  setOurs(o) { ours = o; frame = null; showResult(o); placeDownloads(); redraw(); },
+  /** 배치가 바뀌면 그 배치의 배선은 더 이상 이 배치의 것이 아니다 */
+  invalidateRouting() {
+    if (!routed && !liveRec && !routeFail) return;
+    routed = null; liveRec = null; routeFail = null;
+    showDrc(); placeDownloads();
+    setStatus("<span>배치를 고쳤습니다 — Routing 을 다시 실행하세요</span>");
+    if (what === "route") redraw();
+  },
+  placeRetry: (msg) => editSend(msg),
+  /** 편집기의 재검사·재배선 — 배선 워커(세션을 쥔 것)로. 답은 applyRouted 로 꽂는다 (보기는 그대로) */
+  routeSend: (msg) => routeSend(msg),
+  applyRouted: (m) => applyRouted(m, { view: false }),
+  refreshDownloads: () => { if (lastRouted) routeDownloads(lastRouted); },
+  onModeChange: (on) => layoutForEdit(on),
+};
+// 카드 접기 — 제목을 클릭하면 접히고 펴진다. 편집 모드에 들어가면 편집 카드가 결과 카드 자리(캔버스 바로 옆)에 오고
+// 나머지 카드는 전부 접힌 채 시작한다. 나오면 편집 카드를 감추고 접힘을 들어가기 전대로 되돌린다.
+const foldCards = () => [...document.querySelectorAll(".card.fold")];
+for (const c of foldCards()) c.querySelector(":scope > h2").addEventListener("click", (e) => {
+  if (e.target.closest("button, a, input, select, label")) return;
+  c.classList.toggle("collapsed");
+});
+let foldBefore = null;
+function layoutForEdit(on) {
+  const ec = $("editCard"), rc = $("resultCard");
+  if (on && !foldBefore) {
+    foldBefore = new Map(foldCards().map((c) => [c, c.classList.contains("collapsed")]));
+    for (const c of foldCards()) c.classList.add("collapsed");
+    rc.before(ec);
+  } else if (!on && foldBefore) {
+    rc.after(ec);
+    for (const [c, v] of foldBefore) c.classList.toggle("collapsed", v);
+    foldBefore = null;
+  }
+  ec.hidden = !on;
+}
+// 편집 워커 — 위상 유지 variant 다시 고르기 (배정 x LP, 수 초). 워커가 안 서면 같은 코드를 메인 스레드에서.
+let editWorker = null;
+function editSend(msg) {
+  return new Promise((resolve, reject) => {
+    const take = (m) => {
+      if (m.type === "progress") setStatus(`<span class="dot"></span><span>variant ${m.done}/${m.total} · ${m.t.toFixed(0)}s</span>`);
+      else if (m.type === "error") reject(new Error(m.msg.split("\n")[0]));
+      else if (m.type === "retry") resolve(m);
+    };
+    const main = async (why) => {
+      console.warn("편집 워커를 못 씁니다 — 메인 스레드로 돌립니다:", why);
+      editWorker = null;
+      try { const { runEdit } = await import("./src/job.mjs"); runEdit(msg, take); } catch (e) { reject(e); }
+    };
+    try { editWorker ??= new Worker(new URL("./worker.mjs", import.meta.url), { type: "module" }); }
+    catch (err) { main(err.message); return; }
+    editWorker.onmessage = (ev) => take(ev.data);
+    editWorker.onerror = (ev) => { ev.preventDefault?.(); main(ev.message || "워커 오류"); };
+    editWorker.postMessage(msg);
+  });
+}
+import("./edit.mjs").then((M) => {
+  editor = M.createEditor(editHost);
+  $("modeSeg").querySelector('[data-mode="edit"]').disabled = false;
+  if (ours) editor.placed(ours);
+}).catch((e) => console.warn("편집기(edit.mjs)를 못 받았습니다 — 보기만 됩니다:", e.message));
+// 검사(test/edit-page.mjs)가 들여다본다
+globalThis.__page = { get ours() { return ours; }, get routed() { return routed; }, get editor() { return editor; },
+                      get lastMap() { return lastMap; }, get what() { return what; }, setMode, setView };
 
 // ---------------------------------------------------------------- 회로도 · 묶음
 //
@@ -812,7 +951,7 @@ async function ensureViews(name) {
   return v;
 }
 
-/** 묶음 표 — 앞단이 만든 블록마다 종류·소자·변이 후보·제약. */
+/** 묶음 표 — 앞단이 만든 블록마다 종류·소자·variant 후보·제약. */
 function showBlocks(rows) {
   const tb = $("bt"); tb.textContent = "";
   if (!rows?.length) {
@@ -875,7 +1014,7 @@ function showInfo(b) {
   const dl = $("info"); dl.textContent = "";
   mkRow(dl, "블록", String(b.blocks ?? "—"));
   mkRow(dl, "모듈", b.modules > 1 ? `${b.modules} <small>(계층)</small>` : "1");
-  mkRow(dl, "변이 조합", String(b.leafCombos ?? "—"));
+  mkRow(dl, "variant 조합", String(b.leafCombos ?? "—"));
   if (b.ignored?.length)
     mkRow(dl, "placer 가 무시한 제약", `<small>${b.ignored.join(" · ")}</small>`, "lose");
 }
@@ -888,7 +1027,7 @@ function summarize(blob) {
   return { blocks: (top?.instances ?? []).length, modules: mods.length };
 }
 
-/** 변이 표 — 고른 소자 변이와 반전. */
+/** variant 표 — 고른 소자 variant 와 반전. */
 function variantRows(rects) {
   const tb = $("vt"); tb.textContent = "";
   if (!rects?.length) {
@@ -920,7 +1059,7 @@ function showResult(r) {
     ? `0 <small>밖 / M1 ${r.grid[0]} M2 ${r.grid[1]}</small>`
     : `${r.offgrid} <small>블록이 격자 밖</small>`,
     r.offgrid === 0 ? "win" : "lose");
-  mkRow(dl, "변이 조합", `${r.combos} <small>중 ${r.configs} 설정 탐색</small>`);
+  mkRow(dl, "variant 조합", `${r.combos} <small>중 ${r.configs} 설정 탐색</small>`);
   if (r.hpwlWeight)
     mkRow(dl, "저울", `면적 1 : 선 길이 ${r.hpwlWeight.toFixed(2)}` +
       `<small> · 퍼뜨리기 ${(r.lamRatio ?? 1).toFixed(2)}×</small>`);
@@ -945,6 +1084,9 @@ function showResult(r) {
           r.orderBad ? "lose" : "win");
   if (r.hpwlBeforeFlip)
     mkRow(dl, "반전 효과", `${(r.hpwl / r.hpwlBeforeFlip).toFixed(2)}× <small>HPWL</small>`, "win");
+  if (r.edited)
+    mkRow(dl, "편집", `${r.edited} 회 <small>· 배치기 대비 면적 ${(r.area / Math.max(1, r.base?.area ?? r.area)).toFixed(3)}× · ` +
+          `HPWL ${(r.hpwl / Math.max(1, r.base?.hpwl ?? r.hpwl)).toFixed(3)}×</small>`);
 
   variantRows(r.rects);
 
@@ -1128,6 +1270,7 @@ async function ingest(fileList) {
       text.textContent = `올림 — 모듈 ${blob.topology.modules.length}, 인스턴스 ${nInst}` +
         (blob._missing?.length ? `  (템플릿 ${blob._missing.length}개 없음)` : "");
       ours = null; frame = null; routed = null; liveRec = null; routeFail = null;
+      editor?.placed(null);
       $("metrics").textContent = "";
       variantRows(null);
       showInfo(summarize(blob));
@@ -1279,7 +1422,7 @@ function handle(m) {
       runnerKind = m.runner;
       $("gpuField").hidden = m.runner !== "gpu";
     }
-    setStatus(`<span class="dot"></span><span>계산 중 — 변이 조합을 훑는다` +
+    setStatus(`<span class="dot"></span><span>계산 중 — variant 조합을 훑는다` +
               (m.runner ? ` <small>(${m.runner === "gpu" ? "WebGPU" : "CPU"})</small>` : "") + `</span>`);
   } else if (m.type === "progress") {
     setStatus(`<span class="dot"></span><span>${m.done}/${m.total} ${m.phase ?? "후보"} · ${m.t.toFixed(0)}s</span>`);
@@ -1293,6 +1436,7 @@ function handle(m) {
   } else if (m.type === "done") {
     ours = m; frame = null; busy = false; $("run").disabled = false;
     $("routeRun").disabled = false;
+    editor?.placed(m);
     redraw(); showResult(m);
     placeDownloads();
     setStatus(`<span>완료 — ${m.secs.toFixed(1)}s · 설정 ${m.configs} 개 · ` +
@@ -1357,14 +1501,29 @@ async function leavesFor(name, blob) {
 }
 
 // 워커가 안 서는 브라우저에서는 같은 코드(src/route/pipeline.mjs)를 메인 스레드에서 돌린다.
-let routeWorker = null;
+// 편집기의 재검사·재배선(kind)을 받으려면 여기서도 마지막 판의 세션을 쥔다 — routeworker.mjs 와 같다.
+let routeWorker = null, mainSession = null, mainRouter = null, lastRouted = null;
 async function routeOnMain(msg) {
-  const [{ routeDesign, routeMessage }, { loadAlignRouter }] = await Promise.all(
+  const [{ routeSession, sessionOutput, recheck, routeMessage }, { loadAlignRouter }] = await Promise.all(
     [import("./src/route/pipeline.mjs"), import("./src/route/alignroute.mjs")]);
   const t0 = performance.now();
-  const r = await fetch("./src/route/alignroute.wasm");
-  if (!r.ok) throw new Error(`src/route/alignroute.wasm → ${r.status}`);
-  const out = await routeDesign({ ...msg, router: await loadAlignRouter(await r.arrayBuffer()), say: routeSay });
+  let out;
+  if (msg.kind === "recheck") {
+    if (!mainSession) throw new Error("배선 세션이 없습니다 — Routing 실행을 먼저 하세요");
+    out = recheck(mainSession, msg.edits ?? []);
+  } else {
+    if (!mainRouter) {
+      const r = await fetch("./src/route/alignroute.wasm");
+      if (!r.ok) throw new Error(`src/route/alignroute.wasm → ${r.status}`);
+      mainRouter = await loadAlignRouter(await r.arrayBuffer());
+    }
+    if (msg.kind === "reroute") {
+      if (!mainSession) throw new Error("배선 세션이 없습니다 — Routing 실행을 먼저 하세요");
+      mainSession = await routeSession({ design: mainSession.design, leaves: mainSession.lv, placement: mainSession.placement,
+                                         router: mainRouter, say: routeSay, frozen: msg.frozen ?? [] });
+    } else mainSession = await routeSession({ ...msg, router: mainRouter, say: routeSay });
+    out = sessionOutput(mainSession);
+  }
   return routeMessage(out, (performance.now() - t0) / 1000);
 }
 const routeSay = (text) =>
@@ -1440,8 +1599,9 @@ function routePlacement() {
   };
 }
 
-/** 브라우저가 방금 낸 배선 결과를 그림·DRC 표·다운로드에 꽂는다. */
-function showRouted(m) {
+/** 브라우저가 방금 낸 배선 결과를 그림·DRC 표·다운로드에 꽂는다. view 면 배선 보기로 옮겨 보인다
+ *  (편집기의 재검사·재배선은 보기를 그대로 둔다). */
+function applyRouted(m, { view = true } = {}) {
   const errs = (m.errors ?? []).map((t) => ({ text: t, file: "" }));
   liveRec = {
     errors: errs, nerrors: m.nerrors ?? errs.length,
@@ -1450,22 +1610,27 @@ function showRouted(m) {
   };
   routed = m.geo ?? null;
   routeFail = null;
+  lastRouted = m;
+  editor?.routed(m);
   routeDownloads(m);
-  setView("route");
+  if (view) setView("route");
   showDrc();
-  showCanvas();
+  if (view) showCanvas(); else redraw();
 }
+const showRouted = (m) => applyRouted(m, { view: true });
 
 /** 방금 만든 배선 산출물을 Blob 링크로 건다 (서버에 없는 파일이다). */
 function routeDownloads(m) {
   clearDownloads("");
-  const nm = designName() || "design";
+  // 손으로 고친 배선(고정 넷이 있거나 편집 이력이 있으면)의 산출물은 -wires 로 가른다 — 배선기가 낸 그대로가 아니다
+  const rt = editor?.state?.rt;
+  const nm = (designName() || "design") + editedSuffix() + (rt && (rt.frozen.size || rt.hist.length) ? "-wires" : "");
   if (m.gds)
     addDownload(new Blob([m.gds], { type: "application/octet-stream" }),
                 nm + ".gds", "GDS (KLayout)");
   addDownload(new Blob([JSON.stringify(placementJson(), null, 1)],
                        { type: "application/json" }),
-              nm + ".place.json", "Placement (좌표·변이·반전)");
+              (designName() || "design") + editedSuffix() + ".place.json", "Placement (좌표·variant·반전)");
   if (m.geo)
     addDownload(new Blob([JSON.stringify(m.geo)], { type: "application/json" }),
                 nm + ".routed.json", "Routing 기하 (레이어별)");
@@ -1480,9 +1645,11 @@ function placeDownloads() {
   clearDownloads("");
   addDownload(new Blob([JSON.stringify(placementJson(), null, 1)],
                        { type: "application/json" }),
-              (designName() || "design") + ".place.json",
-              "Placement (좌표·변이·반전)");
+              (designName() || "design") + editedSuffix() + ".place.json",
+              "Placement (좌표·variant·반전)");
 }
+/** 편집한 배치의 산출물은 이름으로 가른다 — 배치기가 낸 것이 아니다 */
+const editedSuffix = () => (ours?.edited ? "-edited" : "");
 
 /** 내려받을 배치 JSON — 배선기에 넘기는 원점(oX, oY)과 화면 좌표(x, y, w, h)를 같이 담는다.
  *  하위 모듈까지 담는다. 계층 설계는 최상위 좌표만으로는 배선기에 못 넘긴다. */
@@ -1500,6 +1667,8 @@ function placementJson() {
     })),
     quality: { area: ours.area, hpwl: ours.hpwl, overlap: ours.overlap,
                 resid: ours.resid, offgrid: ours.offgrid, orderBad: ours.orderBad },
+    // 손으로 고친 배치면 몇 번 고쳤는지와 고정한 variant — 0 이면 배치기가 낸 그대로다
+    edited: ours.edited ?? 0, fixedVariants: ours.fixedVariants ?? null,
   };
 }
 $("routeRun").addEventListener("click", runRoute);
@@ -1516,9 +1685,12 @@ async function run() {
   try {
     const name = $("ex").value;
     const blob = await loadExample(name);
+    editor?.placed(null);
     startJob({ name, blob, batch: Number($("batch").value),
                perConfig: Number($("perConfig").value),
-               hpwlWeight: hpwlWeight(), lamRatio: lamRatio() });
+               hpwlWeight: hpwlWeight(), lamRatio: lamRatio(),
+               // 편집기에서 고정한 variant — 그대로 쓰고 나머지는 배치기가 고른다. 없으면 지금 그대로
+               fixedVariants: editor?.fixedVariants?.() ?? null });
   } catch (err) {
     busy = false; $("run").disabled = false;
     clearDownloads();
@@ -1534,6 +1706,7 @@ async function preview(name) {
   try {
     const blob = await loadExample(name);
     ours = null; frame = null; routed = null; liveRec = null; routeFail = null; hover = null;
+    editor?.placed(null);
     $("subCard").hidden = true;
     showInfo(summarize(blob));
     $("metrics").textContent = "";
@@ -1553,6 +1726,7 @@ sel.addEventListener("change", () => {
   const v = sel.value;
   if (v === "__upload__") {
     ours = null; frame = null; routed = null; liveRec = null; routeFail = null; hover = null;
+    editor?.placed(null);
     $("metrics").textContent = ""; variantRows(null);
     showInfo(summarize(blobs.get(v)));
     showBlocks(views.get(v)?.blocks);

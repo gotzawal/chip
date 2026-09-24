@@ -10,7 +10,7 @@
 
 | 걷어낸 것 | 왜 |
 |---|---|
-| `symplace/gpuplace/` 파이썬 배치기, `export-fixtures.py`, `scripts/verify.sh` | 첫 구현. JS 배치기가 변이·반전·영역·계층·WebGPU 까지 가서 그것을 넘어섰고, 파이썬 쪽은 ALIGN 의 place 출력을 읽어 좌표만 덮어쓰는 옛 경로였다. numpy·python-mip 의존이 같이 없어졌다. parity 검사의 고정값은 그대로 둔다 |
+| `symplace/gpuplace/` 파이썬 배치기, `export-fixtures.py`, `scripts/verify.sh` | 첫 구현. JS 배치기가 variant·반전·영역·계층·WebGPU 까지 가서 그것을 넘어섰고, 파이썬 쪽은 ALIGN 의 place 출력을 읽어 좌표만 덮어쓰는 옛 경로였다. numpy·python-mip 의존이 같이 없어졌다. parity 검사의 고정값은 그대로 둔다 |
 | `symplace/web/placer/fixtures/design/` (74 파일), `scripts/route/stage-design.sh` | `data/<예제>.json` 과 같은 앞단 출력을 펼쳐 둔 사본. 검사가 이제 `data/` 를 직접 읽는다 — 사이트와 검사가 같은 입력을 본다 |
 | `symplace/PLAN-route.md`, `symplace/NOTES-phase0.md` | 이미 걷어낸 두 배선 경로(Pyodide 위의 ALIGN 배선기, 독립 격자 배선기)와 타당성 스파이크의 기록. 지금 코드를 설명하지 않는다 |
 | 페이지의 Google Fonts 링크 | 페이지를 여는 데 외부 주소가 하나도 안 들게 — 시스템 글꼴 스택으로 |
@@ -41,7 +41,7 @@ py/                                                                  앞단 Pyod
 symplace/alignroute/                                                 Rust 배선기
 symplace/web/placer/{test,fixtures,pack-example.mjs,README.md}       검사·고정값·예제 묶기·설계 노트
 symplace/scripts/                                                    z3 빌드·node 하네스·분석
-symplace/PLAN-*.md                                                   설계 기록 둘
+symplace/PLAN-*.md                                                   설계 기록 셋 (배선기 이식, variant·GPU, 편집)
 ```
 
 ---
@@ -61,7 +61,7 @@ app/
   main.mjs                  상태와 이벤트 (지금 index.html 의 <script>)
   draw.mjs                  캔버스 (지금 view.mjs) — 확대/이동, 패널, 배선 레이어
   upload.mjs                회로 올리기 — .sp / 앞단 출력 JSON / 예제로 저장
-  results.mjs               지표·변이 표·DRC 표·내려받기
+  results.mjs               지표·variant 표·DRC 표·내려받기
   workers/place.mjs, route.mjs, front.mjs      (지금 worker.mjs, routeworker.mjs, frontworker.mjs)
 src/
   place/                    배치기 — linalg, subspace, energy, solver, lp, legalize, design, place, job, gpu/
@@ -79,7 +79,8 @@ native/
 tools/
   pack-example.mjs          앞단 출력 폴더 -> examples/<name>/
   place.mjs, route.mjs      페이지와 같은 배치·배선을 node 에서 (지금 scripts/route/node/)
-  analysis/                 변이 선택 분석 (지금 scripts/place/)
+  analysis/                 variant 선택 분석 (지금 scripts/place/)
+  edit/                     편집 계획의 실측 (지금 scripts/edit/)
 tests/
   run.sh                    빠른 검사 전부 (lp, parity, design, chunk, leaves, check, compose, gds) — 1 분
   run-slow.sh               place(예제 전부), variants, legalize, route(예제 전부) — 5 분
@@ -87,7 +88,8 @@ tests/
 docs/
   placer.md                 배치기 설계 노트 (지금 symplace/web/placer/README.md)
   router.md                 배선기 이식 기록 (지금 PLAN-route-align.md)
-  variants-gpu.md           변이 선택·WebGPU 기록 (지금 PLAN-place-variants-gpu.md)
+  variants-gpu.md           variant 선택·WebGPU 기록 (지금 PLAN-place-variants-gpu.md)
+  edit.md                   배치·배선 편집과 토폴로지 유지 최적화 계획 (지금 PLAN-edit.md)
 README.md                   하나 — 쓰는 법, 구성, 측정치, 예제 넣기, 의존성
 PLAN.md                     이 문서
 ```
@@ -131,8 +133,8 @@ PLAN.md                     이 문서
 
 ALIGN-public(`8d3cc2e`) 의 `examples/` 41 개 중 29 개가 들어 있다 (루트 README 의 표). 전부 배치(겹침 0,
 대칭 잔차 0)·배선·페이지 검사를 통과한다. 넣으면서 고친 것: 계층이 세 단 이상인 설계(comparator1,
-variable_gain_amplifier)의 하위 모듈을 재귀로 배선기에 넘기고, 같은 모듈을 다른 변이로 두 번 쓰는 설계
-(vco_type2_65)는 변이마다 다른 abstract 로 낸다. 저항·커패시터 잎처럼 폭이 pitch 의 배수가 아닌 블록은
+variable_gain_amplifier)의 하위 모듈을 재귀로 배선기에 넘기고, 같은 모듈을 다른 variant 로 두 번 쓰는 설계
+(vco_type2_65)는 variant 마다 다른 abstract 로 낸다. 저항·커패시터 잎처럼 폭이 pitch 의 배수가 아닌 블록은
 반전 부호에 맞는 격자 앵커를 쓴다.
 
 ### 2.2 예제 하나를 넣는 절차
@@ -156,7 +158,7 @@ variable_gain_amplifier)의 하위 모듈을 재귀로 배선기에 넘기고, �
 | five_transistor_ota_Bulk, test_vga | ALIGN 앞단 자체가 죽는다 ("number of fins must be more than 1") |
 | vco_dtype_12_hierarchical, vco_dtype_12_hierarchical_res_constrained | ALIGN 앞단이 `LVTPFET` 소자의 생성기를 못 찾는다 (`ConfigureCompiler` 와 함께 쓰일 때) |
 | sc_dc_dc_converter | `nf=832` 소자라 리프 도형이 20 MB — 저장소와 페이지에 못 싣는다. 리프 형식을 반복 구조로 압축해야 한다 |
-| powertrain_binary | 블록 63 개(배열 16 + 32 + 17), 변이 조합 1.8e11 — 배치에 10 분. 배열 계층을 한 블록으로 접는 처리가 필요하다 |
+| powertrain_binary | 블록 63 개(배열 16 + 32 + 17), variant 조합 1.8e11 — 배치에 10 분. 배열 계층을 한 블록으로 접는 처리가 필요하다 |
 | switched_capacitor_filter | `GroupCaps` 커패시터 배열: ALIGN 배치 단계의 C++ 커패시터 배치기(`cap_placer/capplacer.cpp`, 80 KB)가 공통 중심 배열을 만들고 그 안을 배선한다. 배선기 이식에 없다 |
 | telescopic_ota_guard_ring | `GuardRing`: PnR 의 `GuardRing.cpp` 20 KB (블록을 링으로 감싸고 전원에 잇는 것)가 배치기·배선기 양쪽에 없다 |
 | fixed_height | 블랙박스 GDS 입력 (`-b gdsfiles/ --scale 1e9`): 브라우저 앞단이 gdspy 를 스텁으로 막아 두었다. JS GDS 읽기와 `gds2lefjson` 이식, 페이지에 블랙박스 폴더 올리기 |
@@ -171,7 +173,7 @@ single_to_differential_converter 수백 건. 소자 자체의 문제라 우리 �
 ### 2.4 합격선
 
 - 배치: 겹침 정확히 0, 대칭 잔차 1e-9 아래, 격자 밖 블록 0, `Order` 위반 0, 면적이 블록 합계의 3 배 안쪽.
-- 배선: SHORT·OPEN 0. `DIFFERENT WIDTH` 는 소자 변이가 섞일 때 나는 것이라 건수만 기록한다.
+- 배선: SHORT·OPEN 0. `DIFFERENT WIDTH` 는 소자 variant 가 섞일 때 나는 것이라 건수만 기록한다.
 - 페이지: 예제를 고르고 배치·배선·GDS 내려받기까지 `page.mjs` 가 끝까지 간다.
 
 ### 2.5 위험
@@ -223,6 +225,7 @@ B  comparator1 의 VSS OPEN 원인 찾기; 저항 잎의 핀 격자는 앞단 JS
 C  재구성 5~7 (app/ 분리, docs, CI)
 D  2.3 의 남은 예제 — 배열 접기(powertrain_binary), 리프 압축(sc_dc_dc_converter) 부터
 E  앞단 JS 이식 1 (z3 대체) — 그다음 2·3 은 별도 계획으로
+F  배치·배선 비주얼 편집과 토폴로지 유지 최적화 — symplace/PLAN-edit.md (P0~P4, R0~R4). A 뒤 어디든 끼울 수 있다
 ```
 
 B 를 A 와 C 사이에 둔 것은 예제 절차가 새 트리에서도 그대로인지 일찍 보려는 것이다. B 에서 절차가

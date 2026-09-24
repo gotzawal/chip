@@ -19,6 +19,8 @@ import { composeModule, metalGrids, offGrid } from "./compose.mjs";
 import { topGds } from "./gds.mjs";
 import { readLeaves, unpackLeaf } from "./leaves.mjs";
 import { MOCK_PDK } from "./pdk.mjs";
+import { clone } from "./align/pnrdb.mjs";
+import { wireModel } from "../edit/wires.mjs";
 
 const rules = checkerRules(MOCK_PDK);
 const grids = metalGrids(MOCK_PDK);
@@ -74,39 +76,76 @@ export function checkModule(node, { leaves, pnrConst, outs }) {
   return { terminals: result.terminals, bbox: viewerBbox(node), errors: errorLines(result, viewerErrors) };
 }
 
+/** 고정 넷을 최상위 일감에 심는다 (편집기의 넷 고정, symplace/PLAN-edit.md 4.5 절).
+ *
+ *  DoNotRoute 에 넣어 상세 배선이 그 넷을 건너뛰게 하고, 경로의 금속·비아 사각형을 첫 블록의 내부 금속·비아로 붙인다 —
+ *  배선기는 블록 내부 금속을 전역 배선의 용량과 상세·전원 배선의 장애물로 본다. 배선 뒤에 경로를 넷에 되붙인다
+ *  (routeSession). 편법이다 — 다음에 wasm 을 빌드할 때 Job 에 obstacles 를 더해 옮긴다. 고정이 없으면 아무것도 안 한다. */
+function freezeNets(job, frozen) {
+  if (!frozen.length) return;
+  job.node.DoNotRoute = [...new Set([...(job.node.DoNotRoute ?? []), ...frozen.map((f) => f.net)])];
+  const bc = job.node.Blocks[0];
+  if (!bc) return;
+  const inst = bc.instance[bc.selectedInstance];
+  for (const f of frozen) {
+    for (const m of f.path_metal ?? []) inst.interMetals.push(clone(m.MetalRect));
+    for (const v of f.path_via ?? []) {
+      inst.interMetals.push(clone(v.UpperMetalRect), clone(v.LowerMetalRect));
+      inst.interVias.push(clone(v));
+    }
+  }
+}
+
 /**
+ * 배선 한 판을 돌리고 **세션**을 돌려준다 — 모듈마다의 hierNode 와 검사 도형. 편집기가 배선기 없이 다시 검사하거나
+ * (recheck) 넷을 고정한 채 다시 배선하려면 이것이 있어야 한다. routeDesign 은 이것의 출력만 낸다.
+ *
  * @param {object} o
  * @param {{topology, primitives}} o.design   예제 파일 또는 앞단 출력
  * @param {object} o.leaves                  리프 도형 ({format: "leaves/1", leaves} 또는 readLeaves 결과)
  * @param {object} o.placement               {bbox, instances, subModules} — 페이지의 배치
  * @param {{route(job:object): Promise<{records:Array, warnings?:string[]}>}} o.router
  *        loadAlignRouter() 결과
+ * @param {Array<{net, path_metal, path_via}>} [o.frozen]   고정할 넷 (최상위) — 그 경로 그대로, 나머지만 배선한다
  * @param {number[]|Date} [o.time]           GDS 에 적을 시각
  * @param {(text:string) => void} [o.say]    진행 (모듈마다 한 줄)
  */
-export async function routeDesign({ design, leaves, placement, router, time, say }) {
+export async function routeSession({ design, leaves, placement, router, frozen = [], time, say }) {
   const lv = leaves?.format ? readLeaves(leaves) : leaves;
   const warnings = [];
   const routeModule = async (job) => {
+    if (job.node.isTop) freezeNets(job, frozen);
     say?.(`${job.node.name} — RouteWork ${job.modes.join("·")}`);
     const r = await router.route(job);
     for (const w of r.warnings ?? []) warnings.push(`${job.node.name}: ${w}`);
     return r;
   };
   const res = await routeBottomUp({ design, leaves: lv, placement, pdk: MOCK_PDK, routeModule });
-
+  const topM = res.modules.find((m) => m.isTop);
+  if (!topM) throw new Error("최상위 모듈을 배선하지 않았다");
+  // 고정 넷의 경로를 되붙인다 — 배선기는 그 넷을 비워서 돌려준다
+  for (const f of frozen) {
+    const n = topM.node.Nets.find((q) => q.name === f.net);
+    if (n) { n.path_metal = clone(f.path_metal ?? []); n.path_via = clone(f.path_via ?? []); }
+  }
+  const session = { design, placement, lv, res, warnings, time, outs: new Map(), outputs: new Map(), top: null,
+                    frozen: frozen.map((f) => f.net), orig: new Map() };
   // _generate_json — results_name_map 의 차례(배선한 차례)로. 하위 모듈이 먼저라 부모가 그 결과를 읽는다.
-  const outs = new Map(), outputs = new Map();
-  let top = null;
   for (const m of res.modules) {
     const variant = `${m.name}_${m.sel}`;
-    const c = checkModule(m.node, { leaves: lv, pnrConst: res.prep.pnrConst, outs });
-    outs.set(variant, c.terminals);
-    outputs.set(variant, c);
-    if (m.isTop) top = { m, c };
+    const c = checkModule(m.node, { leaves: lv, pnrConst: res.prep.pnrConst, outs: session.outs });
+    session.outs.set(variant, c.terminals);
+    session.outputs.set(variant, c);
+    if (m.isTop) session.top = { m, c, variant };
   }
-  if (!top) throw new Error("최상위 모듈을 배선하지 않았다");
+  // 넷마다 배선기가 낸(또는 고정한) 경로 — 편집을 "원래대로" 되돌릴 때 쓴다
+  for (const n of topM.node.Nets) session.orig.set(n.name, { path_metal: clone(n.path_metal), path_via: clone(n.path_via) });
+  return session;
+}
 
+/** 세션의 지금 상태 -> 페이지가 받는 출력 (geo, gds, errors, wires ...) */
+export function sessionOutput(session) {
+  const { res, outputs, top, warnings, time } = session;
   // ALIGN 이 쓰는 3_pnr/<모듈>_<j>.errors 를 파일 이름 순으로 이은 것
   const errors = [...outputs.keys()].sort((a, b) => ((a + ".errors") < (b + ".errors") ? -1 : 1))
     .flatMap((v) => outputs.get(v).errors);
@@ -121,12 +160,38 @@ export async function routeDesign({ design, leaves, placement, router, time, say
       modules: res.modules.length, nets: top.m.node.Nets.length,
       routerMs: records.reduce((s, r) => s + (r.ms ?? 0), 0),
     },
+    // 편집기의 넷 모델 (최상위, PnRDB 단위) 과 고정 넷
+    wires: wireModel(top.m.node), frozen: session.frozen.slice(),
   };
+}
+
+/**
+ * 편집한 넷의 경로를 최상위 노드에 넣고 **배선기 없이** 다시 검사한다 — 도형 합성, DRC/LVS, GDS.
+ * edits: [{ net, path_metal, path_via }] 또는 { net, restore: true } (배선기가 낸 경로로). 비어 있으면 그대로 다시 검사.
+ */
+export function recheck(session, edits = []) {
+  const node = session.top.m.node;
+  for (const e of edits) {
+    const n = node.Nets.find((q) => q.name === e.net);
+    if (!n) throw new Error(`넷이 없다: ${e.net}`);
+    const src = e.restore ? session.orig.get(e.net) : e;
+    n.path_metal = clone(src.path_metal ?? []); n.path_via = clone(src.path_via ?? []);
+  }
+  const c = checkModule(node, { leaves: session.lv, pnrConst: session.res.prep.pnrConst, outs: session.outs });
+  session.outs.set(session.top.variant, c.terminals);
+  session.outputs.set(session.top.variant, c);
+  session.top.c = c;
+  return sessionOutput(session);
+}
+
+/** 배선 한 판 — 세션 없이 출력만 (지금까지의 입구, 그대로) */
+export async function routeDesign(args) {
+  return sessionOutput(await routeSession(args));
 }
 
 /** 페이지로 보낼 메시지 (워커든 메인 스레드든 같은 모양). gds 는 ArrayBuffer — 워커는 옮겨 보낸다. */
 export function routeMessage(out, secs) {
   return { type: "route", ok: true, name: out.name, secs, gds: out.gds.buffer, gdsName: out.name + ".gds",
            errors: out.errors, nerrors: out.errors.length, geo: out.geo, stats: out.stats,
-           warnings: out.warnings };
+           warnings: out.warnings, wires: out.wires, frozen: out.frozen };
 }

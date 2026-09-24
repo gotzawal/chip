@@ -8,7 +8,7 @@
  *  ALIGN 배치기는 ILP 솔버가 필요해 브라우저에 못 싣는다. 즉 "넷리스트를 주면
  *  브라우저가 배치한다"가 성립하지 않았다.
  *
- *  더 중요한 건 그 파일이 **변이 선택의 답까지** 담고 있었다는 것이다.
+ *  더 중요한 건 그 파일이 **variant 선택의 답까지** 담고 있었다는 것이다.
  *  2_primitives 는 같은 소자를 여러 종횡비로 만들어 둔다:
  *
  *      CMC_PMOS_51983143   X1_Y2    800 x 3528   (1열 2행, 홀쭉)
@@ -20,7 +20,7 @@
  *  배선길이가 전부 따라 바뀐다. ALIGN 은 그걸 SA 탐색 안에서 같이 골랐다
  *  (sp.selected[block_id]). 우리는 그 답을 받아 쓰고 있었을 뿐이다.
  *
- *  이 파일은 그 의존을 끊는다. 앞단 출력만 읽고, 변이는 **고르지 않고 남겨둔다**.
+ *  이 파일은 그 의존을 끊는다. 앞단 출력만 읽고, variant 는 **고르지 않고 남겨둔다**.
  *  고르는 일은 solver.mjs 의 multiStartVariants 가 다중 시작점과 함께 한다.
  *
  *  ## 단위 (실측 확인)
@@ -114,7 +114,7 @@ export function templateInfo(tjson) {
     }
   }
   // 넷마다 [중심 오프셋 x, y, 반폭 x, y]. 반폭은 ALIGN 의 HPWL_extend 가 재는
-  // 핀 경계 사각형이다 — 폭 5,000 짜리 핀 막대를 점으로 보면 길쭉한 변이가
+  // 핀 경계 사각형이다 — 폭 5,000 짜리 핀 막대를 점으로 보면 길쭉한 variant 가
   // 공짜로 보인다 (energy.mjs wirelength 의 설명).
   const pins = new Map();
   for (const [net, r] of acc)
@@ -196,10 +196,10 @@ export function moduleOrder(topology) {
   return out;
 }
 
-/** 변이를 고를 **단위**를 정한다.
+/** variant 를 고를 **단위**를 정한다.
  *
  *  블록 하나가 단위인 게 기본이지만, SymmetricBlocks 의 2 원소 쌍은 서로
- *  거울상이라 **같은 변이**를 써야 한다. 모양이 다르면 거울이 아니다.
+ *  거울상이라 **같은 variant**를 써야 한다. 모양이 다르면 거울이 아니다.
  *  그래서 그런 쌍은 한 그룹으로 묶는다. 홑원소(자기대칭)는 자유다.
  *
  *  반환: [{ members:[인스턴스 번호...], abstract, choices:[concrete 이름...] }]
@@ -230,7 +230,7 @@ export function variantGroups(design) {
 
   const out = [];
   for (const g of groups.values()) {
-    // 한 그룹 안의 인스턴스는 같은 abstract 여야 같은 변이를 공유할 수 있다.
+    // 한 그룹 안의 인스턴스는 같은 abstract 여야 같은 variant 를 공유할 수 있다.
     const abs = new Set(g.members.map((i) => design.instances[i].abstract));
     if (abs.size !== 1) {
       // 서로 다른 abstract 가 대칭 쌍으로 묶인 경우(있을 수 있다) — 각자 고른다.
@@ -266,6 +266,23 @@ export function* enumerateAssignments(groups) {
 
 export function sampleAssignment(groups, rand) {
   return groups.map((g) => Math.floor(rand() * Math.max(1, g.choices.length)));
+}
+
+/** 사용자가 고정한 variant 를 그룹에 박는다 — 그 그룹의 후보를 그것 하나로 줄인다.
+ *
+ *  fixed = { 인스턴스 이름: concrete }. 편집기의 "variant 고정" 이 만들고, 배치기(placeDesign 의 fixedVariants)와
+ *  편집기의 variant 다시 고르기가 같이 쓴다. 후보에 없는 이름은 무시한다 (예: 다른 모듈의 인스턴스). 거울 쌍은
+ *  한 그룹이라 한쪽만 고정해도 둘 다 그 variant 다. 고정이 없으면 그룹을 그대로 돌려준다 — 배치기 길은 안 바뀐다.
+ */
+export function restrictGroups(groups, fixed, design) {
+  if (!fixed || !Object.keys(fixed).length) return groups;
+  return groups.map((g) => {
+    for (const m of g.members) {
+      const c = fixed[design.instances[m].name];
+      if (c && g.choices.includes(c)) return { ...g, choices: [c], fixed: true };
+    }
+    return g;
+  });
 }
 
 /** 배정 하나를 실제 배치 문제로 편다.
@@ -440,7 +457,7 @@ export function structuralBound(problem) {
   return [bw, bh];
 }
 
-/** 영역 후보들. 변이 배정마다 블록 크기가 달라지므로 영역도 같이 달라진다.
+/** 영역 후보들. variant 배정마다 블록 크기가 달라지므로 영역도 같이 달라진다.
  *
  *  면적은 (블록 합계 면적 x slack) 이상으로 맞추고 **종횡비만** 바꿔 후보를 낸다.
  *
@@ -506,7 +523,7 @@ export function regionCandidates(problem, { slack = 1.25, aspects = null,
 /** 문제 + 영역 -> 최적화 목적함수. subspace 와 Objective 를 엮는 자리다.
  *
  *  대칭 계 A z = b 는 **블록 크기에 의존한다** (Align 의 모서리 정렬이 w/2, h/2 를
- *  쓴다). 그래서 변이가 바뀌면 z0 와 N 도 다시 만들어야 한다. 배정마다
+ *  쓴다). 그래서 variant 가 바뀌면 z0 와 N 도 다시 만들어야 한다. 배정마다
  *  이 함수를 새로 부르는 이유다.
  */
 export function makeObjective(problem, region, { M = 48 } = {}) {
@@ -528,7 +545,7 @@ export function makeObjective(problem, region, { M = 48 } = {}) {
  *
  *  블록은 자기 중심에 대해 x / y 로 뒤집힐 수 있다 (transformation 의 sX, sY).
  *  크기는 안 변하고 **핀 위치만** 바뀌므로, 영공간도 밀도도 면적도 그대로고
- *  배선길이만 달라진다. 변이와 같은 종류의 이산 선택인데 훨씬 싸다.
+ *  배선길이만 달라진다. variant 와 같은 종류의 이산 선택인데 훨씬 싸다.
  *
  *  ALIGN 의 telescopic_ota 결과를 보면 sX 는 전부 +1 인데 sY 는 PMOS 두 개가
  *  -1 이다. 우연이 아니다 — 세로축 대칭 아래서는 x 반전이 제약에 묶인다:

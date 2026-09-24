@@ -304,9 +304,9 @@ export function placementVerilog(verilogD, placement, leaves, top) {
   // 모듈까지 **따라 내려가며** 등록한다 (계층이 세 단 이상인 comparator1 의 INVERTER_1, NAND_1 ...).
   // abstract 는 전원 포트를 걷어낸 사본 이름(<이름>_PG<i>)이라 모듈 항목의 인스턴스에서 읽어야 하고,
   // 같은 우리 concrete 가 다른 사본에서 쓰일 수 있어 열쇠는 (abstract, concrete) 다.
-  // 같은 모듈을 **다른 모양(변이)** 으로 두 번 쓰면 (vco_type2_65 의 THREE_TERMINAL_INV__v0 / __v2) 각각을
+  // 같은 모듈을 **다른 모양(variant)** 으로 두 번 쓰면 (vco_type2_65 의 THREE_TERMINAL_INV__v0 / __v2) 각각을
   // 다른 abstract (<이름>, <이름>_V1, ...) 로 낸다. PnRDB 는 abstract 마다 노드 하나를 두고 리프 인스턴스의
-  // abstract 를 고른 concrete 로 바꾸므로, 한 abstract 의 두 배치가 리프 변이를 다르게 고르면 뒤엣것이 앞엣것을 덮는다.
+  // abstract 를 고른 concrete 로 바꾸므로, 한 abstract 의 두 배치가 리프 variant 를 다르게 고르면 뒤엣것이 앞엣것을 덮는다.
   const key = (ab, concrete) => `${ab}|${concrete}`;
   const subName = new Map(), subAbstract = new Map(), subConcrete = new Map(), aliases = {};
   const smByConcrete = new Map((placement.subModules ?? []).map((sm) => [sm.concrete, sm]));
@@ -478,7 +478,7 @@ export function prepRoute({ design, leaves, placement, pdk, inputDir = null }) {
   const lef = topLef(collateral, leaves, pdk);
   const map = mapText(design.primitives ?? {});
   const spv = placementVerilog(verilog, placement, leaves, top);
-  // 변이별로 갈라 낸 모듈(<이름>_V1 ...)은 원래 모듈의 제약을 그대로 쓴다.
+  // variant 별로 갈라 낸 모듈(<이름>_V1 ...)은 원래 모듈의 제약을 그대로 쓴다.
   for (const [abV, ab] of Object.entries(spv.aliases ?? {})) pnrConst[abV] = clone(pnrConst[ab]);
   delete spv.aliases;
   connectivityChangeForPartialRouting(spv, design.primitives);
