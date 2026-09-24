@@ -19,10 +19,11 @@ import { readDesign, topIndex, moduleOrder, variantGroups,
 import { placeHierarchy, symmetryResidual, orderViolations,
          spreadShapes, SUB_VARIANTS, axes } from "./place.mjs";
 import { createGpuRunner } from "./gpu/runner.mjs";
+import { editKit, rebuild, centers, retryVariants } from "./edit/place.mjs";
 
 export async function runJob(data, post) {
   const { name, blob, batch, grid = [80, 84],
-          hpwlWeight, lamRatio, gpu = true, perConfig = 32 } = data;
+          hpwlWeight, lamRatio, gpu = true, perConfig = 32, fixedVariants = null } = data;
   try {
     // WebGPU 가 있으면 연속 단계(Adam)를 거기서 돈다 — 시작점을 설정마다 perConfig 개.
     // 없으면 CPU 로, 총 시작점 batch 개 (예전과 같다). 어느 쪽인지 화면에 알린다.
@@ -49,6 +50,8 @@ export async function runJob(data, post) {
       ...(runner ? { runner, perConfig } : {}),
       ...(hpwlWeight ? { hpwlWeight } : {}),
       ...(lamRatio ? { lamRatio } : {}),
+      // 편집기에서 고정한 변이 — 최상위 인스턴스의 것만 (placeHierarchy 가 하위에는 안 준다)
+      ...(fixedVariants && Object.keys(fixedVariants).length ? { fixedVariants } : {}),
       onProgress: (done, total, cand, phase) => {
         seen++;
         // 후보 하나마다 오는 것은 8 개에 한 번만. GPU 조각(cand 없음)과 legalize 진행은 그대로.
@@ -154,10 +157,36 @@ export async function runJob(data, post) {
       legalFailBy: top.legalizeFailBy, legalRescued: top.legalizeRescued,
       hpwlBeforeFlip: top.hpwlBeforeFlip,
       subs, subModules,
+      // 편집 키트 — 페이지가 이 배치의 문제(영공간·변이 후보·반전 자유도)를 다시 짓는 데 필요한 것 (src/edit/place.mjs)
+      edit: editKit(r, grid), fixedVariants,
       secs: (performance.now() - t0) / 1000,
     });
   } catch (err) {
     // 첫 줄이 메시지다 — Safari·Firefox 의 stack 에는 메시지 없이 자리만 있다
+    post({ type: "error", msg: `${err?.message ?? err}\n${err?.stack ?? ""}`.slice(0, 1200) });
+  }
+}
+
+/** 편집 — 위상을 유지한 채 변이를 다시 고른다 (페이지의 "위상 유지 최적화"). 워커에서도 메인 스레드에서도 같다.
+ *
+ *  받는 것: { kind: "retry", blob, kit, rects, fixed, compact, hpwlWeight, cap }
+ *    blob 은 {topology, primitives, templates}, kit 은 done 의 edit, rects 는 지금 좌표(done 과 같은 모양),
+ *    fixed 는 사용자가 고정한 변이 { 인스턴스: concrete }.
+ *  보내는 것: {type:"progress"} 몇 번, 그 다음 {type:"retry", ranking, current, total, tried, ms} —
+ *    ranking 의 out 이 done 과 같은 모양의 rects·bbox·axes·지표라 그대로 덮어쓸 수 있다.
+ */
+export function runEdit(data, post) {
+  const t0 = performance.now();
+  try {
+    const { blob, kit, rects, fixed = null, compact = 0.5, hpwlWeight = 1, cap = 128 } = data;
+    const model = rebuild(blob, kit, rects);
+    const { cx, cy } = centers(model);
+    const r = retryVariants(model, cx, cy, model.sx, model.sy, {
+      fixed, cap, hpwlWeight, compact,
+      onProgress: (done, total) => { if (done % 4 === 0 || done === total) post({ type: "progress", done, total, phase: "변이", t: (performance.now() - t0) / 1000 }); },
+    });
+    post({ type: "retry", ranking: r.ranking, current: r.current, total: r.total, tried: r.tried, ms: r.ms });
+  } catch (err) {
     post({ type: "error", msg: `${err?.message ?? err}\n${err?.stack ?? ""}`.slice(0, 1200) });
   }
 }

@@ -268,6 +268,23 @@ export function sampleAssignment(groups, rand) {
   return groups.map((g) => Math.floor(rand() * Math.max(1, g.choices.length)));
 }
 
+/** 사용자가 고정한 변이를 그룹에 박는다 — 그 그룹의 후보를 그것 하나로 줄인다.
+ *
+ *  fixed = { 인스턴스 이름: concrete }. 편집기의 "변이 고정" 이 만들고, 배치기(placeDesign 의 fixedVariants)와
+ *  편집기의 변이 다시 고르기가 같이 쓴다. 후보에 없는 이름은 무시한다 (예: 다른 모듈의 인스턴스). 거울 쌍은
+ *  한 그룹이라 한쪽만 고정해도 둘 다 그 변이다. 고정이 없으면 그룹을 그대로 돌려준다 — 배치기 길은 안 바뀐다.
+ */
+export function restrictGroups(groups, fixed, design) {
+  if (!fixed || !Object.keys(fixed).length) return groups;
+  return groups.map((g) => {
+    for (const m of g.members) {
+      const c = fixed[design.instances[m].name];
+      if (c && g.choices.includes(c)) return { ...g, choices: [c], fixed: true };
+    }
+    return g;
+  });
+}
+
 /** 배정 하나를 실제 배치 문제로 편다.
  *
  *  flips 를 주면 인스턴스별 [sx, sy] 를 쓴다 (거울 반전). 크기는 안 변하고

@@ -20,7 +20,7 @@
  *  실패율 자체는 진단용으로 같이 돌려준다.
  */
 import { readDesign, variantGroups, flipPlan, moduleOrder,
-         orderDirections, blockSpacing } from "./design.mjs";
+         orderDirections, blockSpacing, restrictGroups } from "./design.mjs";
 import { multiStartVariants, refineFlips, exactArea, hpwl, scoreOf } from "./solver.mjs";
 import { legalize, exactOverlap, refineDirections } from "./legalize.mjs";
 
@@ -57,13 +57,16 @@ export async function placeDesign(input, {
   onConfig = null,
   // WebGPU runner (src/gpu/runner.mjs) 와 설정당 시작점 수. 없으면 CPU, 총 batch 개.
   runner = null, perConfig = null,
+  // 사용자가 고정한 변이 { 인스턴스 이름: concrete } — 편집기에서 온다. 그 그룹은 그 변이만 본다 (restrictGroups).
+  // 없으면 지금 그대로다.
+  fixedVariants = null,
 } = {}) {
   const t0 = performance.now();
   const design = input.design ?? readDesign(input);
   if (design.missing?.length)
     return { ok: false, reason: `템플릿을 못 찾은 인스턴스: ${design.missing.join(", ")}`,
              design };
-  const groups = variantGroups(design);
+  const groups = restrictGroups(variantGroups(design), fixedVariants, design);
   const res = await multiStartVariants(design, groups, {
     batch, iters, seed, M, slack, aspects, maxConfigs,
     // 후보를 고르는 저울과 legalize 뒤 저울을 같게 둔다.
@@ -497,6 +500,7 @@ export async function placeHierarchy({ topology, primitives, templates }, opts =
                reason: `템플릿을 못 찾은 인스턴스: ${design.missing.join(", ")}` };
     const isTop = name === order[order.length - 1];
     const opt = isTop || !subBatch ? { ...rest } : { ...rest, batch: subBatch };
+    if (!isTop) delete opt.fixedVariants;                 // 고정 변이는 최상위 인스턴스의 것이다
     // 중간 과정 콜백에 모듈 이름을 얹는다 (계층이면 어느 층인지 알아야 한다)
     if (rest.onConfig)
       opt.onConfig = (i, total, best, phase) =>
