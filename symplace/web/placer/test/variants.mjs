@@ -1,7 +1,7 @@
-/** 변이 선택이 **실제로 결과를 가르는가**를 본다.
+/** variant 선택이 **실제로 결과를 가르는가**를 본다.
  *
  *  test/place.mjs 가 "고른 답이 좋은가"를 본다면, 이쪽은 그 앞 질문을 본다:
- *  배정을 바꾸면 결과가 달라지긴 하는가? 안 달라지면 변이 선택은 애초에
+ *  배정을 바꾸면 결과가 달라지긴 하는가? 안 달라지면 variant 선택은 애초에
  *  할 이유가 없는 일이다.
  *
  *  그래서 배정을 전수로 돌리고 배정별 최고를 늘어놓는다. 점수 폭이 0 이 아니어야 한다.
@@ -27,11 +27,11 @@ for (const ex of exampleNames()) {
 
   const groups = variantGroups(design);
   const nAssign = countAssignments(groups);
-  if (nAssign < 2) { console.log("  변이 조합이 하나뿐 — 생략"); continue; }
+  if (nAssign < 2) { console.log("  variant 조합이 하나뿐 — 생략"); continue; }
 
   const t0 = Date.now();
   const res = await multiStartVariants(design, groups, { batch: BATCH, iters: ITERS, seed: 1 });
-  console.log(`  변이조합 ${nAssign}, 설정(배정x영역) ${res.configs}, ` +
+  console.log(`  variant 조합 ${nAssign}, 설정(배정x영역) ${res.configs}, ` +
               `후보 ${res.candidates.length}개, ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
   // 배정마다 legalize 까지 간 최선을 잡는다. 연속단계 점수로만 줄 세우면
@@ -77,8 +77,8 @@ for (const ex of exampleNames()) {
   }
   if (skipped) console.log(`      ... ${skipped} 개 생략 ...`);
   const spread = ranked[ranked.length - 1][1].sc - ranked[0][1].sc;
-  console.log(`  점수 폭 ${spread.toFixed(4)}   (0 이면 변이 선택이 무의미하다는 뜻)`);
-  ok(spread > 1e-6, "배정이 달라도 점수가 같다 — 변이 선택이 무의미해진다");
+  console.log(`  점수 폭 ${spread.toFixed(4)}   (0 이면 variant 선택이 무의미하다는 뜻)`);
+  ok(spread > 1e-6, "배정이 달라도 점수가 같다 — variant 선택이 무의미해진다");
 
   const win = ranked[0][1];
   console.log(`  고른 배정 [${ranked[0][0]}]  ${win.c.concrete.join(" ")}`);

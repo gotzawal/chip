@@ -1,7 +1,7 @@
 /** 스파이크 (symplace/PLAN-edit.md 3.1·3.5 절의 실측).
  *  (1) 계층 설계에서 페이지가 워커의 done 메시지 + 편집 키트만으로 최상위 문제를 다시 지으면 배치기 안의 문제와
  *      같은가 (크기·핀).
- *  (2) 위상(분리 방향)을 유지한 채 변이 배정을 전수로 바꿔 정리하면 점수가 좋아지는 배정이 있는가.
+ *  (2) 위상(분리 방향)을 유지한 채 variant 배정을 전수로 바꿔 정리하면 점수가 좋아지는 배정이 있는가.
  *
  *  src/edit/place.mjs 의 editKit / rebuild / retryVariants 를 그대로 부른다 — 페이지의 편집기와 같은 코드다.
  *
@@ -35,7 +35,7 @@ for (let p = 0; p < Math.min(P.pinOff.length, P0.pinOff.length); p++) dp = Math.
 const same = P.names.join() === P0.names.join() && P.n === P0.n && P.pinInst.length === P0.pinInst.length;
 console.log(`(1) 키트로 다시 지은 문제: 이름·수 같음 ${same}  크기 차 ${dw}  핀 오프셋 차 ${dp}  핀 ${P.pinInst.length}/${P0.pinInst.length}  키트 템플릿 ${Object.keys(kit.subTemplates).length} 개 (${JSON.stringify(kit).length} 바이트)`);
 
-// --- (2) 위상 유지 변이 재선택 ---
+// --- (2) 위상 유지 variant 재선택 ---
 const { cx, cy } = centers(model);
 const base = toRects(model, cx, cy, model.sx, model.sy);
 const rv = retryVariants(model, cx, cy, model.sx, model.sy, { cap: 128 });

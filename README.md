@@ -55,7 +55,7 @@ edit.mjs          편집기 — 보기/편집 토글로 켜는 배치·배선 �
 src/job.mjs       배치 한 판 (워커에서도, 메인 스레드에서도 같은 코드가 돈다)
 src/*.mjs         배치기 본체 (의존성 없는 ES 모듈)
 src/gpu/runner.mjs  연속 단계(Adam)를 WebGPU 컴퓨트 셰이더로 — 있으면 쓰고, 없으면 CPU
-src/edit/         편집의 셈 — place.mjs (편집 키트로 문제 다시 짓기, 제약을 따르는 끌기, 위상 유지 정리, 변이 다시),
+src/edit/         편집의 셈 — place.mjs (편집 키트로 문제 다시 짓기, 제약을 따르는 끌기, 위상 유지 정리, variant 다시),
                   wires.mjs (넷의 조각 그래프, 옮길 범위, 되펴기), compact.mjs (정돈)
 src/route/        배선 — ALIGN 배선 알고리즘의 이식: 입력·PnRDB(align/), Rust 배선기(alignroute.wasm),
                   도형 합성, DRC/LVS, GDS
@@ -72,13 +72,14 @@ symplace/         소스·검사·도구 — Rust 배선기(alignroute/), node �
 
 1. **회로를 올리거나** (`.sp` 넷리스트) **예제를 고른다.** 제목 아래 "개념 설명" 을 펼치면 이 도구가 하는 일이
    적혀 있다.
-2. **Placement 실행** — 변이·반전·영역·격자를 배치기가 직접 고른다. 끝나면 배치 JSON 을 바로 받을 수 있다.
+2. **Placement 실행** — variant·반전·영역·격자를 배치기가 직접 고른다. 끝나면 배치 JSON 을 바로 받을 수 있다.
    시작점 예산과 저울 둘, WebGPU 의 설정당 시작점은 "상세 placement 설정" 에 접혀 있다 — 기본값으로도 된다.
 3. **Routing 실행** — 이 탭이 배선한다. ALIGN 의 배선 알고리즘을 그대로 옮긴 것이다: 배선기에
    넘기는 자료와 계층 부기는 JS, 전역·상세·전원 배선은 Rust(wasm), 도형 합성·DRC/LVS·GDS 는
    JS. 결과는 `Routing` 보기에 그려지고, 아래 내려받기 칸이 그 자리에서 채워진다.
 4. **편집 (선택)** — 캔버스 제목 줄의 **보기 / 편집** 토글. Placement·Routing 보기에서 손으로 고치고, 고친 위상 안에서
-   다시 최적화한다 (아래 "편집" 절). 편집하지 않으면 전부 위와 같다 — 배치기·배선기가 다 고르고, 결과와 파일도 같다.
+   다시 최적화한다 (아래 "편집" 절). 편집을 켜면 편집 카드가 캔버스 바로 옆(결과 카드 자리)에 오고 나머지 카드는 접힌다
+   (카드 제목을 클릭하면 언제든 접고 편다). 편집하지 않으면 전부 위와 같다 — 배치기·배선기가 다 고르고, 결과와 파일도 같다.
 
 그림은 흐름 순서대로 넷이다 — `Schematic` / `Primitives` / `Placement` / `Routing`. 휠로 확대, 끌어서 이동,
 더블클릭으로 초기화. Routing 보기에서는 금속·비아·소자층·웰을 묶음으로 껐다 켤 수 있다.
@@ -88,7 +89,7 @@ symplace/         소스·검사·도구 — Rust 배선기(alignroute/), node �
 - **Primitives** — 앞단(1_topology + 2_primitives)이 소자를 묶은 결과, 곧 **배치기가 놓는 블록**이다. 차동쌍·전류
   거울 같은 잎 묶음은 색 상자로, GroupBlocks 나 서브서킷으로 만든 모듈은 점선 상자로 감싸고,
   SymmetricBlocks 제약의 거울 쌍은 대칭축 양쪽에 거울로 놓는다. 스택·병렬로 합쳐진 소자는 하나로
-  보인다 (`stack 2`, `m=4`). 그림 아래 표가 블록마다 종류·소자·변이 후보(2_primitives 의 크기)·제약을 적는다.
+  보인다 (`stack 2`, `m=4`). 그림 아래 표가 블록마다 종류·소자·variant 후보(2_primitives 의 크기)·제약을 적는다.
 
 Schematic·Primitives 모듈(`src/schematic/`)은 페이지가 **따로, 필요할 때** 받는다 — 못 받아도 예제 목록과
 배치·배선은 그대로 돈다. 빌드가 없는 정적 사이트라 브라우저가 옛 모듈을 캐시에 쥔 채 새 `index.html` 만 받는 일이 있는데,
@@ -127,9 +128,9 @@ Schematic·Primitives 모듈(`src/schematic/`)은 페이지가 **따로, 필요�
 | Z / Y | 되돌리기 / 다시 실행 |
 | Esc | 고르기 해제 |
 
-카드의 **변이** 드롭다운으로 블록의 변이(같은 소자의 다른 종횡비)를 고르면 그 블록(거울 짝까지)의 변이가 **고정**된다.
-그 뒤 Placement 를 다시 실행해도 고정한 변이는 그대로 두고 나머지를 배치기가 고른다. 고정을 풀면 다시 배치기가 고른다.
-**변이 다시** 는 위상(쌍 관계)을 그대로 둔 채 고정하지 않은 블록의 변이 배정을 전수로 돌려 (128 개까지, 배치 워커에서)
+카드의 **variant** 드롭다운으로 블록의 variant(같은 소자의 다른 종횡비)를 고르면 그 블록(거울 짝까지)의 variant 가 **고정**된다.
+그 뒤 Placement 를 다시 실행해도 고정한 variant 는 그대로 두고 나머지를 배치기가 고른다. 고정을 풀면 다시 배치기가 고른다.
+**variant 다시** 는 위상(쌍 관계)을 그대로 둔 채 고정하지 않은 블록의 variant 배정을 전수로 돌려 (128 개까지, 배치 워커에서)
 `log(면적) + w·log(HPWL)` 로 줄 세우고 1 위를 적용한다 — high_speed_comparator 가 6080x11760 에서 6080x10584 로
 (ALIGN 이 낸 bbox) 간다. **반전 다시** 는 반전만 다시 고르고, **원래대로** 는 배치기 결과로 되돌린다.
 
@@ -153,7 +154,7 @@ Schematic·Primitives 모듈(`src/schematic/`)은 페이지가 **따로, 필요�
 카드에 **고정 넷 빼고 다시 배선** 과 **원래 배선으로** 가 더 있다. 배선기 결과는 대개 이미 최단이라 정돈은 "이미
 짧습니다" 라 하고, 옮겨서 우회를 만든 뒤에 쓸모가 있다. 편집한 배선의 내려받기(GDS·배선 JSON)에는 `-wires` 가 붙는다.
 
-한계: 편집은 최상위 모듈만이다 (하위 모듈은 블록으로 옮기고 뒤집고 변이를 바꾼다). 전원 넷은 옮길 수 없다. 넷을 고정하고
+한계: 편집은 최상위 모듈만이다 (하위 모듈은 블록으로 옮기고 뒤집고 variant 를 바꾼다). 전원 넷은 옮길 수 없다. 넷을 고정하고
 다시 배선한 결과는 ALIGN 의 것과 같지 않다 — 편집이 없으면 같다.
 
 ## 회로 올리기
@@ -164,7 +165,7 @@ Schematic·Primitives 모듈(`src/schematic/`)은 페이지가 **따로, 필요�
 ```
 .sp 넷리스트
   -> 앞단  1_topology + 2_primitives   Pyodide 에서 0.7 ~ 9 s
-  -> 배치  변이·반전·영역·격자          JS 에서 3 ~ 60 s (WebGPU 가 있으면 시작점을 더 준다)
+  -> 배치  variant·반전·영역·격자          JS 에서 3 ~ 60 s (WebGPU 가 있으면 시작점을 더 준다)
   -> 배선  ALIGN 배선 알고리즘의 이식   JS + Rust wasm (전역·상세·전원 배선, 검사, GDS)  0.1 ~ 1 s
   -> GDS + DRC/LVS
 ```
@@ -207,9 +208,9 @@ inverter_v1/v2/v3, common_source, block_spacing_bug, five_transistor_ota_high_fr
 ## 배치 결과 (CPU, 시작점 96, 무게 1, node 단일 스레드)
 
 `node symplace/web/placer/test/place.mjs` 가 찍는 값이다. HPWL 은 **핀 경계 사각형**으로 잰다
-(아래 "변이 선택"). 겹침은 전부 정확히 0, 대칭 잔차는 1e-12 이하, 격자 밖 블록 0 이다.
+(아래 "variant 선택"). 겹침은 전부 정확히 0, 대칭 잔차는 1e-12 이하, 격자 밖 블록 0 이다.
 
-| 예제 | 블록 | 변이 조합 | bbox | 채움 | HPWL | 시간 |
+| 예제 | 블록 | variant 조합 | bbox | 채움 | HPWL | 시간 |
 |---|---|---|---|---|---|---|
 | telescopic_ota | 5 | 8 | 1440×11760 | 0.87 | 15916 | 4 s |
 | current_mirror_ota | 5 | 2 | 8800×2352 | 1.00 | 18156 | 4 s |
@@ -227,7 +228,7 @@ calibrate 가 lam·mu 를 기울기 비로 잡으므로 궤적이 같다. `test/
 calibrate 한 번의 W·D·B·lam·mu 가 CPU(f64) 와 상대오차 1e-5~1e-7, 600 스텝 뒤 최선
 점수가 소수 넷째 자리까지 같고, 40 스텝씩 끊어 돌린 것이 비트까지 같다.
 
-GPU 일 때 예산의 뜻이 바뀐다. 총 시작점이 아니라 **설정(변이 배정 x 영역)마다
+GPU 일 때 예산의 뜻이 바뀐다. 총 시작점이 아니라 **설정(variant 배정 x 영역)마다
 "GPU 시작점/설정"** 개다 (기본 32). CPU 의 시작점 96 은 설정당 1~4 개라 배정 하나의
 점수가 표본 서너 개로 정해져 순위가 잡음 안에 있었다. legalize·반전·정확한 면적은
 CPU(f64) 에 남는다. 어댑터가 없으면 CPU 로 조용히 떨어지고 화면에 CPU 라고 적는다.
@@ -238,7 +239,7 @@ CPU 는 시작점 180 개에 6.5 s). 실제 GPU 에서의 시간은 아직 재�
 
 ## 예산은 **라운드로** 쓴다
 
-"시작점" 은 총 시작점 수다. 설정(= 변이 배정 x 영역 후보) 수가 하한이고,
+"시작점" 은 총 시작점 수다. 설정(= variant 배정 x 영역 후보) 수가 하한이고,
 남는 예산은 **잘 되는 설정에 더 준다**.
 
 ```
@@ -249,7 +250,7 @@ CPU 는 시작점 180 개에 6.5 s). 실제 GPU 에서의 시간은 아직 재�
 
 전에는 `설정마다 floor(예산/설정수) 개` 를 똑같이 흩뿌리고 끝이었다.
 설정이 예산보다 많으면 그 몫이 1 로 깔려서 (1) 예산 설정이 아무 일도 안 하고
-(2) 예산을 늘려도 **깊이가 안 깊어졌다.** 변이 조합은 128 개까지 전수로 보고
+(2) 예산을 늘려도 **깊이가 안 깊어졌다.** variant 조합은 128 개까지 전수로 보고
 (WebGPU 면 512), 그보다 많으면 추첨한다.
 
 ## 저울 두 개 — 둘 다 연속으로 돌린다
@@ -294,11 +295,11 @@ lamRatio   0.25    0.5     1       2       4
 연속 겹침  0.216   0.189   0.160   0.140   0.111
 ```
 
-반면 최종 면적/HPWL 은 **단조롭지 않다.** 저울이 탐색을 옮기면 이기는 **이산 변이**가
+반면 최종 면적/HPWL 은 **단조롭지 않다.** 저울이 탐색을 옮기면 이기는 **이산 variant**가
 바뀌고, 그 차이가 저울 차이보다 크기 때문이다. 그래서 화면에도 연속 단계
 겹침 중앙값을 같이 띄운다 — 슬라이더가 실제로 무엇을 했는지 보는 눈금이다.
 
-## 변이 선택 — 핀은 점이 아니라 사각형이다
+## variant 선택 — 핀은 점이 아니라 사각형이다
 
 `2_primitives` 는 같은 소자를 여러 종횡비로 만들어 둔다 (`X1_Y2` 는 800x3528,
 `X2_Y1` 은 1120x2352 — 트랜지스터도 파라미터도 같고 **모양만** 다르다).
@@ -307,21 +308,21 @@ lamRatio   0.25    0.5     1       2       4
 
 1. **배선을 재는 자.** 넷마다 핀 사각형 합집합의 **중심 한 점**으로 HPWL 을 재면 손가락 16 개를
    한 줄로 늘어놓은 `X16_Y1` (핀이 폭 5,032 짜리 가로 막대) 이 블록 가운데 점 하나로 보여
-   길쭉한 변이일수록 배선이 공짜로 보인다. 그래서 핀 **경계 사각형**의 min/max 로 잰다
+   길쭉한 variant 일수록 배선이 공짜로 보인다. 그래서 핀 **경계 사각형**의 min/max 로 잰다
    (`templateInfo` 가 넷별 핀 반폭을 남기고, `hpwl` 과 연속 단계의 `wirelength` 가 `x ± ex` 로 잰다).
    후보 점수는 거울 반전 뒤의 배선길이로 매긴다 — 반전 전 값으로 줄을 세우면 그 이득이 후보마다
    다르게 붙어 순위가 흔들린다.
 2. **표본.** 설정마다 시작점이 1~4 개면 배정 하나의 점수가 표본 서너 개로 정해진다.
    WebGPU 가 있으면 설정당 수십 개를 준다. legalize 뒤에는 상위 후보 몇 개의 분리 방향을 뒤집어
    다시 풀어 본다 (`legalize.mjs` 의 `refineDirections`).
-3. **계층.** 하위 모듈은 종횡비를 퍼뜨려 3 개(`SUB_VARIANTS`)를 상위의 변이로 올린다. 하위 모듈의
+3. **계층.** 하위 모듈은 종횡비를 퍼뜨려 3 개(`SUB_VARIANTS`)를 상위의 variant 로 올린다. 하위 모듈의
    점수에는 종횡비가 없고, 상위가 어떻게 쓸지는 그 자리에서 판단할 수 없기 때문이다.
 
 legalize 가 INFEASIBLE 이면 그 후보는 버려진다. 계층 설계에서는 그게 대부분이었으므로 실패하면
 **여유 영역을 넓혀 다시 푼다** (1.6 → 3 → 6). 영역 제약은 넓히면 실행가능 집합이 커지기만 하고,
 목적함수에 반둘레가 들어 있어 넓혀줘도 알아서 좁게 푼다.
 
-자세한 설계 노트(변이·반전·영역·계층·legalize)는 [symplace/web/placer/README.md](symplace/web/placer/README.md).
+자세한 설계 노트(variant·반전·영역·계층·legalize)는 [symplace/web/placer/README.md](symplace/web/placer/README.md).
 
 ## 브라우저 배선 — ALIGN 배선 알고리즘의 이식
 
@@ -353,10 +354,10 @@ symplace/alignroute/        Rust 배선기 — build.sh 가 src/route/alignroute
 symplace/web/placer/test/   node 검사 — 심플렉스, 에너지 대조, 배치, legalize, 검사기·격자·GDS 고정 사례, 브라우저(WebGPU·페이지)
 symplace/web/placer/fixtures/  고정값 — 배치 문제의 정답 4 예제, 검사기 사례 106, 격자 문구 150, GDS 2
 symplace/web/placer/pack-example.mjs  앞단 출력 폴더 -> data/ 의 예제 파일
-symplace/web/placer/README.md  배치기 설계 노트 (변이·반전·영역·계층을 어떻게 고르는지, legalize)
+symplace/web/placer/README.md  배치기 설계 노트 (variant·반전·영역·계층을 어떻게 고르는지, legalize)
 symplace/scripts/           z3 빌드, route/node/ (페이지와 같은 배치·배선을 node 에서), place/ (분석), edit/ (편집 계획의 실측)
 symplace/PLAN-route-align.md          배선기를 ALIGN 알고리즘 그대로 옮긴 계획과 대조 기록
-symplace/PLAN-place-variants-gpu.md   변이 선택 분석과 WebGPU 계획·결과
+symplace/PLAN-place-variants-gpu.md   variant 선택 분석과 WebGPU 계획·결과
 symplace/PLAN-edit.md                 배치·배선 비주얼 편집과 토폴로지 유지 최적화 계획 (실측 포함)
 ```
 
@@ -371,7 +372,7 @@ node symplace/web/placer/test/parity.mjs     # 에너지·기울기·영공간�
 node symplace/web/placer/test/design.mjs     # 앞단 출력에서 만든 문제 == 고정값의 문제
 node symplace/web/placer/test/legalize.mjs   # 겹침 0 / 대칭 잔차 / 면적
 node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 돌린 Adam
-node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 — 배정이 결과를 가르는가
+node symplace/web/placer/test/variants.mjs   # variant 배정 전수 — 배정이 결과를 가르는가
 node symplace/web/placer/test/gpu.mjs        # GPU runner == CPU (headless Chromium, WebGPU)
 node symplace/web/placer/test/page.mjs high_speed_comparator gpu 96 32   # 페이지 통째로 (워커 + WebGPU)
 node symplace/web/placer/test/leaves.mjs     # 리프 도형 파일이 예제와 맞는가
@@ -381,7 +382,7 @@ node symplace/web/placer/test/gds.mjs        # GDS == 고정 사례 (바이트)
 node symplace/web/placer/test/schematic.mjs  # 회로도·묶음 배열 — 예제 전부에서 겹침 0, 선이 핀에 닿는가, 거울 쌍 대칭
 node symplace/web/placer/test/views.mjs      # 페이지의 회로도·묶음 보기 (headless Chromium) — 예제 전부 + 올리기
 node symplace/web/placer/test/stale.mjs      # 옛 모듈이 브라우저 캐시에 남은 채 새 판을 새로고침해도 예제 목록이 뜨는가
-node symplace/web/placer/test/edit-place.mjs   # 배치 편집 — 키트로 다시 지은 문제, 끌기의 성질, 편집 6 종의 정리, 반전·변이, 위상 유지 변이 다시
+node symplace/web/placer/test/edit-place.mjs   # 배치 편집 — 키트로 다시 지은 문제, 끌기의 성질, 편집 6 종의 정리, 반전·variant, 위상 유지 variant 다시
 node symplace/web/placer/test/edit-wires.mjs   # 배선 편집 — 편집 없는 재검사 == 배선 결과, 조각 그래프 되펴기, 범위 안 옮기기, 넷 고정 재배선
 node symplace/web/placer/test/edit-compact.mjs # 정돈 — 위상 그대로, 길이·오류 안 늚, 범위 끝까지 밀었다 정돈하면 원래 길이
 node symplace/web/placer/test/edit-page.mjs current_mirror_ota 48   # 페이지의 편집기 통째로 (headless Chromium)

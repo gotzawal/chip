@@ -7,6 +7,6 @@
  */
 import { runJob, runEdit } from "./src/job.mjs";
 
-// kind 가 "retry" 면 편집(위상 유지 변이 다시 고르기), 아니면 배치 한 판 — 지금 그대로.
+// kind 가 "retry" 면 편집(위상 유지 variant 다시 고르기), 아니면 배치 한 판 — 지금 그대로.
 self.onmessage = (e) => (e.data?.kind === "retry" ? runEdit(e.data, (m) => postMessage(m))
                                                   : runJob(e.data, (m) => postMessage(m)));

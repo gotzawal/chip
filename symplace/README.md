@@ -44,7 +44,7 @@ E = W + λ·D + μ·B
 하되, **여전히 θ 공간에서** 한다. x 공간에서 블록을 밀면 대칭이 깨지지만
 θ 공간에서는 어떻게 움직여도 `z = z₀ + Nθ` 가 제약을 지킨다.
 
-소자 변이(같은 소자의 다른 종횡비)·거울 반전·영역 종횡비는 연속 최적화로 못 정하는
+소자 variant(같은 소자의 다른 종횡비)·거울 반전·영역 종횡비는 연속 최적화로 못 정하는
 이산 선택이라 다중 시작의 한 축으로 넣어 고른다. 어떻게 고르는지, 어디서 틀렸었는지는
 [web/placer/README.md](web/placer/README.md).
 
@@ -61,15 +61,15 @@ web/placer/
   test/                  검사 (아래). 루트의 src/ 와 data/ 를 읽는다
   fixtures/              고정값 — 배치 문제의 정답(4 예제), 검사기 사례 106, 격자 문구 150, GDS 2
   pack-example.mjs       앞단 출력 폴더 -> data/<예제>.json, data/<예제>.leaves.json, data/index.json
-  README.md              배치기 설계 노트 — 변이·반전·영역·계층을 어떻게 고르는지, legalize, 검증
+  README.md              배치기 설계 노트 — variant·반전·영역·계층을 어떻게 고르는지, legalize, 검증
 scripts/
   build-z3-pyodide.sh    앞단이 쓰는 libz3 (/py/z3, Pyodide side module) 를 빌드한 방법
   route/node/place.mjs   페이지와 같은 배치를 node 에서 돌려 배선기에 넘기는 모양으로 저장
   route/node/newroute.mjs  페이지와 같은 길로 node 에서 배선 (`all` 이면 예제 전부; 배치 캐시가 없으면 그 자리에서 배치)
   place/prof.mjs         한 시작점의 시간이 항별로 어디에 쓰이는지
-  edit/place.mjs, variants.mjs, route.mjs   편집(PLAN-edit.md)의 실측 — 편집 6 종의 정리, 키트로 다시 지은 문제와 변이 다시, 조각 옮기기·넷 고정
+  edit/place.mjs, variants.mjs, route.mjs   편집(PLAN-edit.md)의 실측 — 편집 6 종의 정리, 키트로 다시 지은 문제와 variant 다시, 조각 옮기기·넷 고정
 PLAN-route-align.md      배선기를 ALIGN 알고리즘 그대로 옮긴 계획과 결과 (대조 방법·수치, 기록)
-PLAN-place-variants-gpu.md  변이 선택 분석과 WebGPU 계획·결과 (기록)
+PLAN-place-variants-gpu.md  variant 선택 분석과 WebGPU 계획·결과 (기록)
 PLAN-edit.md             배치·배선 비주얼 편집과 토폴로지 유지 최적화 — 계획과 결과 (기록)
 ```
 
@@ -82,11 +82,11 @@ PLAN-edit.md             배치·배선 비주얼 편집과 토폴로지 유지 
 # 배치기
 node symplace/web/placer/test/lp.mjs         # 심플렉스 — 답을 아는 문제 6 + 무작위 60 건을 꼭짓점 전수 열거와 대조
 node symplace/web/placer/test/parity.mjs     # 에너지·기울기·영공간 — 고정값(fixtures/<예제>.json)과 기계 정밀도로 대조
-node symplace/web/placer/test/design.mjs     # 앞단 출력에서 만든 문제 == 고정값의 문제 (같은 변이를 주면)
+node symplace/web/placer/test/design.mjs     # 앞단 출력에서 만든 문제 == 고정값의 문제 (같은 variant 를 주면)
 node symplace/web/placer/test/chunk.mjs      # 끊어 돌린 Adam == 한 번에 돌린 Adam
 node symplace/web/placer/test/legalize.mjs   # 겹침 0 / 대칭 잔차 / 면적·배선 (고정값 위에서)
 node symplace/web/placer/test/place.mjs [예제]   # 앞단 출력만으로 배치 — 본 경로. 겹침 0·대칭 잔차·Order·격자
-node symplace/web/placer/test/variants.mjs   # 변이 배정 전수 — 배정이 결과를 가르는가
+node symplace/web/placer/test/variants.mjs   # variant 배정 전수 — 배정이 결과를 가르는가
 node symplace/web/placer/test/bench.mjs [예제] [batch] [iters]   # 처리량
 # 배선
 node symplace/web/placer/test/leaves.mjs     # data/<예제>.leaves.json 이 예제와 맞는가
@@ -96,7 +96,7 @@ node symplace/web/placer/test/gds.mjs        # GDS 바이트 == 고정 사례 (2
 node symplace/scripts/route/node/newroute.mjs all   # 예제 전부를 배치하고 페이지와 같은 길로 배선해 DRC/LVS 를 찍는다
 # 편집 (src/edit/, 배선 세션)
 node symplace/web/placer/test/edit-place.mjs [예제]   # 편집 키트로 다시 지은 문제 == 배치기의 문제, 끌기의 성질(거울·축·잔차), 편집 6 종 x 정리 2 가지
-                                                    # (겹침 0, 잔차, 격자, 관계 보존), 반전·변이, 위상 유지 변이 다시 (CACHE=1 이면 배치를 캐시에 둔다)
+                                                    # (겹침 0, 잔차, 격자, 관계 보존), 반전·variant, 위상 유지 variant 다시 (CACHE=1 이면 배치를 캐시에 둔다)
 node symplace/web/placer/test/edit-wires.mjs [예제]   # 편집 없는 재검사 == 배선 결과 (바이트), 조각 그래프 되펴기, 범위 안 옮기기에 오류가 안 늚, 넷 고정 재배선
 node symplace/web/placer/test/edit-compact.mjs [예제] # 정돈 — 위상 그대로, 길이 안 늚, 오류 안 늚, 범위 끝까지 밀었다 정돈하면 원래 길이
 # 회로도 · 묶음 보기 (src/schematic/)
@@ -109,7 +109,7 @@ node symplace/web/placer/test/views.mjs [예제]   # 페이지의 회로도·묶
                                                 # (SHOT=폴더 를 주면 보기마다 PNG 를 남긴다)
 node symplace/web/placer/test/stale.mjs [옛 ref]  # 옛 판(origin/main)을 캐시에 넣고 새 판을 보통 새로고침 — 예제 목록이 그대로 떠야 한다
                                                 # (새 모듈이 옛 모듈에 없는 이름을 import 하면 페이지가 통째로 비는 함정)
-node symplace/web/placer/test/edit-page.mjs current_mirror_ota 48   # 페이지의 편집기 — 끌기·정리·반전·되돌리기·변이 고정·변이 다시,
+node symplace/web/placer/test/edit-page.mjs current_mirror_ota 48   # 페이지의 편집기 — 끌기·정리·반전·되돌리기·variant 고정·variant 다시,
                                                                     # 배선 조각 옮기기·재검사·고정·재배선·정돈
 ```
 
@@ -126,6 +126,6 @@ JS 가 그것을 넘어선 뒤 걷어냈다 (마지막으로 들어 있던 커�
   그대로 넘기고, 페이지가 "배치기가 무시한 제약" 으로 보여준다 (`src/design.mjs` 의 제약 등록).
 - **계층 설계의 결과는 아직 흔들린다** — 하위 모듈이 올리는 모양(기본 3 개)에 따라 상위의 bbox 가
   한 줄(2352)씩 달라진다 (high_speed_comparator).
-- **편집은 최상위 모듈만이다.** 하위 모듈은 블록으로 옮기고 뒤집고 변이를 바꿀 뿐 그 안은 못 고친다. 전원 넷은 못 옮긴다.
+- **편집은 최상위 모듈만이다.** 하위 모듈은 블록으로 옮기고 뒤집고 variant 를 바꿀 뿐 그 안은 못 고친다. 전원 넷은 못 옮긴다.
   넷을 고정하고 다시 배선하면 결과가 ALIGN 과 달라진다 — 편집이 없으면 같다.
 - **WebGPU 는 SwiftShader 로만 쟀다.** 실제 GPU 에서의 시간은 아직 재지 못했다.

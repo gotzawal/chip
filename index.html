@@ -169,6 +169,17 @@
     margin: 0; padding: 11px 14px 9px; border-bottom: 1px solid var(--hair);
   }
   .card > .body { padding: 14px; }
+  .cols > div > .card + .card { margin-top: 16px; }
+  /* 접는 카드 — 제목을 클릭하면 접힌다. 편집 모드에서는 편집 카드 말고 전부 접힌 채 시작한다 */
+  .card.fold > h2 { cursor: pointer; user-select: none; position: relative; padding-right: 30px; }
+  .card.fold > h2::after {
+    content: ""; position: absolute; right: 15px; top: 11px; width: 6px; height: 6px;
+    border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint);
+    transform: rotate(45deg); transition: transform 0.12s;
+  }
+  .card.fold.collapsed > h2 { border-bottom: none; }
+  .card.fold.collapsed > h2::after { transform: rotate(-45deg); top: 13px; }
+  .card.fold.collapsed > :not(h2) { display: none; }
 
   canvas {
     display: block; width: 100%; background: var(--sunk);
@@ -344,7 +355,7 @@ data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 �
       <summary title="시작점 예산과 저울 둘, WebGPU 의 설정당 시작점. 기본값으로도 된다">상세 placement 설정</summary>
       <div class="advrow">
         <label class="field"
-               title="총 시작점 예산. 설정(변이 배정 x 영역 후보) 수가 하한이라,
+               title="총 시작점 예산. 설정(variant 배정 x 영역 후보) 수가 하한이라,
 설정이 많은 계층 설계에서는 주로 **넓이**로 쓰인다 — 배정을 몇 개까지 훑을지가
 같이 늘어난다. 남는 예산은 점수 상위 설정에 라운드로 더 준다."><span>시작점</span>
           <select id="batch">
@@ -362,7 +373,7 @@ HPWL 은 핀 경계 사각형으로 잰다 (ALIGN 의 HPWL_extend). 다음 place
         </label>
         <label class="field" id="gpuField" hidden
                title="WebGPU 가 있으면 연속 단계(Adam)를 GPU 에서 돈다. 그때 시작점은 총 예산이
-아니라 설정(변이 배정 x 영역)마다 이만큼이다. 시작점 96 짜리 CPU 예산은 설정당
+아니라 설정(variant 배정 x 영역)마다 이만큼이다. 시작점 96 짜리 CPU 예산은 설정당
 1~4 개였다 — 배정 하나의 점수가 표본 서너 개로 정해져 순위가 잡음 안에 있었다.">
           <span>GPU 시작점/설정</span>
           <select id="perConfig">
@@ -397,7 +408,7 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
               <button data-what="route" aria-pressed="false">Routing</button>
             </span>
             <span class="seg" id="modeSeg" hidden style="margin-left:6px"
-                  title="편집: 블록을 끌어 옮기고 뒤집고 변이를 바꾼다 — 편집이 없으면 배치기·배선기가 낸 그대로다">
+                  title="편집: 블록을 끌어 옮기고 뒤집고 variant 를 바꾼다 — 편집이 없으면 배치기·배선기가 낸 그대로다">
               <button data-mode="view" aria-pressed="true">보기</button>
               <button data-mode="edit" aria-pressed="false" disabled>편집</button>
             </span>
@@ -417,38 +428,38 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
           <span style="color:var(--faint)">휠 확대 · 끌어 이동 · 더블클릭 초기화</span>
         </div>
       </div>
-      <div class="card" style="margin-top:16px">
-        <h2>소자 변이 — 고른 것</h2>
+      <div class="card fold" id="variantCard">
+        <h2>소자 variant — 고른 것</h2>
         <div class="tw"><table>
-          <thead><tr><th>인스턴스</th><th>변이</th><th>크기</th><th>반전</th></tr></thead>
+          <thead><tr><th>인스턴스</th><th>variant</th><th>크기</th><th>반전</th></tr></thead>
           <tbody id="vt"><tr><td colspan="4" class="dim">Placement 를 실행하면 채워집니다</td></tr></tbody>
         </table></div>
       </div>
-      <div class="card" style="margin-top:16px" id="blockCard">
+      <div class="card fold" id="blockCard">
         <h2 title="앞단(1_topology)이 넷리스트의 소자를 묶어 만든 블록 — placer 는 이 블록을 놓는다.
-변이 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들어 둔 것이다.">Primitives — 앞단이 만든 블록 (placement 이전)</h2>
+variant 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들어 둔 것이다.">Primitives — 앞단이 만든 블록 (placement 이전)</h2>
         <div class="tw"><table>
-          <thead><tr><th>블록</th><th>종류</th><th>소자</th><th>변이 후보</th><th>제약</th></tr></thead>
+          <thead><tr><th>블록</th><th>종류</th><th>소자</th><th>variant 후보</th><th>제약</th></tr></thead>
           <tbody id="bt"><tr><td colspan="5" class="dim">회로를 고르면 채워집니다</td></tr></tbody>
         </table></div>
       </div>
     </div>
 
     <div>
-      <div class="card">
+      <div class="card fold" id="resultCard">
         <h2>결과</h2>
         <dl class="metrics" id="metrics"></dl>
       </div>
-      <div class="card" id="editCard" hidden style="margin-top:16px">
+      <div class="card" id="editCard" hidden>
         <h2 title="배치를 손으로 고친다. 끌기는 제약을 따라 움직이고(거울 쌍은 거울로, 축 위 블록은 축을 따라), 정리는 사용자가
 정한 위상(쌍의 상대 위치)을 그대로 둔 채 겹침을 없애고 격자에 앉힌다. 편집이 없으면 지금 그대로다.">편집</h2>
         <div class="body" id="editBody"></div>
       </div>
-      <div class="card" style="margin-top:16px">
+      <div class="card fold" id="infoCard">
         <h2>설계</h2>
         <div class="body"><dl class="metrics" id="info" style="margin:-14px"></dl></div>
       </div>
-      <div class="card" id="drcCard" style="margin-top:16px">
+      <div class="card fold" id="drcCard">
         <h2>Routing · GDS · DRC</h2>
         <dl class="metrics" id="drcMetrics"></dl>
         <div class="body" id="drcErrs" style="border-top:1px solid var(--hair)"></div>
@@ -456,7 +467,7 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
           <div class="dl" id="dlBar"></div>
         </div>
       </div>
-      <div class="card" id="subCard" hidden style="margin-top:16px">
+      <div class="card fold" id="subCard" hidden>
         <h2>하위 모듈이 올린 모양</h2>
         <div class="tw"><table>
           <thead><tr><th>모듈</th><th>쓴 것</th><th>올린 후보</th></tr></thead>
@@ -821,14 +832,35 @@ const editHost = {
   routeSend: (msg) => routeSend(msg),
   applyRouted: (m) => applyRouted(m, { view: false }),
   refreshDownloads: () => { if (lastRouted) routeDownloads(lastRouted); },
-  onModeChange: (on) => { $("editCard").hidden = !on; },
+  onModeChange: (on) => layoutForEdit(on),
 };
-// 편집 워커 — 위상 유지 변이 다시 고르기 (배정 x LP, 수 초). 워커가 안 서면 같은 코드를 메인 스레드에서.
+// 카드 접기 — 제목을 클릭하면 접히고 펴진다. 편집 모드에 들어가면 편집 카드가 결과 카드 자리(캔버스 바로 옆)에 오고
+// 나머지 카드는 전부 접힌 채 시작한다. 나오면 편집 카드를 감추고 접힘을 들어가기 전대로 되돌린다.
+const foldCards = () => [...document.querySelectorAll(".card.fold")];
+for (const c of foldCards()) c.querySelector(":scope > h2").addEventListener("click", (e) => {
+  if (e.target.closest("button, a, input, select, label")) return;
+  c.classList.toggle("collapsed");
+});
+let foldBefore = null;
+function layoutForEdit(on) {
+  const ec = $("editCard"), rc = $("resultCard");
+  if (on && !foldBefore) {
+    foldBefore = new Map(foldCards().map((c) => [c, c.classList.contains("collapsed")]));
+    for (const c of foldCards()) c.classList.add("collapsed");
+    rc.before(ec);
+  } else if (!on && foldBefore) {
+    rc.after(ec);
+    for (const [c, v] of foldBefore) c.classList.toggle("collapsed", v);
+    foldBefore = null;
+  }
+  ec.hidden = !on;
+}
+// 편집 워커 — 위상 유지 variant 다시 고르기 (배정 x LP, 수 초). 워커가 안 서면 같은 코드를 메인 스레드에서.
 let editWorker = null;
 function editSend(msg) {
   return new Promise((resolve, reject) => {
     const take = (m) => {
-      if (m.type === "progress") setStatus(`<span class="dot"></span><span>변이 ${m.done}/${m.total} · ${m.t.toFixed(0)}s</span>`);
+      if (m.type === "progress") setStatus(`<span class="dot"></span><span>variant ${m.done}/${m.total} · ${m.t.toFixed(0)}s</span>`);
       else if (m.type === "error") reject(new Error(m.msg.split("\n")[0]));
       else if (m.type === "retry") resolve(m);
     };
@@ -915,7 +947,7 @@ async function ensureViews(name) {
   return v;
 }
 
-/** 묶음 표 — 앞단이 만든 블록마다 종류·소자·변이 후보·제약. */
+/** 묶음 표 — 앞단이 만든 블록마다 종류·소자·variant 후보·제약. */
 function showBlocks(rows) {
   const tb = $("bt"); tb.textContent = "";
   if (!rows?.length) {
@@ -978,7 +1010,7 @@ function showInfo(b) {
   const dl = $("info"); dl.textContent = "";
   mkRow(dl, "블록", String(b.blocks ?? "—"));
   mkRow(dl, "모듈", b.modules > 1 ? `${b.modules} <small>(계층)</small>` : "1");
-  mkRow(dl, "변이 조합", String(b.leafCombos ?? "—"));
+  mkRow(dl, "variant 조합", String(b.leafCombos ?? "—"));
   if (b.ignored?.length)
     mkRow(dl, "placer 가 무시한 제약", `<small>${b.ignored.join(" · ")}</small>`, "lose");
 }
@@ -991,7 +1023,7 @@ function summarize(blob) {
   return { blocks: (top?.instances ?? []).length, modules: mods.length };
 }
 
-/** 변이 표 — 고른 소자 변이와 반전. */
+/** variant 표 — 고른 소자 variant 와 반전. */
 function variantRows(rects) {
   const tb = $("vt"); tb.textContent = "";
   if (!rects?.length) {
@@ -1023,7 +1055,7 @@ function showResult(r) {
     ? `0 <small>밖 / M1 ${r.grid[0]} M2 ${r.grid[1]}</small>`
     : `${r.offgrid} <small>블록이 격자 밖</small>`,
     r.offgrid === 0 ? "win" : "lose");
-  mkRow(dl, "변이 조합", `${r.combos} <small>중 ${r.configs} 설정 탐색</small>`);
+  mkRow(dl, "variant 조합", `${r.combos} <small>중 ${r.configs} 설정 탐색</small>`);
   if (r.hpwlWeight)
     mkRow(dl, "저울", `면적 1 : 선 길이 ${r.hpwlWeight.toFixed(2)}` +
       `<small> · 퍼뜨리기 ${(r.lamRatio ?? 1).toFixed(2)}×</small>`);
@@ -1386,7 +1418,7 @@ function handle(m) {
       runnerKind = m.runner;
       $("gpuField").hidden = m.runner !== "gpu";
     }
-    setStatus(`<span class="dot"></span><span>계산 중 — 변이 조합을 훑는다` +
+    setStatus(`<span class="dot"></span><span>계산 중 — variant 조합을 훑는다` +
               (m.runner ? ` <small>(${m.runner === "gpu" ? "WebGPU" : "CPU"})</small>` : "") + `</span>`);
   } else if (m.type === "progress") {
     setStatus(`<span class="dot"></span><span>${m.done}/${m.total} ${m.phase ?? "후보"} · ${m.t.toFixed(0)}s</span>`);
@@ -1594,7 +1626,7 @@ function routeDownloads(m) {
                 nm + ".gds", "GDS (KLayout)");
   addDownload(new Blob([JSON.stringify(placementJson(), null, 1)],
                        { type: "application/json" }),
-              (designName() || "design") + editedSuffix() + ".place.json", "Placement (좌표·변이·반전)");
+              (designName() || "design") + editedSuffix() + ".place.json", "Placement (좌표·variant·반전)");
   if (m.geo)
     addDownload(new Blob([JSON.stringify(m.geo)], { type: "application/json" }),
                 nm + ".routed.json", "Routing 기하 (레이어별)");
@@ -1610,7 +1642,7 @@ function placeDownloads() {
   addDownload(new Blob([JSON.stringify(placementJson(), null, 1)],
                        { type: "application/json" }),
               (designName() || "design") + editedSuffix() + ".place.json",
-              "Placement (좌표·변이·반전)");
+              "Placement (좌표·variant·반전)");
 }
 /** 편집한 배치의 산출물은 이름으로 가른다 — 배치기가 낸 것이 아니다 */
 const editedSuffix = () => (ours?.edited ? "-edited" : "");
@@ -1631,7 +1663,7 @@ function placementJson() {
     })),
     quality: { area: ours.area, hpwl: ours.hpwl, overlap: ours.overlap,
                 resid: ours.resid, offgrid: ours.offgrid, orderBad: ours.orderBad },
-    // 손으로 고친 배치면 몇 번 고쳤는지와 고정한 변이 — 0 이면 배치기가 낸 그대로다
+    // 손으로 고친 배치면 몇 번 고쳤는지와 고정한 variant — 0 이면 배치기가 낸 그대로다
     edited: ours.edited ?? 0, fixedVariants: ours.fixedVariants ?? null,
   };
 }
@@ -1653,7 +1685,7 @@ async function run() {
     startJob({ name, blob, batch: Number($("batch").value),
                perConfig: Number($("perConfig").value),
                hpwlWeight: hpwlWeight(), lamRatio: lamRatio(),
-               // 편집기에서 고정한 변이 — 그대로 쓰고 나머지는 배치기가 고른다. 없으면 지금 그대로
+               // 편집기에서 고정한 variant — 그대로 쓰고 나머지는 배치기가 고른다. 없으면 지금 그대로
                fixedVariants: editor?.fixedVariants?.() ?? null });
   } catch (err) {
     busy = false; $("run").disabled = false;

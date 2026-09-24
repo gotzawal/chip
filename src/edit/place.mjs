@@ -1,8 +1,8 @@
 /** 배치 편집 — 워커가 낸 배치를 페이지에서 고치고, 사용자가 정한 위상 안에서 다시 최적화한다.
  *
  *  배치기(src/place.mjs)는 좌표만 내보낸다. 편집에는 그 좌표를 낳은 **문제**가 필요하다 — 제약의 영공간
- *  z = z0 + N theta (끌기와 정리를 그 위에서 한다), 변이 후보(변이 바꾸기), 반전 자유도(반전). 워커에서
- *  통째로 보내지 않고 앞단 출력과 편집 키트(계층 설계의 하위 모듈 변이 템플릿)로 **다시 짓는다** (rebuild).
+ *  z = z0 + N theta (끌기와 정리를 그 위에서 한다), variant 후보(variant 바꾸기), 반전 자유도(반전). 워커에서
+ *  통째로 보내지 않고 앞단 출력과 편집 키트(계층 설계의 하위 모듈 variant 템플릿)로 **다시 짓는다** (rebuild).
  *  실측: 다시 지은 문제가 배치기 안의 문제와 이름·크기·핀이 같고, theta 를 되찾은 좌표 오차가 1e-12 아래다.
  *
  *  세 가지 일.
@@ -10,7 +10,7 @@
  *               theta 의 최소 노름 보정이라 거울 쌍은 거울로 따라오고 축 위 블록은 축을 따라서만 미끄러진다.
  *    정리       settle — 편집 좌표에서 쌍의 분리 방향을 읽어(그것이 위상이다) legalize 를 그대로 돌린다:
  *               겹침 0, 대칭 잔차 0, 격자, Order, 간격. 편집 좌표에서 덜 움직이고 반둘레를 줄인다.
- *    변이 다시  retryVariants — 같은 방향표로 배정을 전수 legalize 해 점수로 고른다. 사용자가 고정한 변이는 그대로.
+ *    variant 다시  retryVariants — 같은 방향표로 배정을 전수 legalize 해 점수로 고른다. 사용자가 고정한 variant 는 그대로.
  *
  *  편집이 없으면 아무것도 안 한다 — 페이지의 배치·배선 길은 그대로다 (symplace/PLAN-edit.md).
  */
@@ -28,9 +28,9 @@ export const GRID = [80, 84];
 
 /** placeHierarchy 결과에서 편집 키트를 만든다 — job.mjs 가 done 메시지에 싣는다.
  *
- *  최상위 문제를 페이지에서 다시 지으려면 하위 모듈 변이(`<모듈>__v<k>`)의 템플릿이 필요하다. placeHierarchy 가
+ *  최상위 문제를 페이지에서 다시 지으려면 하위 모듈 variant(`<모듈>__v<k>`)의 템플릿이 필요하다. placeHierarchy 가
  *  상위에 등록한 것과 **같은 규칙**(spreadShapes, SUB_VARIANTS)으로 전부 다시 만든다 — 쓰인 것만이 아니라 후보
- *  전부를 넣어야 편집기가 변이를 바꿔 볼 수 있다. 평면 설계는 비어 있다. hsc 에서 템플릿 4 개, 1.8 KB.
+ *  전부를 넣어야 편집기가 variant 를 바꿔 볼 수 있다. 평면 설계는 비어 있다. hsc 에서 템플릿 4 개, 1.8 KB.
  */
 export function editKit(hr, grid = GRID) {
   const topName = hr.order[hr.order.length - 1];
@@ -65,7 +65,7 @@ function roleMap(design) {
 /**
  * 앞단 출력 + 편집 키트 + 지금 좌표(rects: done 메시지의 것과 같은 모양) -> 편집 모델.
  *
- * rects 의 concrete 로 변이 배정을 되찾고, 그 배정의 문제(크기·핀·넷)와 제약 영공간을 짓고, 좌표에서 theta 를
+ * rects 의 concrete 로 variant 배정을 되찾고, 그 배정의 문제(크기·핀·넷)와 제약 영공간을 짓고, 좌표에서 theta 를
  * 되찾는다. 모델의 진실은 theta 와 반전(sx, sy)이고 rects 는 그것에서 다시 낸다 (toRects).
  */
 export function rebuild(blob, kit, rects) {
@@ -91,7 +91,7 @@ export function rebuild(blob, kit, rects) {
   P.names.forEach((nm, i) => {
     const r = byName.get(nm);
     if (!r) throw new Error(`좌표가 없는 블록: ${nm}`);
-    // 크기는 문제의 것 (변이를 바꿨으면 rects 의 w/h 는 낡았다) — 중심은 그대로
+    // 크기는 문제의 것 (variant 를 바꿨으면 rects 의 w/h 는 낡았다) — 중심은 그대로
     cx[i] = r.x + (r.w ?? P.w[i]) / 2; cy[i] = r.y + (r.h ?? P.h[i]) / 2;
     sx[i] = (r.sx ?? 1) > 0 ? 1 : -1; sy[i] = (r.sy ?? 1) > 0 ? 1 : -1;
   });
@@ -316,7 +316,7 @@ export function settle(model, cx, cy, sx, sy, { both = false, compact = 0.5, sla
   const orderBad = orderViolations(P, cx, cy);
   const ea = exactArea(cx, cy, P.w, P.h);
   const region = ea.box.slice();
-  // 블록 하나거나 한 줄이면 영역의 한 변이 0 일 수 있다 — legalize 의 여유가 0 이 되지 않게
+  // 블록 하나거나 한 줄이면 영역의 한 variant 0 일 수 있다 — legalize 의 여유가 0 이 되지 않게
   const span = Math.max(region[2] - region[0], region[3] - region[1], 1);
   if (region[2] - region[0] < 1e-9) region[2] = region[0] + span;
   if (region[3] - region[1] < 1e-9) region[3] = region[1] + span;
@@ -372,7 +372,7 @@ export function flipFreedom(model, name) {
   return g ? { xFree: g.xFree, yFree: g.yFree } : { xFree: false, yFree: false };
 }
 
-/** 블록의 변이 후보 { group, members, choices: [{concrete, w, h}], current } */
+/** 블록의 variant 후보 { group, members, choices: [{concrete, w, h}], current } */
 export function variantChoices(model, name) {
   const di = model.design.instances.findIndex((v) => v.name === name);
   const gi = model.groups.findIndex((g) => g.members.includes(di));
@@ -386,7 +386,7 @@ export function variantChoices(model, name) {
   };
 }
 
-/** 변이를 바꾼 rects — 그룹 구성원 전부, 중심은 그대로. 부르는 쪽이 rebuild 한다. */
+/** variant 를 바꾼 rects — 그룹 구성원 전부, 중심은 그대로. 부르는 쪽이 rebuild 한다. */
 export function withVariant(model, rects, name, concrete) {
   const vc = variantChoices(model, name);
   if (!vc || !vc.choices.some((c) => c.concrete === concrete)) return null;
@@ -398,7 +398,7 @@ export function withVariant(model, rects, name, concrete) {
   });
 }
 
-// ---------------------------------------------------------------- 변이 다시 고르기 (위상 유지)
+// ---------------------------------------------------------------- variant 다시 고르기 (위상 유지)
 
 function systemOf(P) {
   const sizes = new Map(P.names.map((nm, i) => [nm, [P.w[i], P.h[i]]]));
@@ -408,9 +408,9 @@ function systemOf(P) {
 }
 
 /**
- * 같은 위상(분리 방향표)에서 변이 배정을 전수로 legalize 해 줄 세운다.
+ * 같은 위상(분리 방향표)에서 variant 배정을 전수로 legalize 해 줄 세운다.
  *
- *   fixed      { 인스턴스 이름: concrete } — 사용자가 고정한 변이. 그 그룹은 그것만 본다
+ *   fixed      { 인스턴스 이름: concrete } — 사용자가 고정한 variant. 그 그룹은 그것만 본다
  *   cap        배정이 이보다 많으면 추첨 (배치기와 같이 128)
  *   onProgress (done, total)
  *

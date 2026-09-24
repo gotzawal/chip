@@ -1,12 +1,12 @@
 /** 앞단 출력 -> 배치 결과. 브라우저가 부르는 입구 하나.
  *
  *  ALIGN 의 place 단계를 **대신한다**. 입력은 1_topology 와 2_primitives 뿐이고
- *  ALIGN 배치기 출력은 쓰지 않는다. 그래서 변이(어느 종횡비의 소자를 쓸지)와
+ *  ALIGN 배치기 출력은 쓰지 않는다. 그래서 variant(어느 종횡비의 소자를 쓸지)와
  *  거울 반전(sX, sY)을 우리가 직접 골라야 한다 — 이 파일이 그 순서를 엮는다.
  *
  *      readDesign          앞단 JSON 셋을 읽는다
- *      variantGroups       변이를 고를 단위 (대칭 쌍은 묶인다)
- *      multiStartVariants  (변이 배정 x 영역 후보) x 시작점 을 굴린다
+ *      variantGroups       variant 를 고를 단위 (대칭 쌍은 묶인다)
+ *      multiStartVariants  (variant 배정 x 영역 후보) x 시작점 을 굴린다
  *      legalize            겹침을 정확히 0 으로 (LP)
  *      refineFlips         거울 반전을 좌표하강으로 고른다
  *
@@ -52,12 +52,12 @@ export async function placeDesign(input, {
   retrySlack = [3, 6],
   // legalize 뒤 점수 상위 이만큼에 대해 분리 방향을 뒤집어 본다 (refineDirections).
   refineTop = 4, refineFlips: refineFlipsMax = 6,
-  // 설정(변이 배정 x 영역) 하나가 끝날 때마다 불린다. 화면에 중간 과정을
+  // 설정(variant 배정 x 영역) 하나가 끝날 때마다 불린다. 화면에 중간 과정을
   // 보여주려고 뚫어뒀다 — 좌표가 들어 있어 그대로 그릴 수 있다.
   onConfig = null,
   // WebGPU runner (src/gpu/runner.mjs) 와 설정당 시작점 수. 없으면 CPU, 총 batch 개.
   runner = null, perConfig = null,
-  // 사용자가 고정한 변이 { 인스턴스 이름: concrete } — 편집기에서 온다. 그 그룹은 그 변이만 본다 (restrictGroups).
+  // 사용자가 고정한 variant { 인스턴스 이름: concrete } — 편집기에서 온다. 그 그룹은 그 variant 만 본다 (restrictGroups).
   // 없으면 지금 그대로다.
   fixedVariants = null,
 } = {}) {
@@ -170,7 +170,7 @@ export async function placeDesign(input, {
     //
     // 왜 필요한가: 계층 설계에서 실패가 후보의 대부분이었다 (hsc 120/144,
     // cascode 28/34 — 전부 INFEASIBLE). 실패한 후보는 그냥 버려지므로
-    // "변이를 고른다"가 사실상 살아남은 스무 개 안에서만 일어났다.
+    // "variant 를 고른다"가 사실상 살아남은 스무 개 안에서만 일어났다.
     const args = { z0: c.z0, N: c.N, n: c.problem.n, w: c.problem.w,
                    h: c.problem.h, cxRef: c.cx, cyRef: c.cy, region: c.region, forced, gap };
     let r = legalize(args);
@@ -447,8 +447,8 @@ export function synthesizeTemplate(design, result, grid = null) {
 /** 계층 설계를 아래에서 위로 배치한다.
  *
  *  ALIGN 도 같은 순서다. 하위 모듈을 먼저 배치해 크기와 포트 위치를 굳히고,
- *  상위는 그걸 블록 하나로 본다. 변이 선택은 모듈마다 따로 일어난다 —
- *  하위의 변이 선택이 그 모듈의 bbox 를 정하고, 그 bbox 가 상위 문제의 입력이 된다.
+ *  상위는 그걸 블록 하나로 본다. variant 선택은 모듈마다 따로 일어난다 —
+ *  하위의 variant 선택이 그 모듈의 bbox 를 정하고, 그 bbox 가 상위 문제의 입력이 된다.
  *  (전 계층을 한꺼번에 최적화하는 것은 아니다. ALIGN 도 그렇게 하지 않는다.)
  *
  *  high_speed_comparator 가 이 경로를 탄다: 최상위 10 인스턴스 중 5 개가
@@ -469,8 +469,8 @@ export function synthesizeTemplate(design, result, grid = null) {
  *  (ALIGN 은 6080x10584, ar 0.57), 영역 후보가 전부 그 주변에서만 나온다.
  *
  *  고치는 방법은 점수에 종횡비 벌점을 넣는 게 아니라 **고르지 않는 것**이다.
- *  하위 모듈을 종횡비별로 몇 개 내어 상위의 **변이**로 등록하면, 이미 있는
- *  변이 선택 기계가 그대로 고른다. ALIGN 도 같은 구조다 —
+ *  하위 모듈을 종횡비별로 몇 개 내어 상위의 **variant**로 등록하면, 이미 있는
+ *  variant 선택 기계가 그대로 고른다. ALIGN 도 같은 구조다 —
  *  PRIMITIVE_38447703_PG0_0 ~ _PG0_3 을 만들어 두고 상위가 고른다.
  */
 /** 하위 모듈을 몇 가지 모양으로 상위에 올릴지.
@@ -500,7 +500,7 @@ export async function placeHierarchy({ topology, primitives, templates }, opts =
                reason: `템플릿을 못 찾은 인스턴스: ${design.missing.join(", ")}` };
     const isTop = name === order[order.length - 1];
     const opt = isTop || !subBatch ? { ...rest } : { ...rest, batch: subBatch };
-    if (!isTop) delete opt.fixedVariants;                 // 고정 변이는 최상위 인스턴스의 것이다
+    if (!isTop) delete opt.fixedVariants;                 // 고정 variant 는 최상위 인스턴스의 것이다
     // 중간 과정 콜백에 모듈 이름을 얹는다 (계층이면 어느 층인지 알아야 한다)
     if (rest.onConfig)
       opt.onConfig = (i, total, best, phase) =>
@@ -510,7 +510,7 @@ export async function placeHierarchy({ topology, primitives, templates }, opts =
     results.set(name, r);
     if (isTop) break;                                     // top 은 굳힐 필요가 없다
 
-    // 모양별 최선을 몇 개 골라 상위의 변이로 등록한다.
+    // 모양별 최선을 몇 개 골라 상위의 variant 로 등록한다.
     //
     // **점수 순으로 자르면 안 된다.** 그러면 종횡비가 한쪽으로 쏠린다.
     // 실측(hsc, PRIMITIVE_98739713): 점수 상위 3 개가 0.63 / 0.27 / 0.37 로

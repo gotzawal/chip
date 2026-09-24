@@ -3,13 +3,13 @@
  *  index.html 이 **동적으로** 받는다 (회로도 모듈과 같은 이유 — 옛 모듈이 캐시에 남은 채 새 판을 받아도 페이지가
  *  비지 않게). 못 받으면 편집 토글이 안 켜질 뿐 보기·배치·배선은 그대로다. 편집이 없으면 아무것도 바꾸지 않는다.
  *
- *  배치 편집의 셈은 전부 src/edit/place.mjs 에 있다 (문제 다시 짓기, 끌기 사영, 정리, 변이 다시). 여기는
+ *  배치 편집의 셈은 전부 src/edit/place.mjs 에 있다 (문제 다시 짓기, 끌기 사영, 정리, variant 다시). 여기는
  *  포인터·키·카드·덧칠뿐이다. 진실은 model 의 theta 와 반전(sx, sy)이고, 화면의 rects 는 거기서 다시 낸다.
  *
  *    끌기      제약을 따라 (거울 쌍은 거울로, 축 위 블록은 축을 따라, Align 줄은 같이). 축은 고정, Alt 는 그룹째
  *    정리      편집 좌표의 쌍 관계(위상)를 박고 legalize — 겹침 0, 격자, Order, 압축
- *    위상 유지 최적화   정리 뒤 같은 위상에서 변이를 전수로 다시 고른다 (워커)
- *    변이 고정  카드에서 고른 변이는 고정된다 — 다음 "Placement 실행" 도 그 변이를 쓴다
+ *    위상 유지 최적화   정리 뒤 같은 위상에서 variant 를 전수로 다시 고른다 (워커)
+ *    variant 고정  카드에서 고른 variant 는 고정된다 — 다음 "Placement 실행" 도 그 variant 를 쓴다
  *
  *  배선 편집 (넷 고르기·조각 옮기기·재검사·고정·재배선)은 src/edit/wires.mjs 와 배선 워커의 세션 위에서 한다.
  */
@@ -95,7 +95,7 @@ export function createEditor(host) {
     pl.theta = pl.model.theta; pl.sx = pl.model.sx; pl.sy = pl.model.sy;
     pl.locked = new Set(s.locked); pl.pinned = new Map(s.pinned); pl.edits = s.edits;
     if (s.ours !== state().ours) host.setOurs(s.ours);
-    // 정리 전 상태였나 — 좌표나 변이가 굳힌 배치와 다르면
+    // 정리 전 상태였나 — 좌표나 variant 가 굳힌 배치와 다르면
     const by = new Map(s.ours.rects.map((r) => [r.name, r]));
     pl.dirty = s.rects.some((r) => { const o = by.get(r.name); return !o || o.concrete !== r.concrete || Math.abs(r.x - o.x) > 1e-6 || Math.abs(r.y - o.y) > 1e-6; });
     refreshLive();
@@ -104,7 +104,7 @@ export function createEditor(host) {
   function undo() { if (!pl.hist.length) return; pl.fut.push(snapshot()); restore(pl.hist.pop()); afterEdit(false); }
   function redo() { if (!pl.fut.length) return; pl.hist.push(snapshot()); restore(pl.fut.pop()); afterEdit(false); }
 
-  /** 배치 하나로 편집기를 다시 세운다 (워커의 done 이거나 원래 배치로 되돌릴 때). 고정한 변이는 부르는 쪽이 남긴다. */
+  /** 배치 하나로 편집기를 다시 세운다 (워커의 done 이거나 원래 배치로 되돌릴 때). 고정한 variant 는 부르는 쪽이 남긴다. */
   function placed(done) {
     pl.base = done; pl.kit = done?.edit ?? null; pl.err = null;
     pl.hist = []; pl.fut = []; pl.dirty = false; pl.edits = done?.edited ?? 0; pl.sel = new Set(); pl.ranking = null;
@@ -195,7 +195,7 @@ export function createEditor(host) {
     pl.theta = pl.model.theta; pl.sx = pl.model.sx; pl.sy = pl.model.sy;
     pl.dirty = true;
     afterEdit();
-    host.setStatus(`<span>${esc(name)} 의 변이를 ${esc(short(concrete))} 로 — 겹침이 생기면 정리하세요. 이 변이는 고정됩니다</span>`);
+    host.setStatus(`<span>${esc(name)} 의 variant 를 ${esc(short(concrete))} 로 — 겹침이 생기면 정리하세요. 이 variant 는 고정됩니다</span>`);
   }
   function unpin(name) {
     const vc = pl.model ? variantChoices(pl.model, name) : null;
@@ -246,12 +246,12 @@ export function createEditor(host) {
   }
   function placedKeepPins(done) { const pinned = pl.pinned; placed(done); pl.pinned = pinned; render(); }
 
-  /** 정리 뒤 같은 위상에서 변이를 다시 고른다 (워커). 끝나면 1 위를 적용하고 순위를 카드에 보인다 */
+  /** 정리 뒤 같은 위상에서 variant 를 다시 고른다 (워커). 끝나면 1 위를 적용하고 순위를 카드에 보인다 */
   async function retry() {
     if (!pl.model || pl.busy) return;
     if (pl.dirty && !settleNow()) return;
     pl.busy = true; render();
-    host.setStatus('<span class="dot"></span><span>같은 위상에서 변이를 다시 고르는 중…</span>');
+    host.setStatus('<span class="dot"></span><span>같은 위상에서 variant 를 다시 고르는 중…</span>');
     try {
       const ours = state().ours;
       const blob = host.design();
@@ -263,10 +263,10 @@ export function createEditor(host) {
       if (best && !best.current) {
         pushHistory();
         applyOut(best.out);
-        host.setStatus(`<span>변이 다시 — ${r.tried} 배정 중 1 위를 적용했습니다 (면적x배선 ${Math.exp(best.score - (r.ranking[r.current]?.score ?? best.score)).toFixed(3)} 배)  ${(r.ms / 1000).toFixed(1)}s</span>`);
-      } else host.setStatus(`<span>변이 다시 — 지금 배정이 ${r.tried} 배정 중 1 위입니다  ${(r.ms / 1000).toFixed(1)}s</span>`);
+        host.setStatus(`<span>variant 다시 — ${r.tried} 배정 중 1 위를 적용했습니다 (면적x배선 ${Math.exp(best.score - (r.ranking[r.current]?.score ?? best.score)).toFixed(3)} 배)  ${(r.ms / 1000).toFixed(1)}s</span>`);
+      } else host.setStatus(`<span>variant 다시 — 지금 배정이 ${r.tried} 배정 중 1 위입니다  ${(r.ms / 1000).toFixed(1)}s</span>`);
     } catch (e) {
-      host.setStatus(`<span style="color:var(--copper)">변이 다시 실패 — ${esc(e.message)}</span>`);
+      host.setStatus(`<span style="color:var(--copper)">variant 다시 실패 — ${esc(e.message)}</span>`);
     } finally { pl.busy = false; render(); }
   }
   /** retry 의 순위 하나를 배치로 굳힌다 */
@@ -725,7 +725,7 @@ export function createEditor(host) {
       const nm = sel[0], i = pl.model.idx.get(nm), vc = variantChoices(pl.model, nm), ff = flipFreedom(pl.model, nm);
       const opts = vc.choices.map((c) => `<option value="${esc(c.concrete)}"${c.concrete === vc.current ? " selected" : ""}>${esc(short(c.concrete))} ${Math.round(c.w)}×${Math.round(c.h)}</option>`).join("");
       rows.push(`<div class="editrow"><span class="lab">블록</span><span><b>${esc(nm)}</b> · ${esc(pl.model.design.instances.find((v) => v.name === nm)?.abstract ?? "")}${vc.members.length > 1 ? ` · 거울 쌍 ${esc(vc.members.filter((q) => q !== nm).join(" "))}` : ""}</span></div>`);
-      rows.push(`<div class="editrow"><span class="lab">변이</span><span><select data-act="variant" data-name="${esc(nm)}"${vc.choices.length > 1 ? "" : " disabled"}>${opts}</select>${pl.pinned.has(nm) ? ` <button data-act="unpin" data-name="${esc(nm)}" title="Placement 실행 때 이 변이를 고정하지 않는다">고정 해제</button>` : ""}</span></div>`);
+      rows.push(`<div class="editrow"><span class="lab">variant</span><span><select data-act="variant" data-name="${esc(nm)}"${vc.choices.length > 1 ? "" : " disabled"}>${opts}</select>${pl.pinned.has(nm) ? ` <button data-act="unpin" data-name="${esc(nm)}" title="Placement 실행 때 이 variant 를 고정하지 않는다">고정 해제</button>` : ""}</span></div>`);
       rows.push(`<div class="editrow"><span class="lab">반전</span><span><button data-act="flipx"${ff.xFree ? "" : " disabled"} title="${ff.xFree ? "x 반전 (F)" : "제약에 묶여 있다"}">x ${pl.sx[i] > 0 ? "+" : "−"}</button> <button data-act="flipy"${ff.yFree ? "" : " disabled"} title="${ff.yFree ? "y 반전 (V)" : "제약에 묶여 있다"}">y ${pl.sy[i] > 0 ? "+" : "−"}</button> <button data-act="lock" title="잠근 블록은 끌리지 않고 정리 때도 그 자리 (L)">${pl.locked.has(nm) ? "잠금 해제" : "잠금"}</button></span></div>`);
       rows.push(`<div class="editrow"><span class="lab">자리</span><span>x ${fmt(live.rects[i].x)} y ${fmt(live.rects[i].y)} · ${Math.round(live.rects[i].w)}×${Math.round(live.rects[i].h)}</span></div>`);
     } else if (sel.length > 1) {
@@ -736,14 +736,14 @@ export function createEditor(host) {
     if (pl.pinned.size) {
       const seen = new Set(), items = [];
       for (const [nm, c] of pl.pinned) { if (seen.has(c + nm)) continue; seen.add(c + nm); items.push(`${esc(nm)} <small>${esc(short(c))}</small> <button data-act="unpin" data-name="${esc(nm)}" title="고정 해제">×</button>`); }
-      rows.push(`<div class="editrow"><span class="lab">고정 변이</span><span>${items.join(" · ")}<br><small style="color:var(--muted)">다음 Placement 실행도 이 변이를 씁니다 (나머지는 배치기가 고른다)</small></span></div>`);
+      rows.push(`<div class="editrow"><span class="lab">고정 variant</span><span>${items.join(" · ")}<br><small style="color:var(--muted)">다음 Placement 실행도 이 variant 를 씁니다 (나머지는 배치기가 고른다)</small></span></div>`);
     }
     rows.push(`<div class="editrow"><span class="lab">정리</span><span>` +
       `<button class="run" data-act="settle" title="편집 좌표의 쌍 관계(위상)를 그대로 두고 겹침을 없애고 격자에 앉힌다 (Enter)"${pl.busy ? " disabled" : ""}>정리 (위상 유지)</button> ` +
-      `<button data-act="retry" title="정리한 뒤 같은 위상에서 변이를 전수로 다시 고른다 — 고정한 변이는 그대로"${pl.busy ? " disabled" : ""}>위상 유지 최적화</button> ` +
+      `<button data-act="retry" title="정리한 뒤 같은 위상에서 variant 를 전수로 다시 고른다 — 고정한 variant 는 그대로"${pl.busy ? " disabled" : ""}>위상 유지 최적화</button> ` +
       `<button data-act="reflip" title="좌표는 그대로, 반전만 다시 고른다">반전 다시</button></span></div>`);
     rows.push(`<div class="editrow"><span class="lab">압축</span><span><input type="range" data-act="compact" min="0" max="20" step="1" value="${Math.round(pl.compact * 10)}" style="width:120px;vertical-align:middle"> <b id="editCompact">${pl.compact.toFixed(1)}</b> <small style="color:var(--muted)">0 손댄 것만 · 0.5 배치기 기본</small> · <label><input type="checkbox" data-act="both"${pl.both ? " checked" : ""}> 관계 둘 다 <small style="color:var(--muted)">(덜 움직이고 덜 압축)</small></label></span></div>`);
-    rows.push(`<div class="editrow"><span class="lab">이력</span><span><button data-act="undo"${pl.hist.length ? "" : " disabled"} title="Z">되돌리기</button> <button data-act="redo"${pl.fut.length ? "" : " disabled"} title="Y">다시 실행</button> <button data-act="revert" title="배치기가 낸 배치로 되돌린다 (고정 변이는 남는다)">원래 배치로</button></span></div>`);
+    rows.push(`<div class="editrow"><span class="lab">이력</span><span><button data-act="undo"${pl.hist.length ? "" : " disabled"} title="Z">되돌리기</button> <button data-act="redo"${pl.fut.length ? "" : " disabled"} title="Y">다시 실행</button> <button data-act="revert" title="배치기가 낸 배치로 되돌린다 (고정 variant 는 남는다)">원래 배치로</button></span></div>`);
     if (pl.ranking) {
       const cur = state().ours;
       const tr = pl.ranking.map((r, k) => `<tr><td class="dim">${k + 1}</td><td class="dim">${Math.round(r.bbox[2])}×${Math.round(r.bbox[3])}</td><td class="dim">${fmt(r.hpwl)}</td><td class="dim">${(r.score - (pl.ranking.find((q) => q.current)?.score ?? r.score)).toFixed(3)}</td><td>${r.current ? "<small>지금 배정</small>" : `<button data-act="apply" data-k="${k}">적용</button>`}</td></tr>`).join("");

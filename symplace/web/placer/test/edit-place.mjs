@@ -1,4 +1,4 @@
-/** 배치 편집 검사 (src/edit/place.mjs) — 편집 키트, 끌기 사영, 정리, 변이 다시 고르기.
+/** 배치 편집 검사 (src/edit/place.mjs) — 편집 키트, 끌기 사영, 정리, variant 다시 고르기.
  *
  *  예제마다 배치(CPU, 시작점 BATCH, 격자)를 한 번 한 뒤:
  *    키트     rebuild 한 문제가 배치기 안의 문제와 이름·크기·핀이 같고, theta 를 되찾은 좌표 오차 < 1e-9
@@ -6,7 +6,7 @@
  *             끄는 동안 대칭 잔차 < 1e-9
  *    정리     편집 6 종 (끌기 넷, 자리 바꾸기, 겹치게 던지기) 마다 겹침 0, 잔차 < 1e-9, 격자 밖 0,
  *             편집 좌표에서 성립하던 쌍 관계 보존, 편집 없이 정리하면 이동 0
- *    변이     같은 위상에서 배정을 전수로 — 지금 배정이 항등이고, 1 위 점수 <= 지금 점수
+ *    variant     같은 위상에서 배정을 전수로 — 지금 배정이 항등이고, 1 위 점수 <= 지금 점수
  *
  *  실행:  node symplace/web/placer/test/edit-place.mjs [예제 ...]    (BATCH=48, ALL=1 이면 예제 전부, CACHE=1 이면 배치를 캐시)
  */
@@ -159,7 +159,7 @@ for (const ex of wanted) {
   const same = run("편집 없음", c0);
   if (same) ok(same.move < 1e-6, `편집 없이 정리했는데 ${same.move} 움직였다`);
 
-  // --- 반전·변이 ---
+  // --- 반전·variant ---
   const fr = chooseFlips(model, cx0, cy0);
   ok(Math.abs(fr.hpwl - base.hpwl) < 1e-6 || fr.hpwl <= base.hpwl + 1e-6, "반전 다시 고르기가 HPWL 을 늘렸다");
   for (const nm of P.names) {
@@ -170,28 +170,28 @@ for (const ex of wanted) {
       ok((axis === "x" ? f.sx[i] : f.sy[i]) === -(axis === "x" ? model.sx[i] : model.sy[i]), `${nm} ${axis} 반전이 안 뒤집혔다`);
     }
     const vc = variantChoices(model, nm);
-    ok(vc && vc.current === P.concrete[model.idx.get(nm)], `${nm} 의 변이 후보를 못 찾았다`);
+    ok(vc && vc.current === P.concrete[model.idx.get(nm)], `${nm} 의 variant 후보를 못 찾았다`);
     if (vc && vc.choices.length > 1) {
       const other = vc.choices.find((c) => c.concrete !== vc.current);
       const rects2 = withVariant(model, base.rects, nm, other.concrete);
       const m2 = rebuild(blob, kit, rects2);
-      ok(m2.P.concrete[m2.idx.get(nm)] === other.concrete, `${nm} 변이 바꾸기가 안 먹었다`);
+      ok(m2.P.concrete[m2.idx.get(nm)] === other.concrete, `${nm} variant 바꾸기가 안 먹었다`);
       break;
     }
   }
 
-  // --- 변이 다시 고르기 (같은 위상) ---
+  // --- variant 다시 고르기 (같은 위상) ---
   const rv = retryVariants(model, cx0, cy0, model.sx, model.sy, { cap: 128 });
   const cur = rv.ranking[rv.current];
-  console.log(`  변이 다시: 배정 ${rv.total} (본 것 ${rv.tried}, 풀린 것 ${rv.ranking.length}) ${rv.ms.toFixed(0)} ms  지금 ${rv.current + 1} 위  1 위 ${Math.round(rv.ranking[0].bbox[2])}x${Math.round(rv.ranking[0].bbox[3])} 점수 ${rv.ranking[0].score.toFixed(3)} (지금 ${cur?.score.toFixed(3)})`);
+  console.log(`  variant 다시: 배정 ${rv.total} (본 것 ${rv.tried}, 풀린 것 ${rv.ranking.length}) ${rv.ms.toFixed(0)} ms  지금 ${rv.current + 1} 위  1 위 ${Math.round(rv.ranking[0].bbox[2])}x${Math.round(rv.ranking[0].bbox[3])} 점수 ${rv.ranking[0].score.toFixed(3)} (지금 ${cur?.score.toFixed(3)})`);
   ok(cur && Math.abs(cur.score - base.score) < 1e-6, `지금 배정이 항등이 아니다 (${cur?.score} / ${base.score})`);
   ok(rv.ranking[0].score <= base.score + 1e-9, "1 위가 지금보다 나쁘다");
-  // 고정: 첫 그룹의 지금 변이를 고정하면 그 변이만 나와야 한다
+  // 고정: 첫 그룹의 지금 variant 를 고정하면 그 variant 만 나와야 한다
   const g0 = model.groups.find((g) => g.choices.length > 1);
   if (g0) {
     const nm = model.design.instances[g0.members[0]].name, c = P.concrete[model.idx.get(nm)];
     const rf = retryVariants(model, cx0, cy0, model.sx, model.sy, { cap: 128, fixed: { [nm]: c } });
-    ok(rf.ranking.every((r) => r.concrete[model.idx.get(nm)] === c), "고정한 변이가 안 지켜졌다");
+    ok(rf.ranking.every((r) => r.concrete[model.idx.get(nm)] === c), "고정한 variant 가 안 지켜졌다");
   }
 }
 console.log(fails ? `\n실패 ${fails} 건` : "\n전부 통과");

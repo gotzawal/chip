@@ -1,11 +1,11 @@
-# 변이 선택이 ALIGN 과 갈리는 이유, 그리고 배치기를 WebGPU 로 옮기는 계획
+# variant 선택이 ALIGN 과 갈리는 이유, 그리고 배치기를 WebGPU 로 옮기는 계획
 
 > **기록이다.** 이 문서의 실측은 ALIGN 의 배치 결과를 기준선으로 저장소에 두던 때의 것이다. 그 기준선과
 > 비교 도구(`scripts/place/hpwl_extend.mjs`, `rescore.mjs`, `test/variants.mjs` 의 ALIGN 배정 순위)는
 > 걷어냈다 (커밋 `9a16a42` 까지 있다). 처방(핀 경계 HPWL, 로그 점수, 라운드 예산, WebGPU)은 코드에 남아 있다.
 
-배치기가 ALIGN 원본보다 길쭉한 변이를 고르고 면적·배선 효율이 떨어진다는 관찰에서
-출발한다. 1 절은 ALIGN 원본이 변이를 고르는 방식(소스 근거), 2 절은 우리 배치기가
+배치기가 ALIGN 원본보다 길쭉한 variant 를 고르고 면적·배선 효율이 떨어진다는 관찰에서
+출발한다. 1 절은 ALIGN 원본이 variant 를 고르는 방식(소스 근거), 2 절은 우리 배치기가
 어디서 갈리는지를 실측으로 짚고, 3 절이 처방, 4 절이 WebGPU 계획이다.
 
 실측은 전부 이 저장소의 코드로 다시 낼 수 있다 (`symplace/web/placer/test/variants.mjs`,
@@ -18,7 +18,7 @@
 1. **배선 저울이 핀의 길이를 안 본다** (가장 크다). 우리 HPWL 은 넷마다 핀 사각형
    합집합의 **중심 한 점**을 쓴다. ALIGN 의 비용은 `HPWL_extend` — 핀 **경계 사각형**의
    min/max 다. 손가락 16 개를 한 줄로 늘어놓은 `X16_Y1` 은 핀이 폭 5,032 짜리 가로
-   막대인데, 우리 눈에는 블록 중앙의 점 하나다. 그래서 길쭉한 변이일수록 배선이
+   막대인데, 우리 눈에는 블록 중앙의 점 하나다. 그래서 길쭉한 variant 일수록 배선이
    공짜로 보인다. five_transistor_ota 에서 우리 배정은 우리 저울로 ALIGN 배정을
    이기지만 (2.68 대 3.00), ALIGN 저울로는 배선이 2.1 배 길다 (16,732 대 7,860).
    **우리가 만든 후보들을 ALIGN 저울로 다시 줄 세우면 ALIGN 의 배정이 60 개 중 1 위다.**
@@ -39,19 +39,19 @@
 그대로 맞는다. 옮기기 전에 밀도항을 랭크 N 항등식으로 3 배 줄인다 (4.2 절) —
 CPU 도 같이 빨라지고, GPU 가 흉내낼 알고리즘이 하나로 정리된다.
 
-## 1. ALIGN 원본은 변이를 어떻게 고르나
+## 1. ALIGN 원본은 variant 를 어떻게 고르나
 
 ALIGN-public `PlaceRouteHierFlow/placer/` (master, 2026-09 기준) 을 읽었다.
 저장소에는 이 소스가 없다 — 배선기(`alignroute`)만 옮겼고 배치기는 새로 짰기 때문이다.
 
 **탐색.** `Placer::PlacementCoreAspectRatio_ILP` 가 수열쌍(sequence pair) 담금질을
-돈다. 상태는 `(posPair, negPair, selected[])` — `selected[i]` 가 블록 i 의 변이다.
+돈다. 상태는 `(posPair, negPair, selected[])` — `selected[i]` 가 블록 i 의 variant 다.
 이동은 일곱 가지 중 무작위고 그중 하나가 `ChangeSelectedBlock` (블록 하나를 골라
-변이를 아무거나로 바꾼다). 온도는 `T_INT 0.5 -> T_MIN 0.05`, `ALPHA 0.995` 라
-온도 단계가 460 개고, 단계마다 `effort` 번 이동한다. 수열쌍 수 x 변이 조합 수가
+variant 를 아무거나로 바꾼다). 온도는 `T_INT 0.5 -> T_MIN 0.05`, `ALPHA 0.995` 라
+온도 단계가 460 개고, 단계마다 `effort` 번 이동한다. 수열쌍 수 x variant 조합 수가
 460 이하면 담금질 대신 **전수 열거**한다 (`SeqPairEnumerator`). 예제 다섯 개의
 최상위는 전부 한도를 넘어 담금질이다 (five_transistor 는 36 x 60 = 2,160).
-hsc 의 블록 두 개짜리 하위 모듈은 4 x 변이 조합이라 전수 열거 범위에 들 수 있다.
+hsc 의 블록 두 개짜리 하위 모듈은 4 x variant 조합이라 전수 열거 범위에 들 수 있다.
 
 **좌표.** 후보 `(sp, selected)` 마다 `ILP_solver::GenerateValidSolution` 이 좌표를
 ILP 로 푼다. 목적함수는 `LAMBDA x 핀 중심 HPWL + 추정 둘레` 이고, 거울 반전
@@ -81,7 +81,7 @@ LAMBDA = 1.0 (PlacerHyperparameters.h)
 five_transistor_ota, ALIGN 배치와 우리 배치(시작점 96, 씨앗 1, 격자)에 두 저울을
 같이 댔다 (`symplace/scripts/place/hpwl_extend.mjs`).
 
-| 배치 | 변이 | bbox | 면적 | 핀 중심 HPWL (우리) | HPWL_extend (ALIGN) |
+| 배치 | variant | bbox | 면적 | 핀 중심 HPWL (우리) | HPWL_extend (ALIGN) |
 |---|---|---|---|---|---|
 | ALIGN | X4_Y1 X8_Y2 X4_Y2 | 4160x5880 | 24.46M | 4,260 | 7,860 |
 | 우리 | X4_Y1 **X16_Y1 X8_Y1** | 5600x4704 | 26.34M | **3,420** | **16,732** |
@@ -102,7 +102,7 @@ five_transistor_ota, ALIGN 배치와 우리 배치(시작점 96, 씨앗 1, 격�
 - 우리 저울: 우리 배치 2.68 < ALIGN 배치 3.00 — 우리가 이긴다.
 - ALIGN 저울 `log(area) + log(HPWL_extend)`: 26.81 > 25.98 — `e^0.83 = 2.3 배` 진다.
 
-이 착시는 **길쭉한 변이에 체계적으로 유리하다.** 핀 막대의 길이는 변이의 폭에
+이 착시는 **길쭉한 variant 에 체계적으로 유리하다.** 핀 막대의 길이는 variant 의 폭에
 비례하는데 핀 중심은 늘 블록 가운데 근처라, 넷이 블록 중심만 맞추면 배선이 0 에
 가깝게 보인다. 반전 고르기가 HPWL 을 8,964 -> 3,420 (0.38 배) 으로 줄인 것도 같은
 착시다 — 진짜 배선은 그만큼 줄지 않는다.
@@ -151,7 +151,7 @@ ALIGN 은 위상(수열쌍)마다 ILP 로 좌표를 압축한다 — 그 위상�
 ### 2.4 계층 설계에서는 같은 원인이 아래층에서 위층으로 올라간다
 
 hsc 의 하위 모듈 `PRIMITIVE_*` 는 블록이 두 개다. 그 안에서 2.1 의 착시로 길쭉한
-변이를 고르면 모듈 자체가 길쭉해지고 (README 의 1280 x 19992), 그것이 상위의
+variant 를 고르면 모듈 자체가 길쭉해지고 (README 의 1280 x 19992), 그것이 상위의
 입력이 된다. `spreadShapes` 로 여러 모양을 올리는 것은 증상을 덮는 장치지
 원인을 없애지 않는다. 저울을 고치면 하위 모듈에서부터 달라진다.
 
@@ -197,7 +197,7 @@ score = log(area) + hpwlWeight * log(HPWL_extend)      (겹침 벌점은 그대�
 
 - `test/variants.mjs` 에 `hpwl_extend` 열과 (b) 순위를 찍는다. five_transistor 에서
   ALIGN 배정이 1 위, current_mirror 1 위가 나와야 한다.
-- `test/place.mjs` 다섯 예제. 기대: five_transistor 가 ALIGN 과 같은 변이 (3/3),
+- `test/place.mjs` 다섯 예제. 기대: five_transistor 가 ALIGN 과 같은 variant (3/3),
   hsc 하위 모듈의 폭 1280 홀쭉이가 사라짐. telescopic 은 3 절만으로는 씨앗 운이
   남는다 (2.2) — 4 절 뒤에 다시 잰다.
 - `hpwlBeforeFlip -> hpwl` 의 반전 이득이 0.38 배 같은 값에서 ALIGN 급 (0.7~0.9)
@@ -396,19 +396,19 @@ node symplace/scripts/place/prof.mjs                              # 4.1 의 표
 CPU, 시작점 96, 씨앗 1 (핀 경계 HPWL, ALIGN 대비):
 
 ```
-telescopic_ota              1.000 / 1.000   변이 5/5   bbox 같음   4.7 s  (전 10 s)
-current_mirror_ota          1.000 / 1.000   변이 5/5   bbox 같음   5.1 s  (전 16 s)
-five_transistor_ota         1.000 / 1.021   변이 3/3   bbox 같음   6.5 s  (전 32 s)
-cascode_current_mirror_ota  1.000 / 1.107   변이 10/11 bbox 같음  20.8 s  (전 65 s)
-high_speed_comparator       1.222 / 1.132   변이 4/10  6080x12936 48.0 s  (전 171 s)
-high_speed_comparator       1.111 / 1.044   변이 4/10  6080x11760 50.9 s  배정 108 전수 (시작점 324), 격자 포함
+telescopic_ota              1.000 / 1.000   variant 5/5   bbox 같음   4.7 s  (전 10 s)
+current_mirror_ota          1.000 / 1.000   variant 5/5   bbox 같음   5.1 s  (전 16 s)
+five_transistor_ota         1.000 / 1.021   variant 3/3   bbox 같음   6.5 s  (전 32 s)
+cascode_current_mirror_ota  1.000 / 1.107   variant 10/11 bbox 같음  20.8 s  (전 65 s)
+high_speed_comparator       1.222 / 1.132   variant 4/10  6080x12936 48.0 s  (전 171 s)
+high_speed_comparator       1.111 / 1.044   variant 4/10  6080x11760 50.9 s  배정 108 전수 (시작점 324), 격자 포함
 ```
 
 그 뒤 고친 것 둘. 배정 상한을 128 (GPU 512) 까지 전수로 — 96 이면 108 개 중 96 개만
 추첨해 288 과 답이 달랐다. 배선 격자(정수 분기)는 후보 전부가 아니라 내보낼 것
 (최선 + 모양별 최선, 최대 24 개)에만 건다 — hsc 의 마지막 단계가 1 분에서 3 초로.
 
-hsc 가 남았다. 하위 모듈 넷의 변이가 ALIGN 과 다르게 올라가 최상위가 한 줄(2352)
+hsc 가 남았다. 하위 모듈 넷의 variant 가 ALIGN 과 다르게 올라가 최상위가 한 줄(2352)
 높다. 표본을 늘리면 좋아진다 — 페이지를 headless Chromium(WebGPU, SwiftShader)로
 돌려 설정당 8 개(2,304 시작점)를 주니 1.111 / 1.109 (733 s, 소프트웨어 GPU).
 실제 GPU 에서 설정당 32 개로 재는 것이 다음이다.

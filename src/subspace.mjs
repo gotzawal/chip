@@ -92,7 +92,7 @@ export function build(constraints, instNames, sizes) {
     const col = axisXY === "x" ? (n) => sysm.cx(n) : (n) => sysm.cy(n);
     const dim = axisXY === "x" ? 0 : 1;
 
-    // 중심 기준 상수 오프셋. 중심이면 0, 최소변이면 -w/2, 최대변이면 +w/2
+    // 중심 기준 상수 오프셋. 중심이면 0, 최소variant 면 -w/2, 최대variant 면 +w/2
     const edgeOffset = (n) => {
       const half = sizes.get(n)[dim] / 2;
       return kind === "center" ? 0.0 : kind === "min" ? -half : +half;

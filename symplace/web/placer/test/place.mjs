@@ -5,7 +5,7 @@
  *  보는 것:
  *    겹침 정확히 0, 대칭 잔차 ~0, Order 위반 0, (GRID=1 이면) 격자 밖 블록 0
  *    면적이 블록 합계 면적의 3 배 안쪽 (구조가 깨졌는지)
- *    변이 배정·반전·bbox·HPWL 은 보고만 한다
+ *    variant 배정·반전·bbox·HPWL 은 보고만 한다
  *    legalize    상위 후보 중 몇 개가 풀렸나 (영역 후보가 나쁘면 INFEASIBLE)
  *
  *  실행:  node test/place.mjs [예제 ...]     (BATCH=, ITERS=, GRID=1, GPU=<설정당 시작점>)
@@ -51,7 +51,7 @@ for (const ex of exampleNames()) {
   let blockArea = 0;
   for (let i = 0; i < r.w.length; i++) blockArea += r.w[i] * r.h[i];
   const resid = symmetryResidual(r.problem, r.cx, r.cy);
-  console.log(`  블록 ${r.names.length}  변이조합 ${r.totalAssignments}  설정 ${r.configs}  방향뒤집기 ${r.dirFlips ?? 0}  ` +
+  console.log(`  블록 ${r.names.length}  variant 조합 ${r.totalAssignments}  설정 ${r.configs}  방향뒤집기 ${r.dirFlips ?? 0}  ` +
               `시작점 ${r.starts} (${r.runner})  legalize ${r.tried - r.legalizeFail}/${r.tried} 격자 ${r.gridTried}  ${dt.toFixed(1)}s (탐색 ${r.secs.search.toFixed(1)} legalize ${r.secs.legalize.toFixed(1)})`);
   console.log(`  bbox ${Math.round(bw)}x${Math.round(bh)}  채움 ${(blockArea / Math.max(1, r.area)).toFixed(3)}  HPWL ${r.hpwl.toFixed(0)}  ` +
               `겹침 ${(r.overlap / blockArea).toExponential(1)}  대칭잔차 ${resid.toExponential(1)}` +
@@ -70,7 +70,7 @@ for (const ex of exampleNames()) {
   // 품질은 수치로 보고하되, 구조가 깨졌을 때만 실패로 본다.
   // (블록 합계 면적의 3 배는 "다른 절충"이 아니라 무언가 고장난 것이다)
   ok(r.area < 3 * blockArea, `면적이 블록 합계의 ${(r.area / blockArea).toFixed(1)} 배다 — 구조 문제`);
-  console.log(`  변이 ${r.concrete.map((c) => c.replace(/^.*_(X\d+_Y\d+)$/, "$1")).join(" ")}  ` +
+  console.log(`  variant ${r.concrete.map((c) => c.replace(/^.*_(X\d+_Y\d+)$/, "$1")).join(" ")}  ` +
               `반전 ${r.names.map((_, i) => (r.sx[i] > 0 ? "+" : "-") + (r.sy[i] > 0 ? "+" : "-")).join(" ")}`);
 }
 console.log(fails ? `\n실패 ${fails} 건` : "\n전부 통과");

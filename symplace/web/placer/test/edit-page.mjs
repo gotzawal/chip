@@ -3,8 +3,8 @@
  *  보는 것:
  *    편집 토글이 켜지고 카드가 뜬다. 편집이 없으면 배치 결과(rects)가 그대로다.
  *    블록을 끌면 그 블록만 따라오고(자유 블록) 정리 전 상태가 되며, Enter 로 정리하면 겹침 0·편집 1 회,
- *    이 배치의 배선 결과는 지워진다. F 로 반전, Z 로 되돌리기, 카드에서 변이를 고르면 고정되고
- *    다음 Placement 실행이 그 변이를 쓴다. "위상 유지 최적화" 가 순위를 보인다.
+ *    이 배치의 배선 결과는 지워진다. F 로 반전, Z 로 되돌리기, 카드에서 variant 를 고르면 고정되고
+ *    다음 Placement 실행이 그 variant 를 쓴다. "위상 유지 최적화" 가 순위를 보인다.
  *
  *    그 다음 배선하고 배선 편집 모드에서 넷·조각을 골라 한 트랙 끌면 재검사가 돌고 그 넷이 고정되며, Z/Y 로
  *    되돌리고, "이 넷만 다시 배선" 이 나머지를 고정한 채 배선기를 돌린다.
@@ -52,6 +52,24 @@ try {
   const kit = await page.evaluate(() => globalThis.__page.ours.edit ? Object.keys(globalThis.__page.ours.edit.subTemplates).length : null);
   ok(kit !== null, "done 에 편집 키트가 없다");
   console.log(`  편집 켬 · 키트 템플릿 ${kit} 개`);
+  // 편집 카드가 결과 카드 자리에 오고 나머지 카드는 접힌다. 보기로 돌아가면 되돌아온다.
+  const layout = () => page.evaluate(() => {
+    const ec = document.querySelector("#editCard"), rc = document.querySelector("#resultCard");
+    const folds = [...document.querySelectorAll(".card.fold")];
+    return { editShown: !ec.hidden, editFirst: ec.nextElementSibling === rc, folded: folds.filter((c) => c.classList.contains("collapsed")).length, cards: folds.length };
+  });
+  const l1 = await layout();
+  ok(l1.editShown && l1.editFirst, "편집 카드가 결과 카드 자리에 안 왔다");
+  ok(l1.folded === l1.cards, `다른 카드가 다 안 접혔다 (${l1.folded}/${l1.cards})`);
+  await page.click("#resultCard > h2");
+  ok((await layout()).folded === l1.cards - 1, "제목을 클릭해도 카드가 안 펴진다");
+  await page.click('#modeSeg button[data-mode="view"]');
+  const l2 = await layout();
+  ok(!l2.editShown && !l2.editFirst && l2.folded === 0, `보기로 돌아가도 카드가 안 돌아온다 (편집 ${l2.editShown}, 접힘 ${l2.folded})`);
+  await page.click('#modeSeg button[data-mode="edit"]');
+  await page.waitForTimeout(100);
+  ok((await layout()).folded === l1.cards, "다시 편집을 켜면 다시 접혀야 한다");
+  console.log(`  카드: 편집 카드가 결과 자리에, 접힌 카드 ${l1.folded}/${l1.cards}, 보기로 가면 되돌아옴`);
 
   // --- 끌기: 자유 블록(대칭 밖)이 있으면 그것, 없으면 아무 블록 ---
   const pick = await page.evaluate(() => {
@@ -113,7 +131,7 @@ try {
   ok(afterUndo.fut === 1, "되돌리기가 이력을 안 남겼다");
   console.log(`  되돌리기: 편집 ${afterUndo.edited} 회, 이력 ${afterUndo.hist}, 다시 실행 ${afterUndo.fut}`);
 
-  // --- 변이 고정: 후보가 둘 이상인 블록을 골라 다른 변이로 ---
+  // --- variant 고정: 후보가 둘 이상인 블록을 골라 다른 variant 로 ---
   const vpick = await page.evaluate(() => {
     const ed = globalThis.__page.editor, m = ed.state.pl.model;
     for (const g of m.groups) if (g.choices.length > 1) {
@@ -129,27 +147,27 @@ try {
     await page.selectOption('#editBody select[data-act="variant"]', vpick.other);
     await page.waitForTimeout(200);
     const v = await page.evaluate((nm) => { const pl = globalThis.__page.editor.state.pl; return { c: pl.model.P.concrete[pl.model.idx.get(nm)], pinned: [...pl.pinned], dirty: pl.dirty }; }, vpick.name);
-    ok(v.c === vpick.other, `변이가 안 바뀌었다 (${v.c})`);
-    ok(v.pinned.some(([n, c]) => n === vpick.name && c === vpick.other), "변이가 고정되지 않았다");
-    console.log(`  변이 ${vpick.name}: ${vpick.cur} -> ${v.c} (고정 ${v.pinned.length} 개) · 정리 전 ${v.dirty}`);
+    ok(v.c === vpick.other, `variant 가 안 바뀌었다 (${v.c})`);
+    ok(v.pinned.some(([n, c]) => n === vpick.name && c === vpick.other), "variant 가 고정되지 않았다");
+    console.log(`  variant ${vpick.name}: ${vpick.cur} -> ${v.c} (고정 ${v.pinned.length} 개) · 정리 전 ${v.dirty}`);
     await page.keyboard.press("Enter");
     await page.waitForTimeout(300);
-    ok(!(await page.evaluate(() => globalThis.__page.editor.state.pl.dirty)), "변이 뒤 정리가 안 됐다");
-    // 다음 Placement 실행이 고정 변이를 쓴다
+    ok(!(await page.evaluate(() => globalThis.__page.editor.state.pl.dirty)), "variant 뒤 정리가 안 됐다");
+    // 다음 Placement 실행이 고정 variant 를 쓴다
     const t1 = Date.now();
-    console.log(`  고정 변이로 다시 배치: ${await runPlace()}  (${((Date.now() - t1) / 1000).toFixed(0)}s)`);
+    console.log(`  고정 variant 로 다시 배치: ${await runPlace()}  (${((Date.now() - t1) / 1000).toFixed(0)}s)`);
     const again = await page.evaluate((nm) => { const o = globalThis.__page.ours; return { c: o.rects.find((r) => r.name === nm)?.concrete, fixed: o.fixedVariants, edited: o.edited ?? 0, pinned: globalThis.__page.editor.state.pl.pinned.size }; }, vpick.name);
-    ok(again.c === vpick.other, `다시 배치했는데 고정 변이를 안 썼다 (${again.c})`);
-    ok(again.fixed && again.fixed[vpick.name] === vpick.other, "done 에 고정 변이가 없다");
+    ok(again.c === vpick.other, `다시 배치했는데 고정 variant 를 안 썼다 (${again.c})`);
+    ok(again.fixed && again.fixed[vpick.name] === vpick.other, "done 에 고정 variant 가 없다");
     ok(again.edited === 0 && again.pinned > 0, "새 배치는 편집 0 회여야 하고 고정은 남아야 한다");
-  } else console.log("  변이 후보가 하나뿐인 설계 — 변이 고정은 건너뛴다");
+  } else console.log("  variant 후보가 하나뿐인 설계 — variant 고정은 건너뛴다");
 
   // --- 위상 유지 최적화 (워커 retry) ---
   await page.click('#editBody button[data-act="retry"]');
-  await page.waitForFunction(() => /변이 다시|실패/.test(document.querySelector("#status").textContent), null, { timeout: 120000 });
+  await page.waitForFunction(() => /variant 다시|실패/.test(document.querySelector("#status").textContent), null, { timeout: 120000 });
   const rs = (await page.textContent("#status")).trim();
   console.log(`  위상 유지 최적화: ${rs}`);
-  ok(/변이 다시 —/.test(rs), "변이 다시가 실패했다");
+  ok(/variant 다시 —/.test(rs), "variant 다시가 실패했다");
   ok(await page.$eval("#editBody", (e) => !!e.querySelector("table.rank")), "순위 표가 없다");
 
   // --- 편집 끄기: 편집이 없으면 그대로 ---

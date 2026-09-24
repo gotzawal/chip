@@ -21,8 +21,8 @@ import { Mat, matmul } from "./linalg.mjs";
  *  ## 핀은 점이 아니라 사각형이다 — ex, ey 는 핀의 반폭
  *
  *  ALIGN 배치기의 비용(`HPWL_extend`)은 넷마다 핀 **경계 사각형**의 min/max 를
- *  잰다. 손가락 16 개를 한 줄로 늘어놓은 변이는 핀이 폭 5,000 짜리 막대인데,
- *  핀 중심 한 점으로 재면 그 길이가 통째로 사라져 길쭉한 변이가 공짜로 보였다
+ *  잰다. 손가락 16 개를 한 줄로 늘어놓은 variant 는 핀이 폭 5,000 짜리 막대인데,
+ *  핀 중심 한 점으로 재면 그 길이가 통째로 사라져 길쭉한 variant 가 공짜로 보였다
  *  (symplace/PLAN-place-variants-gpu.md 2.1 절). 그래서 max 에는 `x + ex`,
  *  min 에는 `x - ex` 를 넣는다. 식은 그대로고 넣는 점만 바뀐다 — 두 항 모두
  *  같은 x 로 미분되므로 기울기도 그대로 합쳐진다. ex, ey 를 안 주면 점이다.
@@ -34,7 +34,7 @@ export function wirelength(px, py, pinNet, nNet, gamma, ex = null, ey = null) {
   const gy = new Float64Array(P);
 
   for (const [pos, ext, grad] of [[px, ex, gx], [py, ey, gy]]) {
-    // exp 가 터지지 않게 넷별 최댓값/최솟값을 뺀다. W 는 평행이동에 불변이라 안전하다.
+    // exp 가 터지지 않게 넷별 최댓값/최솟값을 뺀다. W 는 평행이동에 불variant 라 안전하다.
     const hi = new Float64Array(nNet).fill(-Infinity);
     const lo = new Float64Array(nNet).fill(Infinity);
     for (let p = 0; p < P; p++) {

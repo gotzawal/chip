@@ -262,7 +262,7 @@ export function placeFromJson(node, modules, drc) {
       const p = pos.get(i);
       nd.Blocks[i].selectedInstance = p.sel;
       const ort = p.hf ? (p.vf ? "S" : "FN") : (p.vf ? "FS" : "N");
-      if (p.sel >= back.Blocks[i].instNum) throw new Error(`${node.name}: 블록 ${i} 의 변이 ${p.sel} 가 design 에 없다`);
+      if (p.sel >= back.Blocks[i].instNum) throw new Error(`${node.name}: 블록 ${i} 의 variant ${p.sel} 가 design 에 없다`);
       updateBlockInHierNode(nd, i, p.sel, ort, p.x, p.y, back.Blocks[i].instance[p.sel]);
     }
     updateTerminalInHierNode(nd, drc);

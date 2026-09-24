@@ -152,7 +152,7 @@ export function multiStart(obj, {
   return out;
 }
 
-// ------------------------------------------------- 변이 선택을 포함한 다중 시작
+// ------------------------------------------------- variant 선택을 포함한 다중 시작
 
 /** 후보 점수. ALIGN 배치기의 비용과 같은 꼴이다:
  *
@@ -168,7 +168,7 @@ export function scoreOf(area, hp, hpwlWeight = 1, overlap = 0) {
   return Math.log(Math.max(area, 1)) + hpwlWeight * Math.log(Math.max(hp, 1)) + 3 * overlap;
 }
 
-/** 변이 배정까지 **추첨에 포함시킨** 다중 시작.
+/** variant 배정까지 **추첨에 포함시킨** 다중 시작.
  *
  *  ## 왜 이게 필요한가
  *
@@ -180,13 +180,13 @@ export function scoreOf(area, hp, hpwlWeight = 1, overlap = 0) {
  *  다행히 고를 것이 적다. 실측 조합 수:
  *    current_mirror_ota 2, high_speed_comparator 4, telescopic_ota 8,
  *    cascode_current_mirror_ota 8, five_transistor_ota 60.
- *  블록이 11 개여도 조합은 8 개다 — 대부분의 인스턴스는 변이가 하나뿐이다.
+ *  블록이 11 개여도 조합은 8 개다 — 대부분의 인스턴스는 variant 가 하나뿐이다.
  *  그래서 작으면 전수, 크면 추첨으로 덮을 수 있다.
  *
  *  ## 구조
  *
  *  이미 시작점을 수십~수천 개 굴려 점수로 고르고 있으므로, 배정을 그 추첨의
- *  한 축으로 넣으면 끝난다. 설정 하나 = (변이 배정, 영역 후보) 이고,
+ *  한 축으로 넣으면 끝난다. 설정 하나 = (variant 배정, 영역 후보) 이고,
  *  설정마다 배정에 맞는 A z = b 와 영공간을 새로 만든다 — 대칭 계가 블록
  *  크기에 의존하기 때문에 재사용할 수 없다.
  *
@@ -200,7 +200,7 @@ export function scoreOf(area, hp, hpwlWeight = 1, overlap = 0) {
  *
  *  점수는 `log(면적) + w x log(HPWL) + 3 x 겹침` (scoreOf) 이다. 절대량이라
  *  배정 간 비교가 그대로 성립한다. 예전에 배정마다 그 배정의 블록 합계 면적으로
- *  나눈 적이 있는데 **틀렸다** — 면적비가 "채움률"이 되어, 변이에 따라 블록
+ *  나눈 적이 있는데 **틀렸다** — 면적비가 "채움률"이 되어, variant 에 따라 블록
  *  면적이 2 배 차이나는 것(NMOS_4T_85599263 X1_Y16 12.79M 대 X8_Y2 6.21M)을
  *  못 봤고 high_speed_comparator 최상위가 3840 x 42336 이 됐다. 로그 점수는
  *  기준값 자체가 없어 그 실수를 할 자리가 없다.
@@ -239,7 +239,7 @@ export async function multiStartVariants(design, groups, {
   // 상한은 예산과 느슨하게만 묶는다. GPU (perConfig) 면 예산이 설정 수에 비례하므로
   // 전수를 본다 (512 까지). CPU 도 128 까지는 전수다 — hsc 의 108 개를 96 으로
   // 추첨하면 ALIGN 이 고른 조합이 빠져 시작점 96 과 288 의 답이 달라졌다
-  // (XCCP 의 하위 모듈 변이). 1 라운드가 설정마다 하나씩은 보므로 배정 108 개면
+  // (XCCP 의 하위 모듈 variant). 1 라운드가 설정마다 하나씩은 보므로 배정 108 개면
   // 시작점 324 개가 하한이 되어 96 보다 12% 더 든다.
   const cap = maxConfigs ?? (perConfig ? Math.max(512, batch) : Math.max(128, batch));
   let assigns;
