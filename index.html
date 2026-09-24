@@ -80,9 +80,32 @@
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.09em;
     text-transform: uppercase; color: var(--copper); margin: 0 0 10px;
   }
-  .lede { margin: 0; color: var(--muted); max-width: 64ch; }
+  .lede { margin: 0; color: var(--muted); }
   .lede + .lede { margin-top: 9px; }
   .lede b { color: var(--ink); font-weight: 600; }
+  /* 접히는 것 둘 — 개념 설명(제목 아래)과 상세 placement 설정(조작부 안). 펼침표는 직접 그린다. */
+  details > summary { list-style: none; cursor: pointer; user-select: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "▸"; display: inline-block; width: 12px; font-size: 10px; }
+  details[open] > summary::before { content: "▾"; }
+  .intro {
+    margin-top: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .intro > summary {
+    padding: 10px 14px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .intro > summary:hover, .adv > summary:hover { color: var(--copper); }
+  .intro > .body { padding: 2px 14px 14px; }
+  .adv { flex: 1 1 100%; }
+  .adv > summary {
+    display: inline-block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--faint); padding: 2px 0;
+  }
+  .adv > .advrow {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
+    margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--hair);
+  }
 
   /* --- 조작부 --- */
   .bar {
@@ -263,68 +286,34 @@
 
 <div class="wrap">
   <header>
-    <p class="tag">Netlist to GDS · in the browser</p>
     <h1>Analog Layout Generator</h1>
-    <p class="lede">
-      아날로그 회로의 넷리스트(<code>.sp</code>)를 넣으면 <b>칩 레이아웃(GDS)</b>을 만들어 준다.
-      회로 읽기 · 배치 · 배선 · 검사 · GDS 내보내기까지 <b>전부 이 브라우저 탭 안에서</b> 돈다 —
-      서버도, 설치도 없다.
-    </p>
-    <p class="lede">
-      넷리스트에서 차동쌍·전류 거울 같은 소자 묶음을 찾아 트랜지스터 모양을 만들고, 짝을 이뤄야 하는
-      소자는 <b>좌우 대칭</b>으로 두면서 면적과 선 길이가 작아지게 배치한다. 그다음 신호선과 전원망(VDD·GND)을
-      금속층에 잇고, 설계 규칙(DRC)과 회로 연결(LVS)을 검사해 GDS 파일로 내보낸다 — KLayout 에서 열린다.
-    </p>
-    <p class="lede">
-      오픈소스 아날로그 레이아웃 도구 <b>ALIGN</b> 과 같은 공정 규칙(FinFET 14 nm 모의 PDK)을 쓰고, 배선기는
-      ALIGN 의 배선 알고리즘을 그대로 옮긴 것이다. ALIGN 의 예제 회로들이 들어 있다.
-    </p>
+    <details class="intro" id="intro">
+      <summary>개념 설명</summary>
+      <div class="body">
+        <p class="lede">
+          아날로그 회로의 넷리스트(<code>.sp</code>)를 넣으면 <b>칩 레이아웃(GDS)</b>을 만들어 준다.
+          회로 읽기 · placement · routing · 검사 · GDS 내보내기까지 <b>전부 이 브라우저 탭 안에서</b> 돈다 —
+          서버도, 설치도 없다.
+        </p>
+        <p class="lede">
+          넷리스트에서 차동쌍·전류 거울 같은 소자 묶음(primitive)을 찾아 트랜지스터 모양을 만들고, 짝을 이뤄야 하는
+          소자는 <b>좌우 대칭</b>으로 두면서 면적과 선 길이가 작아지게 놓는다(placement). 그다음 신호선과
+          전원망(VDD·GND)을 금속층에 잇고(routing), 설계 규칙(DRC)과 회로 연결(LVS)을 검사해 GDS 파일로
+          내보낸다 — KLayout 에서 열린다.
+        </p>
+        <p class="lede">
+          오픈소스 아날로그 레이아웃 도구 <b>ALIGN</b> 과 같은 공정 규칙(FinFET 14 nm 모의 PDK)을 쓰고, router 는
+          ALIGN 의 routing 알고리즘을 그대로 옮긴 것이다. ALIGN 의 예제 회로들이 들어 있다.
+        </p>
+        <p class="lede">
+          그림은 흐름 순서대로 넷이다. <b>Schematic</b> 은 넷리스트 그대로, <b>Primitives</b> 는 앞단이 소자를 묶은
+          블록(placement 의 입력), <b>Placement</b> 는 블록을 놓은 결과, <b>Routing</b> 은 금속층에 이은 결과다.
+        </p>
+      </div>
+    </details>
   </header>
 
   <div class="bar">
-    <label class="field"><span>회로</span>
-      <select id="ex"></select>
-    </label>
-    <label class="field"
-           title="총 시작점 예산. 설정(변이 배정 x 영역 후보) 수가 하한이라,
-설정이 많은 계층 설계에서는 주로 **넓이**로 쓰인다 — 배정을 몇 개까지 훑을지가
-같이 늘어난다. 남는 예산은 점수 상위 설정에 라운드로 더 준다."><span>시작점</span>
-      <select id="batch">
-        <option value="48">48 — 빠르게</option>
-        <option value="96" selected>96 — 기본</option>
-        <option value="288">288 — 넓게</option>
-      </select>
-    </label>
-    <label class="field slide"
-           title="고를 때의 저울. 후보 점수 = log(면적) + w x log(HPWL) — ALIGN 배치기의
-비용과 같은 꼴이고, w = 1 이 ALIGN 의 LAMBDA 다. 면적 10% 와 배선 10% 가 같은 값이다.
-HPWL 은 핀 경계 사각형으로 잰다 (ALIGN 의 HPWL_extend). 다음 배치 실행부터 먹는다.">
-      <span>면적 ↔ 배선 <b id="hwVal">1 : 1.00</b></span>
-      <input type="range" id="hw" min="-40" max="40" step="1" value="0">
-    </label>
-    <label class="field" id="gpuField" hidden
-           title="WebGPU 가 있으면 연속 단계(Adam)를 GPU 에서 돈다. 그때 시작점은 총 예산이
-아니라 설정(변이 배정 x 영역)마다 이만큼이다. 시작점 96 짜리 CPU 예산은 설정당
-1~4 개였다 — 배정 하나의 점수가 표본 서너 개로 정해져 순위가 잡음 안에 있었다.">
-      <span>GPU 시작점/설정</span>
-      <select id="perConfig">
-        <option value="8">8</option>
-        <option value="32" selected>32</option>
-        <option value="128">128</option>
-      </select>
-    </label>
-    <label class="field slide"
-           title="연속 단계의 저울. 시작점에서 밀도(퍼뜨리는 힘)의 기울기를
-배선(당기는 힘)의 몇 배로 둘지다 (calibrate 의 lamRatio). 낮추면 넷이 더 세게
-당겨 배선이 짧고 겹침이 많이 남고, 높이면 퍼뜨려 겹침이 적게 남는다.
-겹침은 legalize 가 어차피 0 으로 만든다 — 얼마나 무른 유체로 둘 것인가의 문제다.
-five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
-      <span>배선 ↔ 퍼뜨리기 <b id="lamVal">1.00×</b></span>
-      <input type="range" id="lam" min="-20" max="20" step="1" value="0">
-    </label>
-    <button class="run" id="run">배치 실행</button>
-    <button class="run" id="routeRun" disabled
-            title="배치한 뒤 이 탭에서 배선한다 — ALIGN 배선기를 Rust 로 옮긴 것(wasm). 검사는 ALIGN 과 같은 DRC/LVS">배선 실행</button>
     <label class="drop" id="drop" title="회로 넷리스트(.sp)를 올린다 — 앞단부터 브라우저에서 돌린다">
       <input type="file" id="file" multiple accept=".sp,.cir,.json">
       <span id="dropText">회로 올리기 — .sp 넷리스트 또는 앞단 출력</span>
@@ -332,21 +321,69 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
     <a class="mini" id="saveEx" hidden
        title="올린 설계의 앞단 출력을 한 파일로 내려받는다.
 data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 목록에 뜬다.">예제로 저장</a>
+    <label class="field"><span>회로</span>
+      <select id="ex"></select>
+    </label>
+    <button class="run" id="run">Placement 실행</button>
+    <button class="run" id="routeRun" disabled
+            title="Placement 뒤 이 탭에서 routing 한다 — ALIGN 의 router 를 Rust 로 옮긴 것(wasm). 검사는 ALIGN 과 같은 DRC/LVS">Routing 실행</button>
     <div class="spacer"></div>
     <div class="status" id="status"></div>
+    <details class="adv" id="adv">
+      <summary title="시작점 예산과 저울 둘, WebGPU 의 설정당 시작점. 기본값으로도 된다">상세 placement 설정</summary>
+      <div class="advrow">
+        <label class="field"
+               title="총 시작점 예산. 설정(변이 배정 x 영역 후보) 수가 하한이라,
+설정이 많은 계층 설계에서는 주로 **넓이**로 쓰인다 — 배정을 몇 개까지 훑을지가
+같이 늘어난다. 남는 예산은 점수 상위 설정에 라운드로 더 준다."><span>시작점</span>
+          <select id="batch">
+            <option value="48">48 — 빠르게</option>
+            <option value="96" selected>96 — 기본</option>
+            <option value="288">288 — 넓게</option>
+          </select>
+        </label>
+        <label class="field slide"
+               title="고를 때의 저울. 후보 점수 = log(면적) + w x log(HPWL) — ALIGN placer 의
+비용과 같은 꼴이고, w = 1 이 ALIGN 의 LAMBDA 다. 면적 10% 와 선 길이 10% 가 같은 값이다.
+HPWL 은 핀 경계 사각형으로 잰다 (ALIGN 의 HPWL_extend). 다음 placement 부터 먹는다.">
+          <span>면적 ↔ 선 길이 <b id="hwVal">1 : 1.00</b></span>
+          <input type="range" id="hw" min="-40" max="40" step="1" value="0">
+        </label>
+        <label class="field" id="gpuField" hidden
+               title="WebGPU 가 있으면 연속 단계(Adam)를 GPU 에서 돈다. 그때 시작점은 총 예산이
+아니라 설정(변이 배정 x 영역)마다 이만큼이다. 시작점 96 짜리 CPU 예산은 설정당
+1~4 개였다 — 배정 하나의 점수가 표본 서너 개로 정해져 순위가 잡음 안에 있었다.">
+          <span>GPU 시작점/설정</span>
+          <select id="perConfig">
+            <option value="8">8</option>
+            <option value="32" selected>32</option>
+            <option value="128">128</option>
+          </select>
+        </label>
+        <label class="field slide"
+               title="연속 단계의 저울. 시작점에서 밀도(퍼뜨리는 힘)의 기울기를
+선 길이(당기는 힘)의 몇 배로 둘지다 (calibrate 의 lamRatio). 낮추면 넷이 더 세게
+당겨 선이 짧고 겹침이 많이 남고, 높이면 퍼뜨려 겹침이 적게 남는다.
+겹침은 legalize 가 어차피 0 으로 만든다 — 얼마나 무른 유체로 둘 것인가의 문제다.
+five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
+          <span>선 길이 ↔ 퍼뜨리기 <b id="lamVal">1.00×</b></span>
+          <input type="range" id="lam" min="-20" max="20" step="1" value="0">
+        </label>
+      </div>
+    </details>
   </div>
 
   <div class="cols">
     <div>
       <div class="card">
         <h2 class="withbar">
-          <span id="cvTitle">배치 — 나란히</span>
+          <span id="cvTitle">Placement</span>
           <span class="viewbar">
-            <span class="seg" id="whatSeg" title="회로도(넷리스트 그대로) → 묶음(앞단이 묶은 블록, 배치 이전) → 배치 → 배선">
-              <button data-what="schem" aria-pressed="false">회로도</button>
-              <button data-what="group" aria-pressed="false">묶음</button>
-              <button data-what="place" aria-pressed="true">배치</button>
-              <button data-what="route" aria-pressed="false">배선</button>
+            <span class="seg" id="whatSeg" title="Schematic(넷리스트 그대로) → Primitives(앞단이 묶은 블록, placement 이전) → Placement → Routing">
+              <button data-what="schem" aria-pressed="false">Schematic</button>
+              <button data-what="group" aria-pressed="false">Primitives</button>
+              <button data-what="place" aria-pressed="true">Placement</button>
+              <button data-what="route" aria-pressed="false">Routing</button>
             </span>
           </span>
         </h2>
@@ -368,12 +405,12 @@ data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 �
         <h2>소자 변이 — 고른 것</h2>
         <div class="tw"><table>
           <thead><tr><th>인스턴스</th><th>변이</th><th>크기</th><th>반전</th></tr></thead>
-          <tbody id="vt"><tr><td colspan="4" class="dim">배치를 실행하면 채워집니다</td></tr></tbody>
+          <tbody id="vt"><tr><td colspan="4" class="dim">Placement 를 실행하면 채워집니다</td></tr></tbody>
         </table></div>
       </div>
       <div class="card" style="margin-top:16px" id="blockCard">
-        <h2 title="앞단(1_topology)이 넷리스트의 소자를 묶어 만든 블록 — 배치기는 이 블록을 놓는다.
-변이 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들어 둔 것이다.">묶음 — 앞단이 만든 블록 (배치 이전)</h2>
+        <h2 title="앞단(1_topology)이 넷리스트의 소자를 묶어 만든 블록 — placer 는 이 블록을 놓는다.
+변이 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들어 둔 것이다.">Primitives — 앞단이 만든 블록 (placement 이전)</h2>
         <div class="tw"><table>
           <thead><tr><th>블록</th><th>종류</th><th>소자</th><th>변이 후보</th><th>제약</th></tr></thead>
           <tbody id="bt"><tr><td colspan="5" class="dim">회로를 고르면 채워집니다</td></tr></tbody>
@@ -391,7 +428,7 @@ data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 �
         <div class="body"><dl class="metrics" id="info" style="margin:-14px"></dl></div>
       </div>
       <div class="card" id="drcCard" style="margin-top:16px">
-        <h2>배선 · GDS · DRC</h2>
+        <h2>Routing · GDS · DRC</h2>
         <dl class="metrics" id="drcMetrics"></dl>
         <div class="body" id="drcErrs" style="border-top:1px solid var(--hair)"></div>
         <div class="body" style="border-top:1px solid var(--hair)">
@@ -408,7 +445,6 @@ data/ 에 넣고 data/index.json 에 {name, label} 한 줄을 더하면 예제 �
     </div>
   </div>
 
-  <footer id="foot">의존성 없는 ES 모듈 · 빌드 단계 없음 · 전부 이 페이지 안에서 계산됩니다</footer>
 </div>
 
 <script type="module">
@@ -508,23 +544,23 @@ const oursNow = () => frame ?? ours;
 /** 지금 화면에 그릴 것. */
 function shots() {
   if (what === "route")
-    return [{ key: "ours", geo: routed, label: "배선",
-              empty: routeFail ? ["배선 실패", routeFail] : ["아직 배선 결과가 없습니다", "배선 실행을 누르세요"] }];
+    return [{ key: "ours", geo: routed, label: "Routing",
+              empty: routeFail ? ["Routing 실패", routeFail] : ["아직 routing 결과가 없습니다", "Routing 실행을 누르세요"] }];
   if (what === "schem" || what === "group") {
     const v = views.get(viewKey());
     const lay = v?.[what] ?? null;
     const err = v?.[what + "Err"];
     const s = lay?.stats;
     return [{ key: "ours", lay,
-              label: lay ? (what === "schem" ? `회로도 · ${v.top} · 소자 ${s.devices} · 넷 ${s.nets}`
-                                             : `묶음 · ${v.top} · 블록 ${v.blocks?.length ?? 0} · 소자 ${s.devices}`) : "",
-              empty: err ? [what === "schem" ? "회로도를 못 그립니다" : "묶음을 못 그립니다", err]
+              label: lay ? (what === "schem" ? `Schematic · ${v.top} · 소자 ${s.devices} · 넷 ${s.nets}`
+                                             : `Primitives · ${v.top} · 블록 ${v.blocks?.length ?? 0} · 소자 ${s.devices}`) : "",
+              empty: err ? [what === "schem" ? "Schematic 을 못 그립니다" : "Primitives 를 못 그립니다", err]
                          : v ? ["만드는 중…"] : ["회로를 고르세요"] }];
   }
   const live = oursNow();
   return [{ key: "ours", data: live, accent: true, axes: live?.axes ?? [],
-            label: frame ? `탐색 중 · ${frame.module}` : "배치",
-            empty: ["아직 배치가 없습니다", "배치 실행을 누르세요"] }];
+            label: frame ? `탐색 중 · ${frame.module}` : "Placement",
+            empty: ["아직 placement 가 없습니다", "Placement 실행을 누르세요"] }];
 }
 
 /** 패널에 맞출 상자. 배치·배선은 원점에서 시작하지만 회로도는 축이 0 이라 좌우로 뻗는다 — 상자를 그대로 쓴다. */
@@ -697,7 +733,8 @@ window.addEventListener("focus", () => redraw());
 const resetView = () => { view.s = 1; view.tx = 0; view.ty = 0; redraw(); };
 cv.addEventListener("dblclick", resetView);
 
-const TITLE = { schem: "회로도 — 넷리스트 그대로", group: "묶음 — 앞단이 묶은 블록 (배치 이전)", place: "배치", route: "배선" };
+const TITLE = { schem: "Schematic — 넷리스트 그대로", group: "Primitives — 앞단이 묶은 블록 (placement 이전)",
+                place: "Placement", route: "Routing" };
 function setView(nextWhat) {
   what = nextWhat ?? what;
   for (const b of $("whatSeg").querySelectorAll("button"))
@@ -737,7 +774,7 @@ async function ensureViews(name) {
   views.set(name, v);
   const M = await schematicModules();
   if (!M) {
-    v.groupErr = v.schemErr = "회로도 모듈(src/schematic/)을 못 받았습니다 — " +
+    v.groupErr = v.schemErr = "Schematic 모듈(src/schematic/)을 못 받았습니다 — " +
       String(schemLoadErr?.message ?? schemLoadErr).slice(0, 120) + ". 캐시를 비우고 새로고침해 보세요.";
     showBlocks([]);
     if ((what === "schem" || what === "group") && viewKey() === name) redraw();
@@ -759,7 +796,7 @@ async function ensureViews(name) {
     const text = await netlistFor(name);
     if (text == null)
       throw new Error(name === "__upload__"
-        ? "앞단 출력만 올렸습니다 — 회로 원문(.sp)이 없어 회로도는 못 그립니다. 묶음 보기는 됩니다."
+        ? "앞단 출력만 올렸습니다 — 회로 원문(.sp)이 없어 schematic 은 못 그립니다. Primitives 보기는 됩니다."
         : `netlists/${name}.sp 가 없습니다`);
     const parsed = M.parseSpice(text);
     const blob = await loadExample(name);
@@ -840,7 +877,7 @@ function showInfo(b) {
   mkRow(dl, "모듈", b.modules > 1 ? `${b.modules} <small>(계층)</small>` : "1");
   mkRow(dl, "변이 조합", String(b.leafCombos ?? "—"));
   if (b.ignored?.length)
-    mkRow(dl, "배치기가 무시한 제약", `<small>${b.ignored.join(" · ")}</small>`, "lose");
+    mkRow(dl, "placer 가 무시한 제약", `<small>${b.ignored.join(" · ")}</small>`, "lose");
 }
 
 /** 설계 요약 — 워커 없이 앞단 출력만 읽어서. */
@@ -855,7 +892,7 @@ function summarize(blob) {
 function variantRows(rects) {
   const tb = $("vt"); tb.textContent = "";
   if (!rects?.length) {
-    tb.innerHTML = '<tr><td colspan="4" class="dim">배치를 실행하면 채워집니다</td></tr>';
+    tb.innerHTML = '<tr><td colspan="4" class="dim">Placement 를 실행하면 채워집니다</td></tr>';
     return;
   }
   const short = (v) => (v ?? "—").replace(/_(\d{6,})_/, "_");
@@ -876,16 +913,16 @@ function showResult(r) {
   for (const q of r.rects) blockArea += q.w * q.h;
   const bw = r.bbox[2] - r.bbox[0], bh = r.bbox[3] - r.bbox[1];
   mkRow(dl, "면적", `${Math.round(bw)} × ${Math.round(bh)} <small>채움 ${(blockArea / Math.max(1, r.area)).toFixed(2)}</small>`);
-  mkRow(dl, "배선 HPWL", r.hpwl > 0 ? `${Math.round(r.hpwl)}` : "— <small>넷 없음</small>");
+  mkRow(dl, "HPWL", r.hpwl > 0 ? `${Math.round(r.hpwl)}` : "— <small>넷 없음</small>");
   mkRow(dl, "겹침", `${(r.overlap / blockArea).toExponential(1)} <small>블록면적 대비</small>`, "win");
   mkRow(dl, "대칭 잔차", `${r.resid.toExponential(1)}`, "win");
-  mkRow(dl, "배선 격자", r.offgrid === 0
+  mkRow(dl, "Routing 격자", r.offgrid === 0
     ? `0 <small>밖 / M1 ${r.grid[0]} M2 ${r.grid[1]}</small>`
     : `${r.offgrid} <small>블록이 격자 밖</small>`,
     r.offgrid === 0 ? "win" : "lose");
   mkRow(dl, "변이 조합", `${r.combos} <small>중 ${r.configs} 설정 탐색</small>`);
   if (r.hpwlWeight)
-    mkRow(dl, "저울", `면적 1 : 배선 ${r.hpwlWeight.toFixed(2)}` +
+    mkRow(dl, "저울", `면적 1 : 선 길이 ${r.hpwlWeight.toFixed(2)}` +
       `<small> · 퍼뜨리기 ${(r.lamRatio ?? 1).toFixed(2)}×</small>`);
   if (r.medOverlap != null)
     mkRow(dl, "연속 단계 겹침", `${r.medOverlap.toFixed(3)} <small>후보 중앙값 · ` +
@@ -1100,7 +1137,7 @@ async function ingest(fileList) {
       ensureViews("__upload__");
       redraw();
       if (!/앞단 완료/.test($("status").textContent))
-        setStatus("<span>올렸습니다 — 배치 실행을 누르세요</span>");
+        setStatus("<span>올렸습니다 — Placement 실행을 누르세요</span>");
     } catch (e) {
       text.textContent = "회로 올리기 — .sp 넷리스트 또는 앞단 출력";
       setStatus(`<span style="color:var(--copper)">${e.message}</span>`);
@@ -1156,7 +1193,7 @@ function clearDownloads(msg) {
   blobUrls = [];
   bar.textContent = "";
   bar.innerHTML = '<span style="color:var(--faint);font-size:12px">' +
-    (msg ?? "배치 실행을 누르면 배치 JSON 이, 배선 실행을 누르면 GDS · 배선 기하 · " +
+    (msg ?? "Placement 실행을 누르면 placement JSON 이, Routing 실행을 누르면 GDS · routing 기하 · " +
             "DRC 원문이 여기에 생깁니다.") + "</span>";
 }
 
@@ -1178,9 +1215,9 @@ function showDrc(rec = liveRec) {
   const dl = $("drcMetrics"), box = $("drcErrs");
   dl.textContent = ""; box.textContent = "";
   if (!rec) {
-    const why = routeFail ? "배선이 실패했습니다 — " + routeFail.replace(/[<>&]/g, "")
-      : ours ? "아직 배선을 안 돌렸습니다 — 배선 실행을 누르세요."
-      : "배선 실행을 누르면 이 탭이 배선하고, DRC/LVS 결과를 여기에 채웁니다.";
+    const why = routeFail ? "Routing 이 실패했습니다 — " + routeFail.replace(/[<>&]/g, "")
+      : ours ? "아직 routing 을 안 돌렸습니다 — Routing 실행을 누르세요."
+      : "Routing 실행을 누르면 이 탭이 routing 하고, DRC/LVS 결과를 여기에 채웁니다.";
     box.innerHTML = '<p style="margin:0;color:var(--muted)">' + why + "</p>";
     return;
   }
@@ -1189,7 +1226,7 @@ function showDrc(rec = liveRec) {
   mkRow(dl, "GDS", d.gdsBytes
     ? `${(d.gdsBytes / 1024).toFixed(0)}K <small>${d.gdsName}</small>` : "-",
     d.gdsBytes ? "win" : "lose");
-  mkRow(dl, "배선 사각형", d.rects ? String(d.rects) : "-");
+  mkRow(dl, "Routing 사각형", d.rects ? String(d.rects) : "-");
   mkRow(dl, "DRC / LVS", `${n} <small>건</small>`, n === 0 ? "win" : "");
   if (!n) {
     box.innerHTML = '<p style="margin:0;color:var(--good)">DRC/LVS 에러 없음.</p>';
@@ -1331,7 +1368,7 @@ async function routeOnMain(msg) {
   return routeMessage(out, (performance.now() - t0) / 1000);
 }
 const routeSay = (text) =>
-  setStatus(`<span class="dot"></span><span>배선 중 — ${String(text).replace(/[<>]/g, "")}</span>`);
+  setStatus(`<span class="dot"></span><span>Routing 중 — ${String(text).replace(/[<>]/g, "")}</span>`);
 function routeSend(msg) {
   return new Promise((resolve, reject) => {
     const main = (why) => {
@@ -1357,7 +1394,7 @@ async function runRoute() {
   if (!ours || busy) return;
   busy = true;
   $("routeRun").disabled = true; $("run").disabled = true;
-  setStatus('<span class="dot"></span><span>배선 중 — Rust 배선기 (wasm)</span>');
+  setStatus('<span class="dot"></span><span>Routing 중 — Rust router (wasm)</span>');
   try {
     const name = $("ex").value;
     const blob = await loadExample(name);
@@ -1367,14 +1404,14 @@ async function runRoute() {
     showRouted(m);
     const st = m.stats;
     if (m.warnings?.length) console.warn("[배선기 경고]\n" + m.warnings.join("\n"));
-    setStatus(`<span>배선 완료 — DRC/LVS ${m.nerrors}건, 모듈 ${st.modules}, 넷 ${st.nets}` +
-              `, 배선기 ${st.routerMs.toFixed(0)} ms, GDS ${(m.gds.byteLength / 1024) | 0}K` +
+    setStatus(`<span>Routing 완료 — DRC/LVS ${m.nerrors}건, 모듈 ${st.modules}, 넷 ${st.nets}` +
+              `, router ${st.routerMs.toFixed(0)} ms, GDS ${(m.gds.byteLength / 1024) | 0}K` +
               `  (${m.secs.toFixed(m.secs < 10 ? 2 : 1)} s)</span>`);
   } catch (err) {
     const msg = (err.message || "").replace(/^(Error: )+/, "");
     const net = /failed to fetch|networkerror|→ \d+/i.test(msg);
-    setStatus(`<span style="color:var(--copper)">배선 실패 — ` +
-      (net ? "배선기나 리프 도형을 못 받았습니다 (" + msg + ")" : msg).replace(/[<>]/g, "") + "</span>");
+    setStatus(`<span style="color:var(--copper)">Routing 실패 — ` +
+      (net ? "router 나 리프 도형을 못 받았습니다 (" + msg + ")" : msg).replace(/[<>]/g, "") + "</span>");
     console.error("[배선 실패]", err);
     // 그림에도 적는다 — 나란히 보기의 오른쪽 패널
     routeFail = msg.slice(0, 160);
@@ -1428,10 +1465,10 @@ function routeDownloads(m) {
                 nm + ".gds", "GDS (KLayout)");
   addDownload(new Blob([JSON.stringify(placementJson(), null, 1)],
                        { type: "application/json" }),
-              nm + ".place.json", "배치 (좌표·변이·반전)");
+              nm + ".place.json", "Placement (좌표·변이·반전)");
   if (m.geo)
     addDownload(new Blob([JSON.stringify(m.geo)], { type: "application/json" }),
-                nm + ".routed.json", "배선 기하 (레이어별)");
+                nm + ".routed.json", "Routing 기하 (레이어별)");
   addDownload(new Blob([(m.errors ?? []).join("\n") || "(에러 없음)\n"],
                        { type: "text/plain" }),
               nm + ".errors.txt", "DRC/LVS 원문");
@@ -1444,7 +1481,7 @@ function placeDownloads() {
   addDownload(new Blob([JSON.stringify(placementJson(), null, 1)],
                        { type: "application/json" }),
               (designName() || "design") + ".place.json",
-              "배치 (좌표·변이·반전)");
+              "Placement (좌표·변이·반전)");
 }
 
 /** 내려받을 배치 JSON — 배선기에 넘기는 원점(oX, oY)과 화면 좌표(x, y, w, h)를 같이 담는다.
@@ -1505,7 +1542,7 @@ async function preview(name) {
     const v = views.get(name);
     if (v) showBlocks(v.blocks); else ensureViews(name);
     redraw();
-    setStatus("<span>배치 실행을 누르면 이 자리에서 풉니다</span>");
+    setStatus("<span>Placement 실행을 누르면 이 자리에서 풉니다</span>");
   } catch (err) {
     setStatus(`<span style="color:var(--copper)">${err.message}</span>`);
   }
@@ -1520,7 +1557,7 @@ sel.addEventListener("change", () => {
     showInfo(summarize(blobs.get(v)));
     showBlocks(views.get(v)?.blocks);
     showDrc(null); clearDownloads(); redraw();
-    setStatus("<span>올린 설계 — 배치 실행을 누르세요</span>");
+    setStatus("<span>올린 설계 — Placement 실행을 누르세요</span>");
     return;
   }
   preview(v); clearDownloads();

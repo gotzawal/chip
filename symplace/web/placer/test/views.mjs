@@ -47,7 +47,7 @@ try {
     if (!v.schem) bad("회로도가 없다: " + v.schemErr);
     if (!v.group) bad("묶음이 없다: " + v.groupErr);
     if (!v.blocks || v.rows !== v.blocks) bad(`묶음 표 ${v.rows} 줄 (블록 ${v.blocks})`);
-    if (!/회로도/.test(v.title)) bad("제목이 회로도가 아니다: " + v.title);
+    if (!/Schematic/.test(v.title)) bad("제목이 Schematic 이 아니다: " + v.title);
     await page.waitForTimeout(150);
     // hover: 캔버스 위를 훑어 넷이나 소자가 하나는 잡혀야 한다
     const box = await page.$eval("#cv", (c) => { const r = c.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
