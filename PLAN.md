@@ -41,7 +41,7 @@ py/                                                                  앞단 Pyod
 symplace/alignroute/                                                 Rust 배선기
 symplace/web/placer/{test,fixtures,pack-example.mjs,README.md}       검사·고정값·예제 묶기·설계 노트
 symplace/scripts/                                                    z3 빌드·node 하네스·분석
-symplace/PLAN-*.md                                                   설계 기록 둘
+symplace/PLAN-*.md                                                   설계 기록 셋 (배선기 이식, 변이·GPU, 편집)
 ```
 
 ---
@@ -80,6 +80,7 @@ tools/
   pack-example.mjs          앞단 출력 폴더 -> examples/<name>/
   place.mjs, route.mjs      페이지와 같은 배치·배선을 node 에서 (지금 scripts/route/node/)
   analysis/                 변이 선택 분석 (지금 scripts/place/)
+  edit/                     편집 계획의 실측 (지금 scripts/edit/)
 tests/
   run.sh                    빠른 검사 전부 (lp, parity, design, chunk, leaves, check, compose, gds) — 1 분
   run-slow.sh               place(예제 전부), variants, legalize, route(예제 전부) — 5 분
@@ -88,6 +89,7 @@ docs/
   placer.md                 배치기 설계 노트 (지금 symplace/web/placer/README.md)
   router.md                 배선기 이식 기록 (지금 PLAN-route-align.md)
   variants-gpu.md           변이 선택·WebGPU 기록 (지금 PLAN-place-variants-gpu.md)
+  edit.md                   배치·배선 편집과 토폴로지 유지 최적화 계획 (지금 PLAN-edit.md)
 README.md                   하나 — 쓰는 법, 구성, 측정치, 예제 넣기, 의존성
 PLAN.md                     이 문서
 ```
@@ -223,6 +225,7 @@ B  comparator1 의 VSS OPEN 원인 찾기; 저항 잎의 핀 격자는 앞단 JS
 C  재구성 5~7 (app/ 분리, docs, CI)
 D  2.3 의 남은 예제 — 배열 접기(powertrain_binary), 리프 압축(sc_dc_dc_converter) 부터
 E  앞단 JS 이식 1 (z3 대체) — 그다음 2·3 은 별도 계획으로
+F  배치·배선 비주얼 편집과 토폴로지 유지 최적화 — symplace/PLAN-edit.md (P0~P4, R0~R4). A 뒤 어디든 끼울 수 있다
 ```
 
 B 를 A 와 C 사이에 둔 것은 예제 절차가 새 트리에서도 그대로인지 일찍 보려는 것이다. B 에서 절차가

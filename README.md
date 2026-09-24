@@ -297,9 +297,10 @@ symplace/web/placer/test/   node 검사 — 심플렉스, 에너지 대조, 배�
 symplace/web/placer/fixtures/  고정값 — 배치 문제의 정답 4 예제, 검사기 사례 106, 격자 문구 150, GDS 2
 symplace/web/placer/pack-example.mjs  앞단 출력 폴더 -> data/ 의 예제 파일
 symplace/web/placer/README.md  배치기 설계 노트 (변이·반전·영역·계층을 어떻게 고르는지, legalize)
-symplace/scripts/           z3 빌드, route/node/ (페이지와 같은 배치·배선을 node 에서), place/ (분석)
+symplace/scripts/           z3 빌드, route/node/ (페이지와 같은 배치·배선을 node 에서), place/ (분석), edit/ (편집 계획의 실측)
 symplace/PLAN-route-align.md          배선기를 ALIGN 알고리즘 그대로 옮긴 계획과 대조 기록
 symplace/PLAN-place-variants-gpu.md   변이 선택 분석과 WebGPU 계획·결과
+symplace/PLAN-edit.md                 배치·배선 비주얼 편집과 토폴로지 유지 최적화 계획 (실측 포함)
 ```
 
 배치기 본체(`src/*.mjs`)는 **이 저장소 루트의 것 하나뿐이다.** 사이트가 그대로
