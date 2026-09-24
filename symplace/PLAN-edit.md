@@ -1,4 +1,4 @@
-# 배치·배선 비주얼 편집과 토폴로지 유지 최적화 — 계획 (2026-09-24)
+# 배치·배선 비주얼 편집과 토폴로지 유지 최적화 — 계획과 결과 (2026-09-24)
 
 페이지의 Placement·Routing 보기는 지금 **보기만** 한다. 배치기가 놓은 블록과 배선기가 이은 금속을 그리고,
 확대·이동이 된다. 이 문서는 거기에 **손으로 고치는 길**을 내는 계획이다. 블록을 끌어 옮기고 뒤집고 변이를
@@ -26,6 +26,9 @@
   0.862 배). 이건 ALIGN 이 낸 bbox 다 (`web/placer/README.md` 의 구조 힌트 절).
 - 배선 조각을 옮기고 배선기 없이 다시 검사·GDS: 4~44 ms + 3~30 ms. 넷 하나를 고정하고 나머지를 다시 배선: 배선기
   28~190 ms, DRC/LVS 가 기준으로 돌아온다.
+
+**결과.** 같은 날 P0~P4, R0~R4, D 를 전부 넣었다. 무엇이 어떻게 되었고 계획과 어디가 다른지는 8 절. 쓰는 법은
+[README.md](../README.md) 의 "편집" 절.
 
 ---
 
@@ -293,6 +296,8 @@ wasm 을 안 바꾸고 된다 (실측 4.7 B).
 
 ### 4.6 정돈 — 토폴로지 유지 압축
 
+> 구현은 이 절의 LP 가 아니라 좌표하강이다 — 8.3 절. 아래는 계획 당시의 판이다.
+
 넷 하나(또는 최상위 전부)의 조각 그래프를 두고 트랙 좌표만 다시 고른다. LP 하나다 (`src/edit/compact.mjs`, `lp.mjs` 로).
 
 ```
@@ -318,8 +323,9 @@ L1 항은 legalize 처럼 보조 변수로, 정수 `k` 는 legalize 의 다이�
 
 `node symplace/scripts/edit/route.mjs <예제>` — 배치(캐시)와 배선을 한 판 돌린 뒤 A, B 를 한다.
 
-**A. 조각 하나를 한 트랙 옮기고 배선기 없이 재검사.** 스크립트는 4.3 의 그래프 없이 "닿은 비아와 그 비아의 직교 토막" 만
-같이 옮기는 거친 판이다 — 그래서 무엇이 필요한지가 오류로 드러난다.
+**A. 조각 하나를 한 트랙 옮기고 배선기 없이 재검사.** 계획 당시의 스크립트는 4.3 의 그래프 없이 "닿은 비아와 그 비아의 직교
+토막" 만 같이 옮기는 거친 판이었다 — 그래서 무엇이 필요한지가 오류로 드러났다 (아래 표). 지금 스크립트는 세션 API 와 조각
+그래프로 같은 것을 잰다 (8.2 절의 수치).
 
 | 예제 | 기준 (배선 전체 / 최상위 검사) | 옮긴 뒤 검사 | GDS | 결과 |
 |---|---|---|---|---|
@@ -351,12 +357,16 @@ L1 항은 legalize 처럼 보조 변수로, 정수 `k` 는 legalize 의 다이�
 |---|---|---|
 | 클릭 | 블록·축 핸들 고르기 (Shift 로 여럿) | 넷 고르기, 다시 클릭하면 조각 |
 | 끌기 | 3.2 의 사영 (축 고정; Alt 는 그룹째) | 조각을 층 수직 방향으로, 허용 띠 안에서 트랙에 스냅 |
-| 화살표 | 한 격자(80/84)씩 | 한 트랙씩 |
+| 화살표 | 한 격자(80/84)씩, Shift 면 열 격자 | 한 트랙씩 |
 | F / V | x / y 반전 (그룹 단위) | F 넷 고정/해제 |
+| L / S | 잠금 / 자리 바꾸기 | — |
 | R | — | 이 넷만 다시 배선 |
-| Enter | 정리 (3.4) | 정돈 — 이 넷 (Shift 는 전부) |
+| Enter | 정리 (3.4) | — |
+| C | — | 정돈 — 이 넷 (Shift+C 는 전부) |
 | Z / Y | 되돌리기 / 다시 실행 | 같다 |
-| Esc | 고르기 해제 | 같다 |
+| Esc | 고르기 해제 | 조각, 다음에 넷 |
+
+(구현된 키다 — 계획에서는 정돈이 Enter 였다.)
 
 오른쪽 열에 **편집** 카드. 고른 것의 이름과 성질(블록: abstract, 변이 드롭다운, 반전 버튼 둘, 잠금, 좌표; 넷: 핀·조각·비아·길이,
 고정), 버튼(정리 / 반전 다시 / 변이 다시 / 원래대로; 다시 검사 / 이 넷 재배선 / 정돈), 압축 슬라이더, "관계 둘 다" 스위치.
@@ -373,12 +383,12 @@ Order 위반 빨강, 축 핸들, 고른 블록의 넷 **플라이라인**(핀 �
 src/edit/place.mjs      편집 키트 -> 문제 다시 짓기(z0, N, theta), 끌기 사영(dragTheta), 관계 읽기, 정리(settle),
                         반전 다시(refineFlips), 변이 다시(retryVariants), Order 검사, 지표
 src/edit/wires.mjs      넷 모델 <-> 조각 그래프 (잇기, 꼭짓점, 옮길 범위, 옮기기, path_metal/path_via 로 펴기)
-src/edit/compact.mjs    토폴로지 유지 압축 LP
+src/edit/compact.mjs    토폴로지 유지 정돈 (계획은 LP, 구현은 좌표하강 — 8.3)
 src/job.mjs             done 에 편집 키트 (subPrimitives, subTemplates)
 src/route/pipeline.mjs  routeDesign 이 wires 와 세션을 돌려주고, recheck(session, edits) 와 고정 넷 심기를 더한다
 routeworker.mjs         kind 로 갈라 세션을 쥔다 (route | recheck | reroute)
 edit.mjs                페이지 쪽 — 포인터·선택·되돌리기·인스펙터·덧칠. index.html 이 **동적 import** 한다
-view.mjs                덧칠 훅 (opt 에 sel, ghost, marks, band ...) — 이름을 더할 뿐 있던 export 는 그대로
+view.mjs                drawRouted 에 opt.focus (고른 넷 말고 흐리기) 만 — 덧칠은 edit.mjs 가 그 위에 그린다. 있던 export 는 그대로
 symplace/web/placer/test/edit-place.mjs, edit-wires.mjs, edit-compact.mjs, edit-page.mjs
 symplace/scripts/edit/  이 문서의 실측 (place, variants, route)
 ```
@@ -394,14 +404,15 @@ symplace/scripts/edit/  이 문서의 실측 (place, variants, route)
 ### 5.3 워커 메시지
 
 ```
-배치 워커
-  { name, blob, batch, ... }                              -> start / progress / frame / done(+edit 키트)   (지금 그대로)
-  { edit: { kit, rects, axes, flips, dirs }, retry: true } -> { type: "retry", ranking: [{assignment, score, bbox, hpwl}] }
+배치 워커  (구현된 모양)
+  { name, blob, batch, fixedVariants?, ... }   -> start / progress / frame / done (+ edit: 편집 키트, fixedVariants)   (지금 그대로)
+  { kind: "retry", blob, kit, rects, fixed, compact, hpwlWeight, cap }
+      -> progress ... -> { type: "retry", ranking: [{assignment, concrete, score, area, hpwl, bbox, out, current}], current, total, tried, ms }
 
 배선 워커  (kind 가 없으면 route — 지금 페이지와 호환)
-  { kind: "route", design, leaves, placement, frozen?: [{ net, metals, vias }] }
-      -> { type: "route", ok, gds, geo, errors, stats, warnings, wires }              세션을 쥔다
-  { kind: "recheck", edits: [{ net, metals, vias }] }
+  { design, leaves, placement, frozen?: [{ net, path_metal, path_via }] }
+      -> { type: "route", ok, gds, geo, errors, stats, warnings, wires, frozen }      세션을 쥔다
+  { kind: "recheck", edits: [{ net, path_metal, path_via } | { net, restore: true }] }
       -> { type: "route", ... }   배선기 없이 compose + check + gds (세션 없으면 error)
   { kind: "reroute", frozen: [...] }   = route 와 같되 세션의 배치·설계로
 ```
@@ -445,13 +456,72 @@ P0~P4 와 R0~R4 는 서로 독립이라 나란히 갈 수 있다. P3 이 제일 
 | Rust 의 `obstacles` 필드는 wasm 재빌드가 든다 | 먼저 `interMetals` 심기(JS)로 가고, 다음 빌드 때 옮긴다 |
 | 편집 뒤 산출물 — 내려받은 배치·GDS 가 "배치기가 낸 것" 이 아니다 | 파일 이름에 `-edited` 를 붙이고 배치 JSON 에 `edited: true` 와 편집 수를 적는다. "결과는 이 자리에서 만든다" 는 그대로다 |
 
+## 8. 결과
+
+전부 들어갔다 — 커밋 `1016f64` (배치 편집의 셈), `1db5858` (배치 편집기), `9a12b94` (배선 세션과 조각 그래프), `1aee457`
+(배선 편집기와 정돈). 편집이 없으면 있던 검사가 그대로 통과한다 — 배치·배선·검사기·GDS·회로도·페이지·옛 캐시.
+
+### 8.1 배치 (P0~P4)
+
+`test/edit-place.mjs` — telescopic_ota, five_transistor_ota, cascode_current_mirror_ota, high_speed_comparator.
+
+- 키트로 다시 지은 문제가 배치기의 문제와 같다 (이름·크기·핀 오프셋·영공간 차원). theta 를 되찾은 좌표 오차 < 1e-9.
+- 끌기: 거울 짝이 거울로, 축 위 블록은 축을 따라, 축은 그룹째, 끄는 동안 잔차 < 1e-9. 핀(축·잠근 블록)이 끌기보다
+  우선한다 — 사영을 두 단계로 (핀 행을 먼저 직교화하고, 끌기 방향에서 그것을 뺀다). 처음 한 단계 사영은 핀한 축을 끌기에
+  딸려 보냈다.
+- 정리: 편집 6 종 x (관계 하나 / 둘 다) 에서 겹침 ~1e-16, 잔차 ~1e-12, 격자 밖 0, Order 위반 0, 관계 보존 100 %
+  (Order 가 강제한 쌍은 그 방향으로), hsc 14~72 ms. 편집 없이 정리하면 이동 0 (항등). Order 를 어긴 자리 바꾸기만
+  `INFEASIBLE (Order 위반 XDP -> XCCN)` 으로 거절한다 — 뜻대로다.
+- 변이 다시: hsc 108 배정 2.5 s, 1 위 6080x10584 (지금 배정은 2 위). 처음엔 4 배정뿐이었다 — 키트에 하위 모듈이
+  올린 모양(`spreadShapes` 의 3 개)을 다 등록해야 했다. 평면 예제는 지금 배정이 1 위.
+- 고정 변이: `placeDesign` 의 `fixedVariants` 가 그 그룹의 후보를 하나로 줄인다 (`restrictGroups`). 최상위 모듈만.
+  사용자가 변이를 고르면 고정, 안 고르면 배치기가 고른다 — 위상도 같다: 편집해 정리하면 그 위상, 안 하면 배치기의 것.
+
+### 8.2 배선 (R0~R4)
+
+`test/edit-wires.mjs`, `test/edit-compact.mjs` — telescopic_ota, cascode_current_mirror_ota, high_speed_comparator.
+
+| | telescopic_ota | cascode_current_mirror_ota | high_speed_comparator |
+|---|---|---|---|
+| 배선 (세션) | ~100 ms | 193 ms | 212 ms |
+| 편집 없는 재검사 | 10 ms, 결과가 바이트까지 같다 | 19 ms | 17 ms |
+| 조각 (토막) · 비아 (원래) | 8 (21) · 14 (26) | 28 (50) · 32 (84) | 36 (43) · 28 (82) |
+| 옮길 수 있는 조각 | 4 / 8 | 10 / 28 | 9 / 36 |
+| 범위 안 ±1 트랙 옮기고 재검사 | 6 번, 오류 는 것 0 | 11 번, 0 | 11 번, 0 |
+| 넷 고정 재배선 | 42~45 ms, 경로 그대로, 오류 0 (0), 다른 넷 바뀜 0 | 187 ms, 5 (5), 0 | 188 ms, 0 (0), 0~2 |
+| 정돈 (배선기 결과에) | 움직임 0 | 0 | 0 |
+| 범위 끝까지 밀었다 정돈 | 6/6 원래 길이로 | 11/11 | 11/11 |
+
+잠긴 조각은 대부분 핀 위이거나 같은 층의 핀에 닿은 것이다 (hsc 27/36). 옮길 범위(`range`)의 규칙은 4.3 에 더해
+실측에서 하나씩 나왔다 — 처음 판은 옮기면 M2 의 이웃 토막과 MinSpace 가 나거나 "규칙 밖" 으로 잘못 잠갔다: 핀 위 비아는
+핀 사각형 안에서만, 이웃의 최소 길이는 그 이웃이 핀에 닿아 있으면 건너뛰고, 이웃 끝이 늘어나는 쪽은 같은 층 도형과의
+끝단 간격(비아 둘러싸기까지), 같은 넷 같은 트랙의 다른 조각과의 간격, 같은 중심선의 비아 간격, 모듈 경계. 그래도 마지막
+판정은 검사기다.
+
+### 8.3 계획과 다른 것
+
+- **정돈은 LP 가 아니라 좌표하강이다** (`src/edit/compact.mjs`). 조각이 트랙을 바꾸면 같은 트랙의 도형이 바뀌어 간격 제약이
+  선형이 아니다. 조각마다 `range` 를 다시 재고 그 안의 트랙 가운데 넷 길이가 가장 짧아지는 곳으로 미끄러뜨리기를 아무것도
+  안 움직일 때까지 되풀이한다 — 위상은 정의상 그대로고 (`topologyKey` 로 확인), ms 단위다. 배선기 결과는 이미 최단이라 안
+  움직이고, 사용자가 만든 우회를 되돌린다. 대칭 넷 묶기는 안 넣었다.
+- 되돌리기는 배선에서는 편집 전후의 경로 스냅샷을 다시 재검사하는 것이고, 배치에서는 좌표·반전·잠금·고정의 스냅샷이다.
+- `view.mjs` 에는 `drawRouted` 의 `focus` (고른 넷 말고 흐리기) 만 더했다. 덧칠(고른 블록·유령·겹침·축 핸들·플라이라인,
+  조각·허용 띠·트랙 눈금·비아)은 `edit.mjs` 가 그 위에 그린다.
+- 검사기 오류의 사각형 표식은 안 그린다 — 카드가 오류 수를 배선기 결과 대비로 보인다.
+- 변이 다시는 배치 워커의 `{kind: "retry"}` 로, 배선의 재검사·재배선은 세션을 쥔 배선 워커의 `{kind: "recheck" | "reroute"}` 로 (5.3).
+
+### 8.4 남은 것
+
+하위 모듈 안 편집 (P5), 전원 넷 옮기기, 대칭 넷의 정돈 묶기, 오류 표식 그리기, Rust 쪽 `obstacles` 필드 (지금은
+`interMetals` 심기).
+
 ## 부록 — 실측 스크립트
 
 ```bash
 node symplace/scripts/edit/place.mjs telescopic_ota 48        # 3.5 첫 표: 편집 6 종 x 정리 3 가지
 node symplace/scripts/edit/variants.mjs high_speed_comparator 48   # 3.1 키트 검증 + 3.5 둘째 표
-node symplace/scripts/edit/route.mjs high_speed_comparator    # 4.7 A, B (배치는 scripts/route/node 와 같은 캐시)
+node symplace/scripts/edit/route.mjs high_speed_comparator    # 4.7 A, B 를 세션 API 로 (배치는 scripts/route/node 와 같은 캐시)
 ```
 
-세 스크립트는 페이지가 쓰는 코드(`src/`)만 부른다. 편집기의 `dragTheta`·`settle` 은 `place.mjs` 의 것을 `src/edit/place.mjs`
-로 옮기고, 이 스크립트는 그것을 부르게 바꾼 뒤 검사(`test/edit-*.mjs`)로 굳힌다.
+세 스크립트는 페이지가 쓰는 코드(`src/`)만 부른다 — `src/edit/place.mjs` 의 `rebuild`·`dragTheta`·`settle`·`retryVariants`,
+`src/route/pipeline.mjs` 의 `routeSession`·`recheck`, `src/edit/wires.mjs` 의 조각 그래프. 합격선은 검사(`test/edit-*.mjs`)가 쥔다.
