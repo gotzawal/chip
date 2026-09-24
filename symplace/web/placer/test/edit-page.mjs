@@ -74,12 +74,17 @@ try {
   ok((await layout()).folded === l1.cards - 1, "보기로 돌아가면 열어 둔 카드가 열려 있어야 한다");
   await page.click('#modeSeg button[data-mode="edit"]');
   await page.waitForTimeout(100);
-  const wide = await page.evaluate(() => {
-    const cols = document.querySelector("#cols"), cv = document.querySelector("#cv");
-    return { wide: cols.classList.contains("wide"), cvW: cv.getBoundingClientRect().width, cardW: cv.parentElement.clientWidth, colsW: cols.clientWidth };
+  // 캔버스는 카드 안을 좌우로 다 채우고 (카드는 왼쪽 열 그대로 — 편집 카드가 옆에 보인다), 그림도 캔버스 좌우를 채운다
+  const fill = await page.evaluate(() => {
+    const cols = document.querySelector("#cols"), cv = document.querySelector("#cv"), m = globalThis.__page.lastMap?.m, bb = globalThis.__page.ours?.bbox;
+    const cvW = cv.getBoundingClientRect().width;
+    const ec = document.querySelector("#editCard").getBoundingClientRect(), cc = cv.parentElement.getBoundingClientRect();
+    return { cvW, cardW: cv.parentElement.clientWidth, colsW: cols.clientWidth, drawn: m && bb ? (m.X(bb[2]) - m.X(bb[0])) / cvW : 0, beside: ec.left > cc.right && ec.top < cc.bottom };
   });
-  ok(wide.wide && wide.cvW >= wide.cardW - 2 && wide.cardW >= wide.colsW - 2, `Placement 보기의 캔버스가 폭을 다 안 쓴다 (${wide.cvW}/${wide.cardW}/${wide.colsW})`);
-  console.log(`  카드: 기본 접힘 ${l2.folded}/${l1.cards}, 편집 카드가 결과 자리에, 보기로 가면 되돌아옴 · 캔버스 ${wide.cvW}/${wide.colsW} px`);
+  ok(fill.cvW >= fill.cardW - 2 && fill.cardW < fill.colsW - 100, `캔버스가 카드 안을 다 안 채운다 (${fill.cvW}/${fill.cardW}/${fill.colsW})`);
+  ok(fill.drawn >= 0.85, `그림이 캔버스 좌우를 다 안 채운다 (${(fill.drawn * 100).toFixed(0)} %)`);
+  ok(fill.beside, "편집 카드가 캔버스 옆에 안 보인다");
+  console.log(`  카드: 기본 접힘 ${l2.folded}/${l1.cards}, 편집 카드가 캔버스 옆 결과 자리에, 보기로 가면 되돌아옴 · 캔버스 ${fill.cvW}/${fill.cardW} px, 그림 ${(fill.drawn * 100).toFixed(0)} %`);
 
   // --- 끌기: 자유 블록(대칭 밖)이 있으면 그것, 없으면 아무 블록 ---
   const pick = await page.evaluate(() => {
