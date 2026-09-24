@@ -156,8 +156,17 @@
   @media (prefers-reduced-motion: reduce) { .dot { animation: none; opacity: .8 } }
 
   /* --- 본문 2단 --- */
-  .cols { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; }
-  @media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .cols { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); grid-template-rows: auto 1fr; gap: 16px; }
+  .cols > .cvcard { grid-column: 1; grid-row: 1; }
+  .cols > .colL { grid-column: 1; grid-row: 2; }
+  .cols > .colR { grid-column: 2; grid-row: 1 / span 2; }
+  /* Placement·Routing 보기: 캔버스가 페이지 폭을 다 쓰고 카드들은 그 아래 두 열로 */
+  .cols.wide > .cvcard { grid-column: 1 / -1; }
+  .cols.wide > .colR { grid-row: 2; }
+  @media (max-width: 860px) {
+    .cols { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+    .cols > .cvcard, .cols > .colL, .cols > .colR { grid-column: 1; grid-row: auto; }
+  }
 
   .card {
     background: var(--panel); border: 1px solid var(--line);
@@ -395,9 +404,8 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
     </details>
   </div>
 
-  <div class="cols">
-    <div>
-      <div class="card">
+  <div class="cols wide" id="cols">
+      <div class="card cvcard">
         <h2 class="withbar">
           <span id="cvTitle">Placement</span>
           <span class="viewbar">
@@ -428,14 +436,15 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
           <span style="color:var(--faint)">휠 확대 · 끌어 이동 · 더블클릭 초기화</span>
         </div>
       </div>
-      <div class="card fold" id="variantCard">
+    <div class="colL">
+      <div class="card fold collapsed" id="variantCard">
         <h2>소자 variant — 고른 것</h2>
         <div class="tw"><table>
           <thead><tr><th>인스턴스</th><th>variant</th><th>크기</th><th>반전</th></tr></thead>
           <tbody id="vt"><tr><td colspan="4" class="dim">Placement 를 실행하면 채워집니다</td></tr></tbody>
         </table></div>
       </div>
-      <div class="card fold" id="blockCard">
+      <div class="card fold collapsed" id="blockCard">
         <h2 title="앞단(1_topology)이 넷리스트의 소자를 묶어 만든 블록 — placer 는 이 블록을 놓는다.
 variant 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들어 둔 것이다.">Primitives — 앞단이 만든 블록 (placement 이전)</h2>
         <div class="tw"><table>
@@ -445,8 +454,8 @@ variant 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들�
       </div>
     </div>
 
-    <div>
-      <div class="card fold" id="resultCard">
+    <div class="colR">
+      <div class="card fold collapsed" id="resultCard">
         <h2>결과</h2>
         <dl class="metrics" id="metrics"></dl>
       </div>
@@ -455,11 +464,11 @@ variant 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들�
 정한 위상(쌍의 상대 위치)을 그대로 둔 채 겹침을 없애고 격자에 앉힌다. 편집이 없으면 지금 그대로다.">편집</h2>
         <div class="body" id="editBody"></div>
       </div>
-      <div class="card fold" id="infoCard">
+      <div class="card fold collapsed" id="infoCard">
         <h2>설계</h2>
         <div class="body"><dl class="metrics" id="info" style="margin:-14px"></dl></div>
       </div>
-      <div class="card fold" id="drcCard">
+      <div class="card fold collapsed" id="drcCard">
         <h2>Routing · GDS · DRC</h2>
         <dl class="metrics" id="drcMetrics"></dl>
         <div class="body" id="drcErrs" style="border-top:1px solid var(--hair)"></div>
@@ -467,7 +476,7 @@ variant 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들�
           <div class="dl" id="dlBar"></div>
         </div>
       </div>
-      <div class="card fold" id="subCard" hidden>
+      <div class="card fold collapsed" id="subCard" hidden>
         <h2>하위 모듈이 올린 모양</h2>
         <div class="tw"><table>
           <thead><tr><th>모듈</th><th>쓴 것</th><th>올린 후보</th></tr></thead>
@@ -630,7 +639,8 @@ function layout() {
   // 패널 폭: 내용이 세로로 길어 높이가 잘렸으면 필요한 만큼만 쓰고 가운데로 모은다.
   const floor = n === 1 ? 260 : 160;               // 너무 좁으면 끌어 옮길 자리가 없다
   const want = Math.min(per, Math.max(floor, ((H - pad * 2) / Math.max(ar, 1e-3)) * 1.1 + pad * 2));
-  const W = Math.round(Math.min(full, want * n + gap));
+  // Placement·Routing 은 카드 폭을 다 쓴다 (끌어 옮길 자리) — 회로도·묶음은 필요한 만큼만
+  const W = what === "place" || what === "route" ? full : Math.round(Math.min(full, want * n + gap));
   const panels = [];
   for (let k = 0; k < n; k++)
     panels.push({ x: k * ((W - gap) / n + gap), y: 0, w: (W - gap) / n, h: H });
@@ -785,6 +795,7 @@ function setView(nextWhat) {
   for (const b of $("whatSeg").querySelectorAll("button"))
     b.setAttribute("aria-pressed", String(b.dataset.what === what));
   $("cvTitle").textContent = TITLE[what];
+  $("cols").classList.toggle("wide", what === "place" || what === "route");
   $("layerBar").hidden = what !== "route";
   for (const k of document.querySelectorAll(".cap .key"))
     k.hidden = !(k.dataset.for ?? "").split(" ").includes(what);

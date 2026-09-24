@@ -65,11 +65,21 @@ try {
   ok((await layout()).folded === l1.cards - 1, "제목을 클릭해도 카드가 안 펴진다");
   await page.click('#modeSeg button[data-mode="view"]');
   const l2 = await layout();
-  ok(!l2.editShown && !l2.editFirst && l2.folded === 0, `보기로 돌아가도 카드가 안 돌아온다 (편집 ${l2.editShown}, 접힘 ${l2.folded})`);
-  await page.click('#modeSeg button[data-mode="edit"]');
+  ok(!l2.editShown && !l2.editFirst && l2.folded === l1.cards, `보기로 돌아가도 카드가 안 돌아온다 (편집 ${l2.editShown}, 접힘 ${l2.folded}/${l1.cards})`);
+  await page.click("#resultCard > h2");                       // 보기에서 결과를 열어 두고
+  await page.click('#modeSeg button[data-mode="edit"]');       // 편집에 들어가면 다 접히고
   await page.waitForTimeout(100);
   ok((await layout()).folded === l1.cards, "다시 편집을 켜면 다시 접혀야 한다");
-  console.log(`  카드: 편집 카드가 결과 자리에, 접힌 카드 ${l1.folded}/${l1.cards}, 보기로 가면 되돌아옴`);
+  await page.click('#modeSeg button[data-mode="view"]');       // 나오면 열어 둔 것이 돌아온다
+  ok((await layout()).folded === l1.cards - 1, "보기로 돌아가면 열어 둔 카드가 열려 있어야 한다");
+  await page.click('#modeSeg button[data-mode="edit"]');
+  await page.waitForTimeout(100);
+  const wide = await page.evaluate(() => {
+    const cols = document.querySelector("#cols"), cv = document.querySelector("#cv");
+    return { wide: cols.classList.contains("wide"), cvW: cv.getBoundingClientRect().width, cardW: cv.parentElement.clientWidth, colsW: cols.clientWidth };
+  });
+  ok(wide.wide && wide.cvW >= wide.cardW - 2 && wide.cardW >= wide.colsW - 2, `Placement 보기의 캔버스가 폭을 다 안 쓴다 (${wide.cvW}/${wide.cardW}/${wide.colsW})`);
+  console.log(`  카드: 기본 접힘 ${l2.folded}/${l1.cards}, 편집 카드가 결과 자리에, 보기로 가면 되돌아옴 · 캔버스 ${wide.cvW}/${wide.colsW} px`);
 
   // --- 끌기: 자유 블록(대칭 밖)이 있으면 그것, 없으면 아무 블록 ---
   const pick = await page.evaluate(() => {
