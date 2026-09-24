@@ -26,6 +26,7 @@ try {
   await page.waitForTimeout(1000);
   const gpuField = await page.$eval("#gpuField", (e) => e.hidden);
   console.log(`WebGPU 칸 ${gpuField ? "숨김" : "보임"}  (모드 ${mode})`);
+  await page.click("#adv > summary");            // 상세 placement 설정은 접혀 있다
   await page.selectOption("#batch", batch);
   if (!gpuField) await page.selectOption("#perConfig", perConfig);
   const t0 = Date.now();
