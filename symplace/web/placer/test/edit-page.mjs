@@ -9,8 +9,12 @@
  *    그 다음 배선하고 배선 편집 모드에서 넷·조각을 골라 한 트랙 끌면 재검사가 돌고 그 넷이 고정되며, Z/Y 로
  *    되돌리고, "이 넷만 다시 배선" 이 나머지를 고정한 채 배선기를 돌린다.
  *
- *    배선 그리기: 넷의 배선을 지우고(rip-up) 노드 검사와 같은 차례(_replay.mjs)를 마우스·키로 따라 그리면 넷이 한
+ *    배선 그리기 (수동): 넷의 배선을 지우고(rip-up) 노드 검사와 같은 차례(_replay.mjs)를 마우스·키로 따라 그리면 넷이 한
  *    덩이로 이어지고 DRC/LVS 가 배선기 결과보다 늘지 않는다. Esc 로 버리기, Delete 로 조각 지우기, Z 로 되돌리기.
+ *
+ *    보조 그리기: 배선 보기에는 편집 전에도 도구 줄이 보이고 "배선" 을 누르면 편집에 들어간다. 넷을 지우고 플라이라인의
+ *    한 끝 핀을 눌러 다른 끝까지 끌면 미리보기가 그 핀에 붙고, 놓으면 이어진다 (DRC/LVS 가 늘지 않는다). 플라이라인을
+ *    클릭해도, 도구 줄의 "열린 곳 모두 잇기" 로도 이어진다.
  *
  *  실행:  node symplace/web/placer/test/edit-page.mjs [예제=current_mirror_ota] [시작점=48]
  */
@@ -202,6 +206,10 @@ try {
   console.log(`배선: ${rs0}`);
   ok(/Routing 완료/.test(rs0), "배선이 실패했다");
   ok(await page.evaluate(() => globalThis.__page.what === "route"), "배선 보기로 안 옮겨졌다");
+  // 도구 줄 — 배선 보기면 편집 전에도 보인다
+  const tb0 = await page.$eval("#editTools", (e) => ({ hidden: e.hidden, text: e.textContent }));
+  console.log(`  도구 줄 (보기): ${tb0.hidden ? "안 보임" : tb0.text.replace(/\s+/g, " ").trim()}`);
+  ok(!tb0.hidden && /배선/.test(tb0.text), "배선 보기에서 도구 줄이 안 보인다");
   await page.click('#modeSeg button[data-mode="edit"]');
   await page.waitForTimeout(200);
   ok(await page.evaluate(() => globalThis.__page.editor.active), "배선 보기에서 편집기가 안 켜졌다");
@@ -296,8 +304,10 @@ try {
     const ripped = await rtNow(() => { const rt = globalThis.__page.editor.state.rt; return { nerr: rt.nerr, card: document.querySelector("#editBody").textContent }; });
     console.log(`  그리기: ${target.name} 배선 지우기 — DRC/LVS ${ripped.nerr} (기준 ${base}) · 차례 ${plan.steps.length} (비아만 ${plan.viaOnly})`);
     ok(ripped.nerr > base && /열린 곳/.test(ripped.card), "배선을 지웠는데 열린 곳이 안 보인다");
-    // Esc 로 버리기 — 아무것도 안 남는다
+    // Esc 로 버리기 — 아무것도 안 남는다. 이 차례는 꺾을 자리마다 클릭하는 수동이다 (A 로 보조 <-> 수동)
     await page.keyboard.press("w");
+    await page.keyboard.press("a");
+    ok(await rtNow(() => globalThis.__page.editor.state.rt.tool === "wire" && !globalThis.__page.editor.state.rt.assist), "A 로 수동이 안 됐다");
     const s0 = plan.steps[0], hist0 = await rtNow(() => globalThis.__page.editor.state.rt.hist.length);
     let p = await at(s0.start.x, s0.start.y);
     await page.mouse.click(p.x, p.y);
@@ -352,6 +362,93 @@ try {
     await idle();
     const undone = await rtNow(() => { const rt = globalThis.__page.editor.state.rt; return { segs: rt.graphs.get(rt.net).segs.length, nerr: rt.nerr }; });
     ok(undone.segs === before.segs && undone.nerr === drawn.nerr, `되돌렸는데 조각 ${undone.segs} / 오류 ${undone.nerr}`);
+
+    // ---------------------------------------------------------------- 보조 그리기
+    // 도구 줄의 "배선" 으로 들어가 보조(기본)로. 넷을 지우고 플라이라인의 한 끝 핀을 눌러 다른 끝까지 끌면 미리보기가 그
+    // 핀에 붙고(클릭 없이), 놓으면 이어진다. 넷이 한 덩이가 될 때까지 되풀이한다. 그 다음 플라이라인 클릭, 모두 잇기.
+    const rip = async (n) => {
+      await page.keyboard.press("Escape"); await page.keyboard.press("Escape");          // 고르기 도구로
+      await page.evaluate((n) => { const rt = globalThis.__page.editor.state.rt; rt.net = n; rt.seg = null; }, n);
+      await page.click('#editTools button[data-tool="select"]');                          // 카드를 다시 그린다
+      const h = await rtNow(() => globalThis.__page.editor.state.rt.hist.length);
+      await page.click('#editBody button[data-act="rrip"]');
+      await page.waitForFunction((h) => { const rt = globalThis.__page.editor.state.rt; return !rt.busy && rt.hist.length > h; }, h, { timeout: 60000 });
+    };
+    const flyOf = (n) => page.evaluate(async (n) => {
+      const rt = globalThis.__page.editor.state.rt, D = await import("./src/edit/draw.mjs");
+      const c = D.netComponents(rt.model.nets.find((q) => q.name === n), rt.graphs.get(n));
+      return { comps: c.comps, lines: c.lines.map((l) => ({ a: l.a, b: l.b })), nerr: rt.nerr };
+    }, n);
+    // 두 점이 다 보이게 그 가운데를 화면 가운데로 굴리고 둘의 화면 자리를
+    const at2 = async (a, b) => {
+      const pa = await page.evaluate(([x, y]) => globalThis.__page.editor.probe.px(x, y), a), pb = await page.evaluate(([x, y]) => globalThis.__page.editor.probe.px(x, y), b);
+      await page.evaluate((my) => { const r = document.querySelector("#cv").getBoundingClientRect(); window.scrollTo(0, Math.max(0, r.top + window.scrollY + my - window.innerHeight / 2)); }, (pa.y + pb.y) / 2);
+      const bx = await page.$eval("#cv", (c) => { const r = c.getBoundingClientRect(); return { x: r.left, y: r.top }; });
+      return [{ x: bx.x + pa.x, y: bx.y + pa.y }, { x: bx.x + pb.x, y: bx.y + pb.y }];
+    };
+    const routedNames = model.nets.filter((n) => n.path_metal.length).map((n) => n.name);
+    const aNet = model.nets.filter((n) => n.path_metal.length).sort((a, b) => b.pins.length - a.pins.length || graphs.get(b.name).vias.length - graphs.get(a.name).vias.length)[0].name;
+    await rip(aNet);
+    await page.click('#editTools button[data-tool="wire"]');
+    if (!(await rtNow(() => globalThis.__page.editor.state.rt.assist))) await page.click('#editTools button[data-act="assist"][data-on="1"]');
+    ok(await rtNow(() => globalThis.__page.editor.state.rt.tool === "wire" && globalThis.__page.editor.state.rt.assist), "도구 줄로 보조 그리기가 안 켜졌다");
+    let fly = await flyOf(aNet);
+    console.log(`  보조: ${aNet} 배선 지우기 — 덩이 ${fly.comps} · DRC/LVS ${fly.nerr} (기준 ${base})`);
+    let tapped = 0, drags = 0;
+    for (let k = 0; k < 12 && fly.comps > 1; k++) {
+      const ln = fly.lines[0];
+      const [pa, pb] = await at2(ln.a, ln.b);
+      const h = await rtNow(() => globalThis.__page.editor.state.rt.hist.length);
+      await page.mouse.move(pa.x, pa.y);
+      await page.mouse.down();
+      const started = await rtNow(() => !!globalThis.__page.editor.state.rt.draw?.assist);
+      await page.mouse.move(pb.x, pb.y, { steps: 8 });
+      const pv = await rtNow(() => { const q = globalThis.__page.editor.state.rt.preview; return q ? { ok: q.ok, target: !!q.target, why: q.why, issues: q.issues.length } : null; });
+      await page.mouse.up();
+      drags++;
+      if (started && pv?.target) tapped++;
+      else bad(`끌기 ${k + 1}: ${started ? "" : "누른 핀에서 시작 안 함 · "}미리보기 ${JSON.stringify(pv)}`);
+      await page.waitForFunction((h) => { const rt = globalThis.__page.editor.state.rt; return !rt.busy && !rt.draw && rt.hist.length > h; }, h, { timeout: 60000 })
+        .catch(() => bad(`끌기 ${k + 1} 가 안 끝났다`));
+      fly = await flyOf(aNet);
+    }
+    const as = await rtNow(() => ({ status: document.querySelector("#status").textContent.trim(), hint: document.querySelector("#hint").textContent.trim() }));
+    console.log(`  보조: 끌기 ${drags} 번 (핀에 붙음 ${tapped}) — 덩이 ${fly.comps} · DRC/LVS ${fly.nerr} (기준 ${base}) · ${as.status}`);
+    ok(fly.comps === 1, `보조로 이은 ${aNet} 이 ${fly.comps} 덩이다`);
+    ok(fly.nerr <= base, `보조로 이은 뒤 오류가 늘었다 ${base} -> ${fly.nerr}`);
+    ok(/보조 그리기 \(토막/.test(as.status), "보조 그리기 상태 줄이 없다");
+    // 플라이라인 클릭 — 선 가운데를 가리키면 굵어지고, 클릭하면 길찾기로 잇는다
+    await rip(aNet);
+    await page.click('#editTools button[data-tool="wire"]');
+    fly = await flyOf(aNet);
+    for (let k = 0; k < 12 && fly.comps > 1; k++) {
+      const ln = fly.lines[0];
+      const [pa, pb] = await at2(ln.a, ln.b);
+      const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+      const h = await rtNow(() => globalThis.__page.editor.state.rt.hist.length);
+      await page.mouse.move(mid.x, mid.y);
+      const hot = await rtNow(() => globalThis.__page.editor.state.rt.flyHover?.net ?? null);
+      if (hot !== aNet) { bad(`플라이라인 가운데를 가리켰는데 ${hot}`); break; }
+      await page.mouse.click(mid.x, mid.y);
+      await page.waitForFunction((h) => { const rt = globalThis.__page.editor.state.rt; return !rt.busy && rt.hist.length > h; }, h, { timeout: 60000 })
+        .catch(() => bad(`플라이라인 클릭 ${k + 1} 이 안 끝났다`));
+      fly = await flyOf(aNet);
+    }
+    console.log(`  보조: 플라이라인 클릭 — 덩이 ${fly.comps} · DRC/LVS ${fly.nerr}`);
+    ok(fly.comps === 1 && fly.nerr <= base, `플라이라인 클릭으로 못 이었다 (덩이 ${fly.comps}, 오류 ${fly.nerr})`);
+    // 열린 곳 모두 잇기 — 두 넷을 지우고 도구 줄 버튼 하나로
+    const two = routedNames.slice(0, 2);
+    for (const n of two) await rip(n);
+    const open0 = await page.$eval('#editTools button[data-act="rconnectall"]', (b) => ({ text: b.textContent.trim(), disabled: b.disabled }));
+    const h2 = await rtNow(() => globalThis.__page.editor.state.rt.hist.length);
+    await page.click('#editTools button[data-act="rconnectall"]');
+    await page.waitForFunction((h) => { const rt = globalThis.__page.editor.state.rt; return !rt.busy && rt.hist.length > h; }, h2, { timeout: 60000 }).catch(() => bad("모두 잇기가 안 끝났다"));
+    const allc = await page.evaluate(async () => {
+      const rt = globalThis.__page.editor.state.rt, D = await import("./src/edit/draw.mjs");
+      return { open: rt.model.nets.filter((q) => D.netComponents(q, rt.graphs.get(q.name)).comps > 1).map((q) => q.name), nerr: rt.nerr, status: document.querySelector("#status").textContent.trim() };
+    });
+    console.log(`  보조: 모두 잇기 (${open0.text}) — 열린 넷 ${allc.open.length} · DRC/LVS ${allc.nerr} (기준 ${base}) · ${allc.status}`);
+    ok(!open0.disabled && !allc.open.length && allc.nerr <= base, `모두 잇기 — 열린 넷 ${allc.open.join(" ")}, 오류 ${allc.nerr}`);
   } else console.log("  배선된 넷이 없다 — 그리기는 건너뛴다");
 } finally {
   await browser.close();
