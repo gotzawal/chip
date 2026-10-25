@@ -102,6 +102,8 @@ node symplace/web/placer/test/edit-compact.mjs [예제] # 정돈 — 위상 그�
 node symplace/web/placer/test/edit-draw.mjs [예제]    # 배선 그리기 — 앵커로 되지은 도형 == 배선기 도형, 넷을 지우고 점을 찍어 배선기 경로대로 다시
                                                     # 그리면 같은 도형·이어짐·오류 안 늚, 조각 지우기 = 검사기 OPEN, 단락·끝단 간격 알림, 헛경고 0
                                                     # (ALL=1 이면 리프 도형이 있는 예제 전부 — 도형 같음은 기본 셋에서만 본다)
+node symplace/web/placer/test/edit-assist.mjs [예제]  # 보조 배선 — 넷을 지우고 플라이라인의 한 끝 핀을 눌러 다른 끝으로 끌면 클릭 없이 핀에 붙고,
+                                                    # 넷이 이어지고 오류가 안 늚, 길이 막힌 꼭짓점을 안 지남, 모두 잇기 (ALL=1 이면 예제 전부)
 # 회로도 · 묶음 보기 (src/schematic/)
 node symplace/web/placer/test/schematic.mjs [예제]   # 예제 전부의 .sp 와 앞단 출력을 배열 — 소자 수, 앞단 잎 <-> .sp 소자 맞춤,
                                                    # 기호 겹침 0, 핀마다 선이 닿는가, 거울 쌍 대칭, 묶음 테두리가 소자를 담는가
@@ -113,7 +115,8 @@ node symplace/web/placer/test/views.mjs [예제]   # 페이지의 회로도·묶
 node symplace/web/placer/test/stale.mjs [옛 ref]  # 옛 판(origin/main)을 캐시에 넣고 새 판을 보통 새로고침 — 예제 목록이 그대로 떠야 한다
                                                 # (새 모듈이 옛 모듈에 없는 이름을 import 하면 페이지가 통째로 비는 함정)
 node symplace/web/placer/test/edit-page.mjs current_mirror_ota 48   # 페이지의 편집기 — 끌기·정리·반전·되돌리기·variant 고정·variant 다시,
-                                                                    # 배선 조각 옮기기·재검사·고정·재배선·정돈, 배선 지우기와 마우스로 다시 그리기
+                                                                    # 배선 조각 옮기기·재검사·고정·재배선·정돈, 배선 지우기와 마우스로 다시 그리기,
+                                                                    # 도구 줄, 보조 — 핀을 눌러 끌어 잇기·플라이라인 클릭·모두 잇기
 ```
 
 `fixtures/<예제>.json` 은 배치 문제의 **정답 고정값**이다 — 이 배치기의 첫 구현(파이썬/numpy)이 뽑아 둔
