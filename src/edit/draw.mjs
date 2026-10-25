@@ -282,9 +282,10 @@ export function buildGeometry(paths, { mine = [], world = null, area = null } = 
   };
   for (const nodes of paths) {
     if (nodes.length === 1) dot(nodes[0], nodes[0].layer);
-    for (let i = 1; i < nodes.length; i++) {
+    for (let i = 1; i < nodes.length;) {
       const a = nodes[i - 1], b = nodes[i];
       if (a.layer === b.layer) {
+        i++;
         if (a.x === b.x && a.y === b.y) continue;
         const l = LAYERS.get(a.layer), v = l.dir === "v";
         if (v ? a.x !== b.x : a.y !== b.y) throw new Error(`${a.layer} 토막이 층 방향(${v ? "세로" : "가로"})이 아니다`);
@@ -292,9 +293,13 @@ export function buildGeometry(paths, { mine = [], world = null, area = null } = 
         raw.push({ layer: l.name, li: l.li, dir: l.dir, t: v ? a.x : a.y, lo: Math.min(p, q), hi: Math.max(p, q), w: l.w });
       } else {
         if (a.x !== b.x || a.y !== b.y) throw new Error(`층이 바뀌는 자리가 어긋났다 (${a.layer} -> ${b.layer})`);
-        const st = stackAt(a.x, a.y, a.layer, b.layer);
+        // 같은 자리에서 층이 잇달아 바뀌면 (M2 -> M3 -> M4) 스택 하나 — 지나가기만 하는 층에 막대가 든다
+        let k = i;
+        while (k + 1 < nodes.length && nodes[k + 1].x === a.x && nodes[k + 1].y === a.y && nodes[k + 1].layer !== nodes[k].layer) k++;
+        const st = stackAt(a.x, a.y, a.layer, nodes[k].layer);
         vias.push(...st.vias);
         for (const m of st.mids) dot(a, m);
+        i = k + 1;
       }
     }
   }
@@ -382,7 +387,8 @@ function closest(r, q) {
  * 넷의 연결 덩이 — 핀(같은 블록·같은 핀의 접점은 블록 안에서 이어져 있다), 조각, 비아를 잇는다. 같은 층·같은 중심선에서
  * 닿는 핀끼리도 (붙어 놓인 블록). 덩이가 둘 이상이면 열려 있다 (검사기의 OPEN).
  * 플라이라인은 덩이끼리 가장 가까운 도형을 잇는 최소 신장 트리다 — 덩이 수 - 1 개.
- * @returns {{comps: number, lines: Array<{a:number[], b:number[], d:number}>}}   좌표는 PnRDB
+ * @returns {{comps: number, lines: Array<{a:number[], b:number[], d:number, ca:number, cb:number}>, pinComp: number[], segComp: number[]}}
+ *          좌표는 PnRDB. pinComp / segComp 는 graph.pins / graph.segs 차례로 덩이 번호, ca / cb 는 선 양 끝의 덩이
  */
 export function netComponents(net, graph) {
   const rects = [], parent = [];
@@ -423,6 +429,8 @@ export function netComponents(net, graph) {
   const groups = new Map();
   for (let i = 0; i < real; i++) { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); }
   const comps = [...groups.values()];
+  const compOf = new Map();
+  comps.forEach((c, k) => { for (const i of c) compOf.set(i, k); });
   // Prim — 덩이 사이 거리는 가장 가까운 도형 쌍
   const lines = [];
   if (comps.length > 1) {
@@ -433,14 +441,14 @@ export function netComponents(net, graph) {
     };
     const inTree = [0], rest = comps.map((_, i) => i).slice(1);
     while (rest.length) {
-      let best = null, bk = -1;
+      let best = null, bk = -1, bt = -1;
       for (const t of inTree)
-        for (let k = 0; k < rest.length; k++) { const c = pair(comps[t], comps[rest[k]]); if (!best || c.d < best.d) { best = c; bk = k; } }
-      lines.push(best);
+        for (let k = 0; k < rest.length; k++) { const c = pair(comps[t], comps[rest[k]]); if (!best || c.d < best.d) { best = c; bk = k; bt = t; } }
+      lines.push({ ...best, ca: bt, cb: rest[bk] });
       inTree.push(rest[bk]); rest.splice(bk, 1);
     }
   }
-  return { comps: comps.length, lines };
+  return { comps: comps.length, lines, pinComp: pins.map((p) => compOf.get(pinIdx.get(p))), segComp: segIdx.map((i) => compOf.get(i)) };
 }
 
 // ---------------------------------------------------------------- 그리는 동안의 규칙
@@ -457,6 +465,23 @@ export function netRuleShapes(net, graph) {
   return { metals, cuts };
 }
 
+/** 세상 도형을 이 넷 것과 남의 것으로 — 블록 내부 금속은 넷 이름이 없다. 이 넷 도형(metals)과 같은 중심선에서 닿는 것은
+ *  그 도형의 일부다: 리프의 핀 막대가 핀 접점과 넷 이름 없는 내부 금속으로 겹쳐 들어 있다 (검사기에서는 같은 넷 이름이다). */
+export function splitWorld(world, metals) {
+  const shape = (layer, r) => {
+    const v = LAYERS.get(layer).dir === "v";
+    return { c: v ? (r[0] + r[2]) / 2 : (r[1] + r[3]) / 2, lo: v ? r[1] : r[0], hi: v ? r[3] : r[2] };
+  };
+  const sameLine = (a, b) => {
+    if (a.layer !== b.layer || !LAYERS.has(a.layer)) return false;
+    const A = shape(a.layer, a.rect), B = shape(b.layer, b.rect);
+    return Math.abs(A.c - B.c) < 1 && B.lo <= A.hi && A.lo <= B.hi;
+  };
+  const ours = [], others = [];
+  for (const o of world) (o.net == null && metals.some((p) => sameLine(p, o)) ? ours : others).push(o);
+  return { ours, others };
+}
+
 /**
  * 그리는 동안의 규칙 — 검사기(check.mjs)가 볼 것 가운데 자리에서 바로 아는 것. 그린 도형(geom: buildGeometry 의 것)의
  * 금속·비아를 세상(world: worldShapes 의 것 — 이 넷 말고 전부)과 이 넷의 다른 도형(mine: netRuleShapes)에 댄다.
@@ -467,8 +492,7 @@ export function netRuleShapes(net, graph) {
  *   폭     같은 중심선에 폭이 다른 도형이 있다 (검사기의 DIFFERENT WIDTH 는 떨어져 있어도 본다)
  *   비아   같은 비아 층의 같은 중심선에서 비아 간격이 모자란다
  *   경계   모듈 밖
- * 블록 내부 금속은 넷 이름이 없다. 이 넷 도형과 같은 중심선에서 닿는 것은 그 도형의 일부로 본다 — 리프의 핀 막대가 핀
- * 접점과 내부 금속에 겹쳐 들어 있다 (검사기에서는 같은 넷 이름이다).
+ * 블록 내부 금속 가운데 이 넷 도형의 일부인 것은 이 넷 것으로 본다 (splitWorld).
  * @returns {Array<{kind, msg, at: number[], rect: number[]|null}>}   at 은 내 사각형, rect 는 부딪힌 것 (PnRDB)
  */
 export function drdIssues(geom, { world = [], mine = { metals: [], cuts: [] }, bbox = null, regions = [] } = {}) {
@@ -488,13 +512,7 @@ export function drdIssues(geom, { world = [], mine = { metals: [], cuts: [] }, b
     return { c: v ? (r[0] + r[2]) / 2 : (r[1] + r[3]) / 2, w: v ? r[2] - r[0] : r[3] - r[1], lo: v ? r[1] : r[0], hi: v ? r[3] : r[2] };
   };
   const nm = (v) => v / 2;                                   // PnRDB -> PDK (문구)
-  const sameLine = (a, b) => {
-    if (a.layer !== b.layer || !LAYERS.has(a.layer)) return false;
-    const A = shape(a.layer, a.rect), B = shape(b.layer, b.rect);
-    return Math.abs(A.c - B.c) < 1 && B.lo <= A.hi && A.lo <= B.hi;
-  };
-  const ours = [...mine.metals], others = [];
-  for (const o of world) (o.net == null && mine.metals.some((p) => sameLine(p, o)) ? ours : others).push(o);
+  const split = splitWorld(world, mine.metals), ours = [...mine.metals, ...split.ours], others = split.others;
   for (const me of metals) {
     const L = LAYERS.get(me.layer), A = shape(me.layer, me.rect);
     if (bbox && (me.rect[0] < bbox[0] || me.rect[1] < bbox[1] || me.rect[2] > bbox[2] || me.rect[3] > bbox[3]))
