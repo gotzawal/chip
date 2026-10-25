@@ -160,8 +160,12 @@ export function sessionOutput(session) {
       modules: res.modules.length, nets: top.m.node.Nets.length,
       routerMs: records.reduce((s, r) => s + (r.ms ?? 0), 0),
     },
-    // 편집기의 넷 모델 (최상위, PnRDB 단위) 과 고정 넷
-    wires: wireModel(top.m.node), frozen: session.frozen.slice(),
+    // 편집기의 넷 모델 (최상위, PnRDB 단위) 과 고정 넷. area 는 배치 영역 — 배선기 격자가 덮는 곳이라 그리기가 최소
+    // 길이로 늘일 때도 이 밖으로는 안 늘인다 (배선 뒤의 LL/UR 은 전원 격자까지 넓어져 있다). regions 는 리프의 Boundary
+    // 사각형 — 검사기가 그 안에서는 MinLength·MinSpace 를 안 본다 (그리는 동안의 규칙도 같게)
+    wires: { ...wireModel(top.m.node), area: session.placement.bbox.map((v) => 2 * v),
+             regions: terminals.filter((t) => t.layer === "Boundary").map((t) => t.rect.map((v) => 2 * v)) },
+    frozen: session.frozen.slice(),
   };
 }
 

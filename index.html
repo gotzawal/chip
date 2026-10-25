@@ -258,6 +258,7 @@
   .hint { color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
   /* --- 편집 (edit.mjs 가 카드를 채운다) --- */
   canvas.editing { cursor: default; }
+  canvas.editing.drawtool { cursor: crosshair; }
   .editrow { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--hair); font-size: 12.5px; line-height: 1.5; }
   .editrow:first-child { border-top: 0; padding-top: 0; }
   .editrow > .lab { flex: 0 0 60px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--faint); padding-top: 4px; }
@@ -408,7 +409,7 @@ five_transistor_ota 실측: 0.25 -> 겹침 0.216, 1 -> 0.160, 4 -> 0.111.">
               <button data-what="route" aria-pressed="false">Routing</button>
             </span>
             <span class="seg" id="modeSeg" hidden style="margin-left:6px"
-                  title="편집: 블록을 끌어 옮기고 뒤집고 variant 를 바꾼다 — 편집이 없으면 배치기·배선기가 낸 그대로다">
+                  title="편집: 블록을 끌어 옮기고 뒤집고 variant 를 바꾼다. 배선은 조각을 옮기고, 층을 골라 직접 그리고 지운다 — 편집이 없으면 배치기·배선기가 낸 그대로다">
               <button data-mode="view" aria-pressed="true">보기</button>
               <button data-mode="edit" aria-pressed="false" disabled>편집</button>
             </span>
@@ -452,7 +453,8 @@ variant 후보는 2_primitives 가 같은 블록을 다른 종횡비로 만들�
       </div>
       <div class="card" id="editCard" hidden>
         <h2 title="배치를 손으로 고친다. 끌기는 제약을 따라 움직이고(거울 쌍은 거울로, 축 위 블록은 축을 따라), 정리는 사용자가
-정한 위상(쌍의 상대 위치)을 그대로 둔 채 겹침을 없애고 격자에 앉힌다. 편집이 없으면 지금 그대로다.">편집</h2>
+정한 위상(쌍의 상대 위치)을 그대로 둔 채 겹침을 없애고 격자에 앉힌다. 배선은 조각을 옆 트랙으로 옮기거나, 레이아웃 편집기처럼
+층을 골라 점을 찍어 그린다 (꺾는 자리에 비아). 편집이 없으면 지금 그대로다.">편집</h2>
         <div class="body" id="editBody"></div>
       </div>
       <div class="card fold collapsed" id="infoCard">
@@ -778,9 +780,9 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) redr
 window.addEventListener("pageshow", () => redraw());
 window.addEventListener("focus", () => redraw());
 
-// 확대/이동 초기화는 더블클릭 — 버튼 대신. 보기를 바꿀 때도 되돌린다.
+// 확대/이동 초기화는 더블클릭 — 버튼 대신. 보기를 바꿀 때도 되돌린다. 편집기가 먼저 본다 (배선 그리기는 더블클릭으로 끝낸다).
 const resetView = () => { view.s = 1; view.tx = 0; view.ty = 0; redraw(); };
-cv.addEventListener("dblclick", resetView);
+cv.addEventListener("dblclick", (e) => { if (editor?.onDblClick?.(e)) return; resetView(); });
 
 const TITLE = { schem: "Schematic — 넷리스트 그대로", group: "Primitives — 앞단이 묶은 블록 (placement 이전)",
                 place: "Placement", route: "Routing" };
