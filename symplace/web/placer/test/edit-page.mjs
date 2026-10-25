@@ -9,11 +9,16 @@
  *    그 다음 배선하고 배선 편집 모드에서 넷·조각을 골라 한 트랙 끌면 재검사가 돌고 그 넷이 고정되며, Z/Y 로
  *    되돌리고, "이 넷만 다시 배선" 이 나머지를 고정한 채 배선기를 돌린다.
  *
+ *    배선 그리기: 넷의 배선을 지우고(rip-up) 노드 검사와 같은 차례(_replay.mjs)를 마우스·키로 따라 그리면 넷이 한
+ *    덩이로 이어지고 DRC/LVS 가 배선기 결과보다 늘지 않는다. Esc 로 버리기, Delete 로 조각 지우기, Z 로 되돌리기.
+ *
  *  실행:  node symplace/web/placer/test/edit-page.mjs [예제=current_mirror_ota] [시작점=48]
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve, launchChromium } from "./_browser.mjs";
+import { replay } from "./_replay.mjs";
+import { buildGraph, worldShapes } from "../../../../src/edit/wires.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..", "..", "..");
@@ -256,6 +261,98 @@ try {
     console.log(`  정돈 (전부): ${c2.status} · 오류 ${c2.nerr}`);
     ok(c2.nerr <= k1.nerr, `전부 정돈 뒤 오류가 늘었다 ${k1.nerr} -> ${c2.nerr}`);
   } else console.log("  옮길 수 있는 조각이 없다 — 옮기기는 건너뛴다");
+
+  // ---------------------------------------------------------------- 배선 그리기
+  // Routing 을 다시 실행해 배선기 결과에서 시작하고, 비아가 가장 많은 넷의 배선을 지운 뒤(rip-up) 노드 검사(edit-draw.mjs)와 같은 차례(_replay.mjs)를
+  // 진짜 마우스·키로 따라 그린다 — 층은 숫자 키, 꺾는 쪽은 T, 끝은 이 넷 도형 클릭 또는 더블클릭. 다 그리면 넷이 한 덩이로
+  // 이어지고 DRC/LVS 가 배선기 결과보다 늘지 않는다. 그리다 Esc 로 버리기, 조각 지우기(Delete), 되돌리기도 본다.
+  const rtNow = (f) => page.evaluate(f);
+  const idle = () => page.waitForFunction(() => !globalThis.__page.editor.state.rt.busy, null, { timeout: 60000 });
+  await page.click("#routeRun");
+  await page.waitForFunction(() => /Routing 완료|Routing 실패/.test(document.querySelector("#status").textContent), null, { timeout: 180000 });
+  await page.click('#modeSeg button[data-mode="edit"]');
+  await page.waitForTimeout(150);
+  const model = await rtNow(() => JSON.parse(JSON.stringify(globalThis.__page.editor.state.rt.model)));
+  const graphs = new Map(model.nets.map((n) => [n.name, buildGraph(n)]));
+  const target = model.nets.filter((n) => n.path_metal.length).sort((a, b) => graphs.get(b.name).vias.length - graphs.get(a.name).vias.length)[0];
+  if (target) {
+    const plan = replay(target, graphs.get(target.name), { world: worldShapes(model, graphs, target.name), area: model.area });
+    const base = await rtNow(() => globalThis.__page.editor.state.rt.baseErrors);
+    // 캔버스의 my 자리가 화면 가운데 오게 굴리고 캔버스 상자를 다시 잰다
+    const at = async (x, y) => {
+      const p = await page.evaluate(([x, y]) => globalThis.__page.editor.probe.px(x, y), [x, y]);
+      await page.evaluate((my) => { const r = document.querySelector("#cv").getBoundingClientRect(); window.scrollTo(0, Math.max(0, r.top + window.scrollY + my - window.innerHeight / 2)); }, p.y);
+      const b = await page.$eval("#cv", (c) => { const r = c.getBoundingClientRect(); return { x: r.left, y: r.top }; });
+      return { x: b.x + p.x, y: b.y + p.y };
+    };
+    // 조각을 클릭해 넷을 고르고 지운다
+    const pick = (await page.evaluate((n) => globalThis.__page.editor.probe.segmentsPx(n), target.name)).sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h))[0];
+    const box3 = await page.$eval("#cv", (c) => { const r = c.getBoundingClientRect(); return { x: r.left, y: r.top }; });
+    await page.mouse.click(box3.x + pick.cx, box3.y + pick.cy);
+    await page.waitForTimeout(100);
+    ok(await page.evaluate((n) => globalThis.__page.editor.state.rt.net === n, target.name), `${target.name} 이 안 골라졌다`);
+    await page.click('#editBody button[data-act="rrip"]');
+    await idle();
+    const ripped = await rtNow(() => { const rt = globalThis.__page.editor.state.rt; return { nerr: rt.nerr, card: document.querySelector("#editBody").textContent }; });
+    console.log(`  그리기: ${target.name} 배선 지우기 — DRC/LVS ${ripped.nerr} (기준 ${base}) · 차례 ${plan.steps.length} (비아만 ${plan.viaOnly})`);
+    ok(ripped.nerr > base && /열린 곳/.test(ripped.card), "배선을 지웠는데 열린 곳이 안 보인다");
+    // Esc 로 버리기 — 아무것도 안 남는다
+    await page.keyboard.press("w");
+    const s0 = plan.steps[0], hist0 = await rtNow(() => globalThis.__page.editor.state.rt.hist.length);
+    let p = await at(s0.start.x, s0.start.y);
+    await page.mouse.click(p.x, p.y);
+    p = await at(s0.end.x, s0.end.y);
+    await page.mouse.move(p.x, p.y, { steps: 4 });
+    const drawing = await rtNow(() => !!globalThis.__page.editor.state.rt.draw);
+    await page.keyboard.press("Escape");
+    const dropped = await rtNow(() => ({ draw: !!globalThis.__page.editor.state.rt.draw, hist: globalThis.__page.editor.state.rt.hist.length, tool: globalThis.__page.editor.state.rt.tool }));
+    ok(drawing && !dropped.draw && dropped.hist === hist0 && dropped.tool === "wire", "Esc 로 그리던 것을 버리지 못했다");
+    // 차례대로 그린다
+    const keyOf = await page.evaluate(async () => (await import("./src/edit/draw.mjs")).DRAW_LAYERS);
+    let dbl = 0, snapped = 0;
+    for (const st of plan.steps) {
+      await page.keyboard.press(String(keyOf.indexOf(st.layer) + 1));
+      if ((await rtNow(() => globalThis.__page.editor.state.rt.turn)) !== st.turn) await page.keyboard.press("t");
+      const h = await rtNow(() => globalThis.__page.editor.state.rt.hist.length);
+      p = await at(st.start.x, st.start.y);
+      await page.mouse.move(p.x, p.y);
+      await page.mouse.click(p.x, p.y);
+      p = await at(st.end.x, st.end.y);
+      await page.mouse.move(p.x, p.y, { steps: 3 });
+      const pv = await rtNow(() => { const q = globalThis.__page.editor.state.rt.preview; return q ? { ok: q.ok, target: !!q.target, why: q.why } : null; });
+      if (pv?.target) { snapped++; await page.mouse.click(p.x, p.y); }
+      else { dbl++; await page.mouse.dblclick(p.x, p.y); }
+      await page.waitForFunction((h) => { const rt = globalThis.__page.editor.state.rt; return !rt.busy && !rt.draw && rt.hist.length > h; }, h, { timeout: 60000 })
+        .catch(() => bad(`차례 ${JSON.stringify(st)} 가 안 끝났다 (${pv?.why ?? ""})`));
+    }
+    const drawn = await page.evaluate(async (n) => {
+      const rt = globalThis.__page.editor.state.rt, D = await import("./src/edit/draw.mjs");
+      const net = rt.model.nets.find((q) => q.name === n), g = rt.graphs.get(n);
+      return { nerr: rt.nerr, comps: D.netComponents(net, g).comps, segs: g.segs.length, vias: g.vias.length, frozen: rt.frozen.has(n), status: document.querySelector("#status").textContent.trim() };
+    }, target.name);
+    console.log(`  그리기: 클릭으로 다시 그림 (붙어서 끝 ${snapped}, 더블클릭 ${dbl}) — 조각 ${drawn.segs} 비아 ${drawn.vias} · 덩이 ${drawn.comps} · DRC/LVS ${drawn.nerr} (기준 ${base}) · ${drawn.status}`);
+    ok(drawn.comps === 1, `다시 그린 ${target.name} 이 ${drawn.comps} 덩이다`);
+    ok(drawn.nerr <= base, `다시 그린 뒤 오류가 늘었다 ${base} -> ${drawn.nerr}`);
+    ok(drawn.frozen, "그린 넷이 고정되지 않았다");
+    ok(/그리기 \(토막/.test(drawn.status), "그리기 상태 줄이 없다");
+    // 조각 지우기 (고르기 도구에서 조각을 클릭하고 Delete) 와 되돌리기
+    await page.keyboard.press("Escape");
+    const sg = (await page.evaluate((n) => globalThis.__page.editor.probe.segmentsPx(n), target.name)).sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h))[0];
+    const seg0 = await page.evaluate(([n, id]) => { const s = globalThis.__page.editor.state.rt.graphs.get(n).segs[id]; return { x: s.dir === "v" ? s.t : (s.lo + s.hi) / 2, y: s.dir === "v" ? (s.lo + s.hi) / 2 : s.t }; }, [target.name, sg.id]);
+    p = await at(seg0.x, seg0.y);
+    await page.mouse.click(p.x, p.y);                                       // 넷 (이미 골라져 있으면 조각)
+    if (!(await rtNow(() => !!globalThis.__page.editor.state.rt.seg))) await page.mouse.click(p.x, p.y);
+    const before = await rtNow(() => ({ segs: globalThis.__page.editor.state.rt.graphs.get(globalThis.__page.editor.state.rt.net).segs.length, hist: globalThis.__page.editor.state.rt.hist.length, picked: !!globalThis.__page.editor.state.rt.seg }));
+    await page.keyboard.press("Delete");
+    await page.waitForFunction((h) => { const rt = globalThis.__page.editor.state.rt; return !rt.busy && rt.hist.length > h; }, before.hist, { timeout: 60000 }).catch(() => bad("Delete 가 안 됐다"));
+    const del = await rtNow(() => { const rt = globalThis.__page.editor.state.rt; return { segs: rt.graphs.get(rt.net).segs.length, nerr: rt.nerr }; });
+    console.log(`  지우기: 조각 ${before.segs} -> ${del.segs} · DRC/LVS ${del.nerr}`);
+    ok(before.picked && del.segs < before.segs, "Delete 로 조각이 안 지워졌다");
+    await page.keyboard.press("z");
+    await idle();
+    const undone = await rtNow(() => { const rt = globalThis.__page.editor.state.rt; return { segs: rt.graphs.get(rt.net).segs.length, nerr: rt.nerr }; });
+    ok(undone.segs === before.segs && undone.nerr === drawn.nerr, `되돌렸는데 조각 ${undone.segs} / 오류 ${undone.nerr}`);
+  } else console.log("  배선된 넷이 없다 — 그리기는 건너뛴다");
 } finally {
   await browser.close();
   srv.close();
