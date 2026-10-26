@@ -1,7 +1,10 @@
-/** 보조 배선 검사 (src/edit/assist.mjs) — 핀을 누르고 끌면 길찾기가 잇는 배선이 검사기와 맞는가.
+/** 보조 배선 검사 (src/edit/assist.mjs) — 핀을 누르고 끄는 대로 따라오는 배선이 검사기와 맞는가.
  *
  *  예제마다 배선 세션을 만든 뒤 (배치는 edit-wires.mjs 와 같은 캐시), 배선된 넷마다 그 넷의 배선을 다 지우고(rip-up):
- *    끌어 잇기   사람이 플라이라인을 따라 끄는 것 — 선의 한 끝 도형을 눌러(assistStart) 다른 끝으로 커서를 옮기면(assistTo)
+ *    따라 긋기   핀을 누른 자리(닻)에서 커서까지 — 처음 끈 쪽(posture)이 첫 토막이고 커서의 격자 점에서 끝난다 (곧장 갈 수
+ *                있을 때. 막혔으면 돌아간다). 닻은 누른 자리에 가장 가까운 격자 점이다. 그렇게 그은 것(이어지지 않은
+ *                토막도)을 넣고 재검사해도 오류가 지운 뒤보다 늘지 않는다 — 규칙에 맞는 것만 긋는다
+ *    끌어 잇기   사람이 플라이라인을 따라 끄는 것 — 선의 한 끝 도형을 눌러(drawStart) 다른 끝으로 커서를 옮기면(drawTo)
  *                클릭 없이 그 덩이의 도형에 붙는다. 넣고 재검사하고, 넷이 한 덩이가 될 때까지 되풀이한다. 넷이 이어지고
  *                재검사 오류가 기준보다 늘지 않는다. 길은 막힌 꼭짓점을 안 지나고, 끝이 붙은 도형 위다
  *    모두 잇기   autoConnect 한 번에 넷의 열린 곳이 다 이어지고 오류가 기준보다 늘지 않는다 (플라이라인 클릭·"열린 곳 잇기")
@@ -17,8 +20,8 @@ import { fileURLToPath } from "node:url";
 import { loadAlignRouter } from "../../../../src/route/alignroute.mjs";
 import { routeSession, sessionOutput, recheck } from "../../../../src/route/pipeline.mjs";
 import { buildGraph } from "../../../../src/edit/wires.mjs";
-import { buildGeometry, pathPlus, netShapes, netComponents, shapeAt } from "../../../../src/edit/draw.mjs";
-import { routingGrid, assistStart, assistTo, autoConnect, GRID_LAYERS } from "../../../../src/edit/assist.mjs";
+import { buildGeometry, pathPlus, netShapes, netComponents, shapeAt, layerPair } from "../../../../src/edit/draw.mjs";
+import { routingGrid, drawStart, drawTo, nodePoint, shapeNodes, autoConnect, GRID_LAYERS } from "../../../../src/edit/assist.mjs";
 import { runJob } from "../../../../src/job.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +51,7 @@ async function placementOf(ex, blob) {
   return placement;
 }
 const graphsOf = (model) => new Map(model.nets.map((n) => [n.name, buildGraph(n)]));
+const PAIR = layerPair("M3", "up");                                // 기본 그리기 층 M3 — 세로 M3, 가로 M4
 const inRect = (r, p) => p.x >= r[0] - 1e-6 && p.x <= r[2] + 1e-6 && p.y >= r[1] - 1e-6 && p.y <= r[3] + 1e-6;
 
 for (const ex of wanted) {
@@ -64,6 +68,58 @@ for (const ex of wanted) {
   const G0 = routingGrid(model0, graphsOf(model0), model0.nets[0].name);
   const tGrid = performance.now() - t0;
   console.log(`  넷 ${model0.nets.length} (배선 ${routedNets.length})  오류 ${base}  격자 ${G0.NX}x${G0.NY}x${G0.NL} (${GRID_LAYERS.join("·")}) ${tGrid.toFixed(1)} ms`);
+
+  // --- 따라 긋기: 핀을 누른 자리에서 커서까지 ㄱ자 (처음 끈 쪽이 첫 토막), 넣어도 오류가 안 는다 ---
+  let heads = 0, straight = 0, detours = 0, flipped = 0, exact = 0, committed = 0, cleanCommits = 0;
+  const followBad = [];
+  for (const n of routedNets) {
+    const ripped = recheck(session, [{ net: n.name, path_metal: [], path_via: [] }]);
+    const model = ripped.wires, graphs = graphsOf(model);
+    const net = model.nets.find((q) => q.name === n.name), g = graphs.get(n.name);
+    const G = routingGrid(model, graphs, n.name);
+    const pin = netShapes(net, g).find((s) => s.kind === "pin" && shapeNodes(G, s).length);
+    if (!pin) continue;
+    const at = { x: (pin.rect[0] + pin.rect[2]) / 2, y: (pin.rect[1] + pin.rect[3]) / 2 };
+    const D = drawStart(model, graphs, n.name, { shape: pin, at, grid: G });
+    if (!D.S) { followBad.push(`${n.name}: 닻을 못 잡음 (${D.why})`); continue; }
+    const A0 = nodePoint(G, D.anchor);
+    if (!(A0.x >= pin.rect[0] - 1e-6 && A0.x <= pin.rect[2] + 1e-6 && A0.y >= pin.rect[1] - 1e-6 && A0.y <= pin.rect[3] + 1e-6))
+      followBad.push(`${n.name}: 닻 (${A0.x}, ${A0.y}) 이 누른 핀 밖`);
+    const px = G.X[1] - G.X[0], py = G.Y[1] - G.Y[0];
+    let commitsHere = 0;
+    for (const [di, dj] of [[5, 0], [-5, 0], [0, 5], [0, -5], [4, 3], [-4, 3], [4, -3], [-4, -3]])
+      for (const posture of ["h", "v"]) {
+        const c = { x: A0.x + di * px, y: A0.y + dj * py };
+        if (c.x < G.X[0] || c.x > G.X[G.NX - 1] || c.y < G.Y[0] || c.y > G.Y[G.NY - 1]) continue;
+        const r = drawTo(D, c, { posture, h: PAIR.h, v: PAIR.v, aperture: -1 });   // 붙기는 끄고 (커서가 다른 핀 위일 수도)
+        if (!r.ok) continue;
+        heads++;
+        if (r.detour) { detours++; continue; }
+        if (r.flipped) flipped++;
+        // 곧장: 닻에서 시작, 처음 움직이는 쪽이 posture (막혀서 꺾는 쪽을 바꿨으면 그쪽), 커서에서 두 칸 안에서 끝 (보통 그 점)
+        const pts = r.path, first = pts.find((q) => q.x !== pts[0].x || q.y !== pts[0].y), last = pts[pts.length - 1];
+        const want = r.flipped ? (posture === "h" ? "v" : "h") : posture;
+        const okStart = pts[0].x === A0.x && pts[0].y === A0.y;
+        const okFirst = !first || (want === "h" ? first.y === A0.y : first.x === A0.x) || di === 0 || dj === 0;
+        const okEnd = Math.abs(last.x - c.x) <= 2 * px + 1 && Math.abs(last.y - c.y) <= 2 * py + 1;
+        if (Math.abs(last.x - c.x) < 1 && Math.abs(last.y - c.y) < 1) exact++;
+        if (okStart && okFirst && okEnd) straight++;
+        else followBad.push(`${n.name}: ${posture} (${di}, ${dj}) 시작 ${okStart} 첫 토막 ${okFirst} 끝 ${okEnd}`);
+        if (commitsHere >= 3 || pts.length < 2) continue;              // 넷마다 셋을 넣어 본다
+        commitsHere++; committed++;
+        const geom = buildGeometry([pts], { mine: netShapes(net, g), world: G.world, area: model.area });
+        const out = recheck(session, [{ net: n.name, ...pathPlus(net, geom) }]);
+        if (out.errors.length <= ripped.errors.length) cleanCommits++;
+        else followBad.push(`${n.name}: ${posture} (${di}, ${dj}) 넣으니 오류 ${ripped.errors.length} -> ${out.errors.length}: ${out.errors.filter((e) => !ripped.errors.includes(e))[0]?.slice(0, 140)}`);
+        recheck(session, [{ net: n.name, path_metal: [], path_via: [] }]);
+      }
+    restoreAll();
+  }
+  console.log(`  따라 긋기: 머리 ${heads} 개 — 곧장 ${straight} (커서 점에서 끝 ${exact}, 꺾는 쪽을 바꿈 ${flipped}), 돌아감 ${detours}` +
+              ` · 넣어 본 것 ${committed} 개 가운데 오류가 안 는 것 ${cleanCommits}`);
+  for (const s of followBad.slice(0, 12)) console.log("    " + s);
+  ok(straight === heads - detours, `따라 긋기 — 곧장 간 머리 가운데 어긋난 것 ${heads - detours - straight}`);
+  ok(cleanCommits === committed, `따라 긋기 — 넣으니 오류가 는 것 ${committed - cleanCommits}`);
 
   // --- 끌어 잇기: 플라이라인을 따라 누르고 끌어 놓는다 ---
   let dragged = 0, drags = 0, flyOnly = 0, worse = 0, maxSearch = 0, maxPress = 0;
@@ -82,13 +138,14 @@ for (const ex of wanted) {
       const sh = netShapes(net, g).filter((s) => inRect(s.rect, at)).sort((a, b) => (a.kind === "pin") - (b.kind === "pin"))[0]
         ?? shapeAt(model, graphs, at.x, at.y, 0, "M3");
       t0 = performance.now();
-      const A = assistStart(model, graphs, n.name, { shape: sh, at });
+      const A = drawStart(model, graphs, n.name, { shape: sh, at });
       const tPress = performance.now() - t0;
       maxPress = Math.max(maxPress, tPress);
       let edit = null;
       if (A.S) {
         t0 = performance.now();
-        const r = assistTo(A, to, { aperture: 160 });
+        const posture = Math.abs(to.x - at.x) >= Math.abs(to.y - at.y) ? "h" : "v";
+        const r = drawTo(A, to, { posture, aperture: 160, h: PAIR.h, v: PAIR.v });
         maxSearch = Math.max(maxSearch, performance.now() - t0);
         if (r.ok && r.target) {
           ok(r.path.every((p, i) => i === 0 || !(p.x === r.path[i - 1].x && p.y === r.path[i - 1].y && p.layer === r.path[i - 1].layer)), `${n.name}: 길에 같은 점이 겹친다`);

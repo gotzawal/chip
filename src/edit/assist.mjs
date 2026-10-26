@@ -10,8 +10,11 @@
  *    변       토막 몸통이 같은 층 도형과 겹치거나 (같은 트랙이면 끝단 간격 안)
  *    트랙     같은 중심선에 폭이 다른 도형이 있으면 그 층의 꼭짓점을 다 (DIFFERENT WIDTH 는 떨어져 있어도 본다)
  *    비아     같은 비아 층의 다른 비아와 간격 안 (이 넷의 같은 자리 비아는 괜찮다)
- *  비용은 길이(층마다 무게 — 그리기 층 짝이 가장 싸고 M1 이 가장 비싸다) + 비아. 시작점에서 다익스트라 한 번 — 커서가 움직일
- *  때는 거꾸로 따라가기만 한다. 나온 경로는 그리기와 같은 점 줄이라 buildGeometry 가 최소 길이를 늘이고 재검사로 간다.
+ *  그리기(drawStart · drawTo)는 누른 자리(닻)에서 커서를 따라간다 — 첫 토막은 사용자가 처음 움직인 쪽(posture), 다음은
+ *  수직으로 꺾어 커서까지 (ㄱ자, 가로 토막은 짝의 가로 층, 세로 토막은 세로 층, 꺾는 자리에 비아). 그 ㄱ자가 막힌 자리를
+ *  지나면 닻에서의 다익스트라 길 나무로 돌아간다. 이 넷의 다른 덩이 도형 가까이 가면 그 위로 붙는다 (pin tap).
+ *  비용은 길이(층마다 무게 — 그리기 층 짝이 가장 싸고 M1 이 가장 비싸다) + 비아. 나온 경로는 수동 그리기와 같은 점 줄이라
+ *  buildGeometry 가 최소 길이를 늘이고 재검사로 간다.
  *
  *  단위는 PnRDB.
  */
@@ -144,6 +147,9 @@ function cell(G, x, y) {
   const px = G.NX > 1 ? G.X[1] - G.X[0] : 1, py = G.NY > 1 ? G.Y[1] - G.Y[0] : 1;
   return [Math.min(G.NX - 1, Math.max(0, Math.round((x - G.X[0]) / px))), Math.min(G.NY - 1, Math.max(0, Math.round((y - G.Y[0]) / py)))];
 }
+const layerIdx = (G, name) => G.layers.findIndex((q) => q.name === name);
+const nodeOf = (G, l, i, j) => l * G.NP + j * G.NX + i;
+function nodeLIJ(G, n) { const l = Math.floor(n / G.NP), r = n - l * G.NP, j = Math.floor(r / G.NX); return [l, r - j * G.NX, j]; }
 /** 도형(netShapes 의 것) 위의 꼭짓점들 — 그 층·그 트랙·스팬 안. 트랙이 격자에 안 맞거나 격자 층이 아니면 없다 */
 export function shapeNodes(G, s) {
   const l = G.layers.findIndex((q) => q.name === s.layer);
@@ -213,9 +219,158 @@ export function pathTo(G, S, n) {
   return ids.reverse().map((m) => nodePoint(G, m));
 }
 
-// ---------------------------------------------------------------- 보조 그리기
+// ---------------------------------------------------------------- 그리기 — 닻에서 커서를 따라
 
 const rectDist = (r, p) => Math.hypot(Math.max(0, r[0] - p.x, p.x - r[2]), Math.max(0, r[1] - p.y, p.y - r[3]));
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/** 붙을 곳 — 이 넷의 다른 덩이 도형들 (꼭짓점이 있는 것). 시작 도형이 없으면(빈 자리) 이 넷 도형 전부 */
+function targetsOf(G, shape) {
+  const shapes = netShapes(G.net, G.graph), comp = netComponents(G.net, G.graph);
+  const compOf = (s) => (s.kind === "pin" ? comp.pinComp[G.net.pins.indexOf(s.pin)] : comp.segComp[s.seg.id]);
+  const startComp = shape ? compOf(shapes.find((s) => s.key === shape.key) ?? shape) ?? -1 : -1;
+  const out = [];
+  for (const s of shapes) {
+    const c = compOf(s);
+    if (shape && c === startComp) continue;
+    const nodes = shapeNodes(G, s);
+    if (nodes.length) out.push({ shape: s, comp: c, nodes });
+  }
+  return out;
+}
+/** 커서 가까이(세 칸 고리까지)에서 길 나무가 닿는 가장 싼 꼭짓점 — 없으면 -1 */
+function nearestReach(G, S, cursor) {
+  const [ci, cj] = cell(G, cursor.x, cursor.y);
+  for (let r = 0; r <= 3; r++) {
+    let best = -1, bc = Infinity;
+    for (let dj = -r; dj <= r; dj++)
+      for (let di = -r; di <= r; di++) {
+        if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+        const i = ci + di, j = cj + dj;
+        if (i < 0 || j < 0 || i >= G.NX || j >= G.NY) continue;
+        for (let l = 0; l < G.NL; l++) { const n = nodeOf(G, l, i, j), c = S.dist[n]; if (c < bc) { bc = c; best = n; } }
+      }
+    if (best >= 0) return best;
+  }
+  return -1;
+}
+
+/**
+ * 닻 n0 에서 격자 점 (i1, j1) 까지 ㄱ자 — 첫 토막은 posture 축 ("h" 가로 먼저, "v" 세로 먼저), 가로 토막은 h 층, 세로 토막은
+ * v 층, 층이 바뀌는 자리에는 비아를 쌓는다. endLayer 를 주면 끝에서 그 층까지 (붙을 도형의 층). 길이 0 인 토막은 건너뛴다.
+ * 막힌 꼭짓점·변·비아 자리를 하나라도 지나면 null — 막힘이 검사기 규칙이라 안 막혔으면 규칙에 맞는다.
+ * @returns {{path: Array<{x,y,layer}>, end: number}|null}   path 는 닻부터, 꺾는 자리와 쌓는 자리만
+ */
+export function lPath(G, n0, i1, j1, { posture, h, v, endLayer = null }) {
+  const lh = layerIdx(G, h), lv = layerIdx(G, v);
+  if (lh < 0 || lv < 0 || G.layers[lh].dir !== "h" || G.layers[lv].dir !== "v") return null;
+  const { nb, eb, vb, NX } = G;
+  let [l, i, j] = nodeLIJ(G, n0);
+  const path = [nodePoint(G, n0)];
+  const here = () => path.push({ x: G.X[i], y: G.Y[j], layer: G.layers[l].name });
+  const stackTo = (lt) => {
+    if (l === lt) return true;
+    while (l !== lt) {
+      const s = lt > l ? 1 : -1;
+      if (vb[nodeOf(G, Math.min(l, l + s), i, j)] || nb[nodeOf(G, l + s, i, j)]) return false;
+      l += s;
+    }
+    here();
+    return true;
+  };
+  const walk = (axis, to) => {
+    for (;;) {
+      const at = axis === "h" ? i : j;
+      if (at === to) break;
+      const s = to > at ? 1 : -1, n = nodeOf(G, l, i, j);
+      if (eb[axis === "h" ? (s > 0 ? n : n - 1) : (s > 0 ? n : n - NX)]) return false;
+      if (axis === "h") i += s; else j += s;
+      if (nb[nodeOf(G, l, i, j)]) return false;
+    }
+    here();
+    return true;
+  };
+  for (const [axis, to] of posture === "h" ? [["h", i1], ["v", j1]] : [["v", j1], ["h", i1]]) {
+    if ((axis === "h" ? i : j) === to) continue;
+    if (!stackTo(axis === "h" ? lh : lv) || !walk(axis, to)) return null;
+  }
+  if (endLayer != null) { const le = layerIdx(G, endLayer); if (le < 0 || !stackTo(le)) return null; }
+  return { path, end: nodeOf(G, l, i, j) };
+}
+
+/**
+ * 그리기 시작 — 닻(누른 도형 위에서 누른 자리에 가장 가까운 꼭짓점, 빈 자리면 그 자리)과 거기서의 길 나무 (막혀서 돌아갈 때와
+ * 붙을 때 쓴다). 붙을 곳(targets)은 이 넷의 다른 덩이의 도형들이다.
+ * @param {object} o  { shape: 누른 도형 (netShapes 의 것) | null, at: 누른 점, prefer, turn, grid: 이미 지은 격자 }
+ * @returns {{G, anchor, S, targets, why?}}   못 잡으면 S 가 null 이고 why
+ */
+export function drawStart(model, graphs, netName, { shape = null, at, prefer = "M3", turn = "up", grid = null } = {}) {
+  const G = grid ?? routingGrid(model, graphs, netName, { prefer, turn });
+  const targets = targetsOf(G, shape);
+  let anchor = -1;
+  if (shape) {
+    let bd = Infinity;
+    for (const n of shapeNodes(G, shape)) { const d = dist(nodePoint(G, n), at); if (d < bd) { bd = d; anchor = n; } }
+  } else {
+    const [i, j] = cell(G, at.x, at.y), l0 = Math.max(0, layerIdx(G, prefer));
+    for (const l of [l0, ...G.layers.map((_, k) => k).filter((k) => k !== l0)]) { const n = nodeOf(G, l, i, j); if (!G.nb[n]) { anchor = n; break; } }
+  }
+  if (anchor < 0) return { G, anchor, S: null, targets, why: shape ? `${shape.layer} 도형이 격자(${GRID_LAYERS.join("·")}) 트랙 위가 아니거나 막혀 있다` : "여기는 막혀 있다" };
+  return { G, anchor, S: search(G, [{ n: anchor, c: 0 }]), targets };
+}
+/** 닻을 옮긴다 — 클릭이나 꺾기로 거기까지 고정했을 때. 같은 닻이면 층 무게를 바꾼 뒤 다시 찾는 것 */
+export function drawMove(D, anchor) {
+  return { ...D, anchor, S: search(D.G, [{ n: anchor, c: 0 }]) };
+}
+
+/**
+ * 커서까지 — 닻에서 ㄱ자로 (첫 토막은 posture 축 — 사용자가 처음 움직인 쪽, h·v 는 가로·세로 토막의 층). 이 넷의 다른 덩이
+ * 도형이 tapAt(진짜 커서)에서 aperture 안이면 그 위로 붙는다 — 커서를 도형에 내린 자리 가까운 꼭짓점부터 ㄱ자로. ㄱ자가 막혔으면
+ * 커서의 둘레 두 칸 안 점까지, 그다음 꺾는 쪽을 바꿔(flipped) 다시 보고, 그래도 막혔으면 길 나무로 돌아간다 (detour). posture 가
+ * 없으면 (커서가 아직 닻 가까이) 닻 그대로다.
+ * @returns {{ok, why, path: Array<{x,y,layer}>, end: number, target, detour, flipped?}}   path 는 닻부터
+ */
+export function drawTo(D, cursor, { posture = null, aperture = 0, h, v, tapAt = cursor } = {}) {
+  const { G, S } = D;
+  const fail = (why) => ({ ok: false, why, path: [], end: -1, target: null, detour: false });
+  if (!S) return fail(D.why ?? "시작점이 없다");
+  let tap = null;
+  for (const t of D.targets) { const d = rectDist(t.shape.rect, tapAt); if (d <= aperture && (!tap || d < tap.d)) tap = { t, d }; }
+  if (tap) {
+    const s = tap.t.shape, r = s.rect;
+    const proj = { x: Math.min(r[2], Math.max(r[0], tapAt.x)), y: Math.min(r[3], Math.max(r[1], tapAt.y)) };
+    const near = tap.t.nodes.map((n) => ({ n, d: dist(nodePoint(G, n), proj) })).sort((a, b) => a.d - b.d).slice(0, 6);
+    for (const p of posture ? [posture, posture === "h" ? "v" : "h"] : ["h", "v"])
+      for (const { n } of near) {
+        const [l, i, j] = nodeLIJ(G, n);
+        const L = lPath(G, D.anchor, i, j, { posture: p, h, v, endLayer: G.layers[l].name });
+        if (L) return { ok: true, why: null, path: L.path, end: L.end, target: s, detour: false };
+      }
+    let best = -1, bc = Infinity;
+    for (const n of tap.t.nodes) { const c = S.dist[n] + 0.3 * dist(nodePoint(G, n), tapAt); if (c < bc) { bc = c; best = n; } }
+    if (best >= 0 && Number.isFinite(S.dist[best])) return { ok: true, why: null, path: pathTo(G, S, best), end: best, target: s, detour: true };
+    return fail(`${s.layer} ${s.kind === "pin" ? "핀" : "배선"} 까지 막혀 있다`);
+  }
+  if (!posture) return { ok: true, why: null, path: [nodePoint(G, D.anchor)], end: D.anchor, target: null, detour: false };
+  // 곧장 (ㄱ자) — 커서의 격자 점, 막혔으면 그 둘레 한두 칸 (커서에 가까운 것부터), 그래도 안 되면 꺾는 쪽을 바꿔서.
+  // 토막이 둘뿐인 길이라 손이 간 대로다. 다 막혔을 때만 길 나무로 돌아간다
+  const [ci, cj] = cell(G, cursor.x, cursor.y);
+  const ring = [[0, 0]];
+  for (let r = 1; r <= 2; r++)
+    for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) if (Math.max(Math.abs(di), Math.abs(dj)) === r) ring.push([di, dj]);
+  const cand = ring.map(([di, dj]) => [ci + di, cj + dj]).filter(([i, j]) => i >= 0 && j >= 0 && i < G.NX && j < G.NY)
+    .map(([i, j]) => ({ i, j, d: Math.hypot(G.X[i] - cursor.x, G.Y[j] - cursor.y) })).sort((a, b) => a.d - b.d);
+  for (const p of [posture, posture === "h" ? "v" : "h"])
+    for (const { i, j } of p === posture ? cand : cand.slice(0, 9)) {
+      const L = lPath(G, D.anchor, i, j, { posture: p, h, v });
+      if (L) return { ok: true, why: null, path: L.path, end: L.end, target: null, detour: false, flipped: p !== posture };
+    }
+  const n = nearestReach(G, S, cursor);
+  if (n >= 0) return { ok: true, why: null, path: pathTo(G, S, n), end: n, target: null, detour: true };
+  return fail("커서 근처까지 길이 없다");
+}
+
+// ---------------------------------------------------------------- 옛 보조 (덩이 전체에서 가장 싼 길) — 캐시에 남은 옛 편집기가 부른다
 
 /**
  * 보조 그리기 시작 — 시작 도형(또는 빈 자리의 점)에서 다익스트라 한 번. 붙을 곳(targets)은 이 넷의 다른 덩이의 도형들이다.
@@ -242,13 +397,7 @@ export function assistStart(model, graphs, netName, { shape = null, at, prefer =
       if (!G.nb[n]) { from = [{ n, c: 0 }]; break; }
     }
   }
-  const targets = [];
-  for (const s of shapes) {
-    const c = compOf(s);
-    if (shape && c === startComp) continue;
-    const nodes = shapeNodes(G, s);
-    if (nodes.length) targets.push({ shape: s, comp: c, nodes });
-  }
+  const targets = targetsOf(G, shape);
   if (!from.length) return { G, S: null, targets, sources: [], why: shape ? `${shape.layer} 도형이 격자(${GRID_LAYERS.join("·")}) 트랙 위가 아니거나 막혀 있다` : "여기는 막혀 있다" };
   return { G, S: search(G, from), targets, sources: from };
 }
@@ -281,21 +430,8 @@ export function assistTo(A, cursor, { aperture = 0 } = {}) {
     if (best >= 0 && Number.isFinite(S.dist[best])) return { ok: true, why: null, path: pathTo(G, S, best), end: best, target: tap.t.shape };
     return { ok: false, why: `${tap.t.shape.layer} ${tap.t.shape.kind === "pin" ? "핀" : "배선"} 까지 막혀 있다`, path: [], end: -1, target: null };
   }
-  const [ci, cj] = cell(G, cursor.x, cursor.y);
-  for (let r = 0; r <= 3; r++) {
-    let best = -1, bc = Infinity;
-    for (let dj = -r; dj <= r; dj++)
-      for (let di = -r; di <= r; di++) {
-        if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
-        const i = ci + di, j = cj + dj;
-        if (i < 0 || j < 0 || i >= G.NX || j >= G.NY) continue;
-        for (let l = 0; l < G.NL; l++) {
-          const n = l * G.NP + j * G.NX + i, c = S.dist[n];
-          if (c < bc) { bc = c; best = n; }
-        }
-      }
-    if (best >= 0) return { ok: true, why: null, path: pathTo(G, S, best), end: best, target: null };
-  }
+  const n = nearestReach(G, S, cursor);
+  if (n >= 0) return { ok: true, why: null, path: pathTo(G, S, n), end: n, target: null };
   return { ok: false, why: "커서 근처까지 길이 없다", path: [], end: -1, target: null };
 }
 
