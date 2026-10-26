@@ -12,9 +12,10 @@
  *    배선 그리기 (수동): 넷의 배선을 지우고(rip-up) 노드 검사와 같은 차례(_replay.mjs)를 마우스·키로 따라 그리면 넷이 한
  *    덩이로 이어지고 DRC/LVS 가 배선기 결과보다 늘지 않는다. Esc 로 버리기, Delete 로 조각 지우기, Z 로 되돌리기.
  *
- *    보조 그리기: 배선 보기에는 편집 전에도 도구 줄이 보이고 "배선" 을 누르면 편집에 들어간다. 넷을 지우고 플라이라인의
- *    한 끝 핀을 눌러 다른 끝까지 끌면 미리보기가 그 핀에 붙고, 놓으면 이어진다 (DRC/LVS 가 늘지 않는다). 플라이라인을
- *    클릭해도, 도구 줄의 "열린 곳 모두 잇기" 로도 이어진다.
+ *    보조 그리기: 배선 보기에는 편집 전에도 도구 줄이 보이고 "배선" 을 누르면 편집에 들어간다. 넷을 지우고 핀을 눌러 옆으로,
+ *    꺾어서, 다시 꺾어서 끌면 배선이 누른 자리에서 그 궤적대로 따라오고 (굽이가 쌓인다), 놓으면 들어간다. 플라이라인의 한 끝
+ *    핀을 눌러 다른 끝까지 끌면 미리보기가 그 핀에 붙고, 놓으면 이어진다 (DRC/LVS 가 늘지 않는다). 플라이라인을 클릭해도,
+ *    도구 줄의 "열린 곳 모두 잇기" 로도 이어진다.
  *
  *  실행:  node symplace/web/placer/test/edit-page.mjs [예제=current_mirror_ota] [시작점=48]
  */
@@ -394,6 +395,61 @@ try {
     ok(await rtNow(() => globalThis.__page.editor.state.rt.tool === "wire" && globalThis.__page.editor.state.rt.assist), "도구 줄로 보조 그리기가 안 켜졌다");
     let fly = await flyOf(aNet);
     console.log(`  보조: ${aNet} 배선 지우기 — 덩이 ${fly.comps} · DRC/LVS ${fly.nerr} (기준 ${base})`);
+    // 따라 긋기 — 핀을 누른 자리에서 시작해 끄는 궤적대로: 옆으로, 위(아래)로, 다시 옆으로 끌면 첫 토막은 가로, 꺾으면 세로,
+    // 다시 꺾은 자리는 고정되어 굽이가 쌓인다 (곧장 갈 수 있을 때). 놓으면 들어가고 오류가 늘지 않는다. Z 로 무른다
+    {
+      const pinInfo = await page.evaluate(async (n) => {
+        const rt = globalThis.__page.editor.state.rt, D = await import("./src/edit/draw.mjs");
+        const s = D.netShapes(rt.model.nets.find((q) => q.name === n), rt.graphs.get(n)).find((q) => q.kind === "pin");
+        return { rect: s.rect, layer: s.layer };
+      }, aNet);
+      const pc = [(pinInfo.rect[0] + pinInfo.rect[2]) / 2, (pinInfo.rect[1] + pinInfo.rect[3]) / 2];
+      const [p0] = await at2(pc, pc);
+      const cvb = await page.$eval("#cv", (c) => { const r = c.getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; });
+      const sx = p0.x < cvb.cx ? 1 : -1, sy = p0.y < cvb.cy ? 1 : -1;            // 캔버스 가운데 쪽으로
+      const h0 = await rtNow(() => globalThis.__page.editor.state.rt.hist.length), n0 = fly.nerr;
+      await page.mouse.move(p0.x, p0.y);
+      const top0 = await page.$eval("#cv", (c) => c.getBoundingClientRect().top);
+      await page.mouse.down();
+      const anchorIn = await page.evaluate(async (r) => {
+        const d = globalThis.__page.editor.state.rt.draw, A = await import("./src/edit/assist.mjs");
+        if (!d?.assist) return null;
+        const p = A.nodePoint(d.assist.G, d.assist.anchor);
+        return p.x >= r[0] - 1e-6 && p.x <= r[2] + 1e-6 && p.y >= r[1] - 1e-6 && p.y <= r[3] + 1e-6;
+      }, pinInfo.rect);
+      // 그은 길의 움직임 차례 (점 줄에서 — 가로 h, 세로 v, 같은 쪽이 이어지면 하나로)
+      const look = () => rtNow(() => { const rt = globalThis.__page.editor.state.rt, q = rt.preview, d = rt.draw;
+        const pts = [...(d?.nodes ?? []), ...(q?.nodes ?? [])];
+        let legs = "";
+        for (let k = 1; k < pts.length; k++) {
+          if (pts[k].x === pts[k - 1].x && pts[k].y === pts[k - 1].y) continue;
+          const dir = pts[k].y === pts[k - 1].y ? "h" : "v";
+          if (!legs.endsWith(dir)) legs += dir;
+        }
+        return { ok: !!q?.ok, detour: !!q?.detour, flipped: !!q?.flipped, legs, corners: d ? d.clicks.length - 1 : -1,
+                 top: document.querySelector("#cv").getBoundingClientRect().top }; });
+      const seen = [];
+      for (const [dx, dy] of [[45, 0], [45, 45], [95, 45]]) { await page.mouse.move(p0.x + sx * dx, p0.y + sy * dy, { steps: 8 }); seen.push(await look()); }
+      await page.mouse.up();
+      await page.waitForFunction((h) => { const rt = globalThis.__page.editor.state.rt; return !rt.busy && !rt.draw && rt.hist.length > h; }, h0, { timeout: 60000 })
+        .catch(() => bad("따라 긋기 — 놓았는데 안 들어갔다"));
+      const after = await flyOf(aNet);
+      console.log(`  보조: 따라 긋기 (닻이 누른 핀 위 ${anchorIn}) — 옆 ${seen[0].legs || "-"}${seen[0].detour ? " (돌아감)" : ""}, 꺾어 ${seen[1].legs || "-"}${seen[1].detour ? " (돌아감)" : ""}, ` +
+                  `다시 꺾어 ${seen[2].legs || "-"} 고정한 굽이 ${seen[2].corners} · 놓으니 DRC/LVS ${n0} -> ${after.nerr}`);
+      ok(anchorIn === true, "따라 긋기 — 누른 핀에서 시작하지 않았다");
+      // 그리는 동안 캔버스가 화면에서 움직이면 (카드가 줄어 스크롤이 당겨지면) 같은 마우스 자리가 다른 점이 된다
+      ok(seen.every((q) => Math.abs(q.top - top0) < 0.5), `따라 긋기 — 그리는 동안 캔버스가 움직였다 (${top0} -> ${seen.map((q) => q.top).join(", ")})`);
+      if (!seen[0].detour && !seen[0].flipped) ok(seen[0].legs === "h", `따라 긋기 — 옆으로 끌었는데 ${seen[0].legs}`);
+      if (!seen[0].detour && !seen[1].detour && !seen[1].flipped) {
+        ok(/^hv/.test(seen[1].legs), `따라 긋기 — 옆으로 끌고 꺾었는데 ${seen[1].legs}`);
+        ok(seen[2].corners >= 1, "따라 긋기 — 다시 꺾었는데 굽이가 고정되지 않았다");
+      }
+      ok(after.nerr <= n0, `따라 긋기 — 넣으니 오류가 늘었다 ${n0} -> ${after.nerr}`);
+      await page.keyboard.press("z");
+      await idle();
+      fly = await flyOf(aNet);
+      ok(fly.nerr === n0, `따라 긋기를 무른 뒤 오류 ${fly.nerr} (지운 뒤 ${n0})`);
+    }
     let tapped = 0, drags = 0;
     for (let k = 0; k < 12 && fly.comps > 1; k++) {
       const ln = fly.lines[0];
